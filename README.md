@@ -42,3 +42,13 @@ A GUI application that provides a SQL REPL interface for querying DuckDB databas
 ```sql
 select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3
 ```
+
+you can also do multiple statements, i.e:
+
+```sql
+create or replace temporary view test_v as 
+select * from sample_sales_data cd
+inner join product_catalog pc on pc.productid = cd.productid;
+
+select distinct productid from test_v ;
+```

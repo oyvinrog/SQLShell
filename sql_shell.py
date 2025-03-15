@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QAbstractTableModel
 from PyQt6.QtGui import QFont, QColor
 import numpy as np
 from datetime import datetime
+import create_test_data  # Import the test data generation module
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -44,9 +45,12 @@ class SQLShell(QMainWindow):
         self.browse_btn.clicked.connect(self.browse_files)
         self.remove_table_btn = QPushButton('Remove Selected')
         self.remove_table_btn.clicked.connect(self.remove_selected_table)
+        self.test_btn = QPushButton('Test')
+        self.test_btn.clicked.connect(self.load_test_data)
         
         table_buttons_layout.addWidget(self.browse_btn)
         table_buttons_layout.addWidget(self.remove_table_btn)
+        table_buttons_layout.addWidget(self.test_btn)
         left_layout.addLayout(table_buttons_layout)
 
         # Right panel for query and results
@@ -288,6 +292,45 @@ class SQLShell(QMainWindow):
             self.execute_query()
         else:
             super().keyPressEvent(event)
+
+    def load_test_data(self):
+        """Generate and load test data"""
+        try:
+            # Create test data directory if it doesn't exist
+            os.makedirs('test_data', exist_ok=True)
+            
+            # Generate test data
+            sales_df = create_test_data.create_sales_data()
+            customer_df = create_test_data.create_customer_data()
+            product_df = create_test_data.create_product_data()
+            
+            # Save test data
+            sales_df.to_excel('test_data/sample_sales_data.xlsx', index=False)
+            customer_df.to_parquet('test_data/customer_data.parquet', index=False)
+            product_df.to_excel('test_data/product_catalog.xlsx', index=False)
+            
+            # Load the files into DuckDB
+            self.conn.register('sample_sales_data', sales_df)
+            self.conn.register('product_catalog', product_df)
+            self.conn.register('customer_data', customer_df)
+            
+            # Update loaded tables tracking
+            self.loaded_tables['sample_sales_data'] = 'test_data/sample_sales_data.xlsx'
+            self.loaded_tables['product_catalog'] = 'test_data/product_catalog.xlsx'
+            self.loaded_tables['customer_data'] = 'test_data/customer_data.parquet'
+            
+            # Update UI
+            self.tables_list.clear()
+            for table_name, file_path in self.loaded_tables.items():
+                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+            
+            # Set the sample query
+            self.query_edit.setText("select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3")
+            
+            self.statusBar().showMessage('Test data loaded successfully')
+            
+        except Exception as e:
+            self.statusBar().showMessage(f'Error loading test data: {str(e)}')
 
 def main():
     app = QApplication(sys.argv)
