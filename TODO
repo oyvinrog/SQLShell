@@ -1,3 +1,6 @@
 - Syntax highlighting
 - Kan håndtere flere filer på likt
 - Kan svitsje mellom python og SQL 
+- support for loading multiple files
+- testdata should be exported to a separate folder
+- Må formatere output som tabell 

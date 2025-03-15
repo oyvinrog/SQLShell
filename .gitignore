@@ -57,3 +57,4 @@ desktop.ini
 *.spec
 *.manifest
 *.spec 
+*.parquet 

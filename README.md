@@ -40,14 +40,5 @@ A GUI application that provides a SQL REPL interface for querying DuckDB databas
 ## Example Queries
 
 ```sql
--- Query the imported Excel file
-SELECT * FROM imported_data LIMIT 5;
-
--- Get column names and data types
-DESCRIBE imported_data;
-
--- Perform aggregations
-SELECT column_name, COUNT(*) 
-FROM imported_data 
-GROUP BY column_name;
-``` 
+select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3
+```
