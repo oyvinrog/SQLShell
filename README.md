@@ -1,6 +1,6 @@
 # SQL Shell
 
-A GUI application that provides a SQL REPL interface for querying DuckDB databases and parquet files (more to come!)
+A GUI application that provides a SQL REPL interface for querying Excel and parquet files (more to come!)
 
 
 ![SQLShell Interface](sqlshell_demo.png)
