@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+recursive-include sqlshell *.py
+recursive-include sqlshell *.db
+recursive-include sqlshell/test_data * 
