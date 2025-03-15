@@ -22,7 +22,7 @@ A GUI application that provides a SQL REPL interface for querying DuckDB databas
 
 1. Run the application:
    ```bash
-   python sql_shell.py
+   python sqls.py
    ```
 
 2. The application will automatically connect to a local DuckDB database named 'pool.db'
