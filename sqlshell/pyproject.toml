@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/sqlshell"
+Homepage = "https://github.com/oyvinrog/SQLShell"
 
 [project.scripts]
 sqls = "sqlshell.main:main" 
