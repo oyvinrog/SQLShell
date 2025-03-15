@@ -2,6 +2,9 @@
 
 A GUI application that provides a SQL REPL interface for querying DuckDB databases and Excel files.
 
+
+![SQLShell Interface](sqlshell\sqlshell_demo.png)
+
 ## Features
 
 - SQL query interface with syntax highlighting
