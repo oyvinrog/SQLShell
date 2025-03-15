@@ -4,9 +4,10 @@ import duckdb
 import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
-                           QLabel, QSplitter, QListWidget)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+                           QLabel, QSplitter, QListWidget, QTableWidget,
+                           QTableWidgetItem, QHeaderView)
+from PyQt6.QtCore import Qt, QAbstractTableModel
+from PyQt6.QtGui import QFont, QColor
 import numpy as np
 from datetime import datetime
 
@@ -80,14 +81,24 @@ class SQLShell(QMainWindow):
         results_widget = QWidget()
         results_layout = QVBoxLayout(results_widget)
         
-        results_label = QLabel("Results:")
-        results_layout.addWidget(results_label)
+        # Results header with row count
+        results_header = QWidget()
+        results_header_layout = QHBoxLayout(results_header)
+        self.results_label = QLabel("Results:")
+        self.row_count_label = QLabel("")
+        results_header_layout.addWidget(self.results_label)
+        results_header_layout.addWidget(self.row_count_label)
+        results_header_layout.addStretch()
+        results_layout.addWidget(results_header)
         
-        self.results_display = QTextEdit()
-        self.results_display.setReadOnly(True)
-        # Set monospace font for better table alignment
-        self.results_display.setFont(QFont("Courier New"))
-        results_layout.addWidget(self.results_display)
+        # Table widget for results
+        self.results_table = QTableWidget()
+        self.results_table.setSortingEnabled(True)
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.horizontalHeader().setStretchLastSection(True)
+        self.results_table.horizontalHeader().setSectionsMovable(True)
+        self.results_table.verticalHeader().setVisible(False)
+        results_layout.addWidget(self.results_table)
 
         # Add widgets to splitter
         splitter.addWidget(query_widget)
@@ -117,44 +128,47 @@ class SQLShell(QMainWindow):
             return value.strftime('%Y-%m-%d %H:%M:%S')
         return str(value)
 
-    def format_dataframe(self, df):
-        """Format DataFrame as a nice ASCII table"""
+    def populate_table(self, df):
+        """Populate the table widget with DataFrame content"""
         if len(df) == 0:
-            return "Query returned no results."
+            self.results_table.setRowCount(0)
+            self.results_table.setColumnCount(0)
+            self.row_count_label.setText("No results")
+            return
 
-        # Convert all values to formatted strings
-        formatted_df = df.applymap(self.format_value)
-
-        # Get maximum width for each column (including header)
-        col_widths = {}
-        for col in df.columns:
-            col_widths[col] = max(
-                len(str(col)),
-                formatted_df[col].astype(str).str.len().max()
-            )
-
-        # Create header
-        header = " | ".join(f"{col:<{col_widths[col]}}" for col in df.columns)
-        separator = "-+-".join("-" * width for width in col_widths.values())
+        # Set dimensions
+        self.results_table.setRowCount(len(df))
+        self.results_table.setColumnCount(len(df.columns))
         
-        # Create rows
-        rows = []
-        for _, row in formatted_df.iterrows():
-            formatted_row = " | ".join(
-                f"{str(val):<{col_widths[col]}}" 
-                for col, val in row.items()
-            )
-            rows.append(formatted_row)
-
-        # Combine all parts
-        table = f"\n{header}\n{separator}\n" + "\n".join(rows)
+        # Set headers
+        self.results_table.setHorizontalHeaderLabels(df.columns)
         
-        # Add summary
-        summary = f"\n\nNumber of rows: {len(df):,}"
-        if len(df) == 1:
-            summary = f"\n\nNumber of row: 1"
-            
-        return table + summary
+        # Populate data
+        for i, (_, row) in enumerate(df.iterrows()):
+            for j, value in enumerate(row):
+                formatted_value = self.format_value(value)
+                item = QTableWidgetItem(formatted_value)
+                
+                # Set alignment based on data type
+                if isinstance(value, (int, float, np.integer, np.floating)):
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                else:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                
+                # Make cells read-only
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                
+                self.results_table.setItem(i, j, item)
+        
+        # Auto-adjust column widths while ensuring minimum and maximum sizes
+        self.results_table.resizeColumnsToContents()
+        for i in range(len(df.columns)):
+            width = self.results_table.columnWidth(i)
+            self.results_table.setColumnWidth(i, min(max(width, 50), 300))
+        
+        # Update row count
+        row_text = "row" if len(df) == 1 else "rows"
+        self.row_count_label.setText(f"{len(df):,} {row_text}")
 
     def browse_files(self):
         file_names, _ = QFileDialog.getOpenFileNames(
@@ -193,12 +207,18 @@ class SQLShell(QMainWindow):
                 # Update UI
                 self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
                 self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
-                self.results_display.append(f'Successfully loaded {file_name} as table "{table_name}"\n')
-                self.results_display.append(f'Schema:\n{df.dtypes.to_string()}\n')
+                
+                # Show preview of loaded data
+                preview_df = df.head()
+                self.populate_table(preview_df)
+                self.results_label.setText(f"Preview of {table_name}:")
                 
             except Exception as e:
                 self.statusBar().showMessage(f'Error loading file: {str(e)}')
-                self.results_display.append(f'Error loading file {file_name}: {str(e)}\n')
+                self.results_table.setRowCount(0)
+                self.results_table.setColumnCount(0)
+                self.row_count_label.setText("")
+                self.results_label.setText(f"Error loading file: {str(e)}")
 
     def sanitize_table_name(self, name):
         # Replace invalid characters with underscores
@@ -221,7 +241,10 @@ class SQLShell(QMainWindow):
                 # Remove from list widget
                 self.tables_list.takeItem(self.tables_list.row(current_item))
                 self.statusBar().showMessage(f'Removed table "{table_name}"')
-                self.results_display.append(f'Removed table "{table_name}"\n')
+                self.results_table.setRowCount(0)
+                self.results_table.setColumnCount(0)
+                self.row_count_label.setText("")
+                self.results_label.setText(f"Removed table: {table_name}")
 
     def execute_query(self):
         query = self.query_edit.toPlainText().strip()
@@ -230,11 +253,14 @@ class SQLShell(QMainWindow):
         
         try:
             result = self.conn.execute(query).fetchdf()
-            formatted_result = self.format_dataframe(result)
-            self.results_display.setText(formatted_result)
+            self.populate_table(result)
+            self.results_label.setText("Query Results:")
             self.statusBar().showMessage('Query executed successfully')
         except Exception as e:
-            self.results_display.setText(f'Error executing query: {str(e)}')
+            self.results_table.setRowCount(0)
+            self.results_table.setColumnCount(0)
+            self.row_count_label.setText("")
+            self.results_label.setText(f"Error executing query: {str(e)}")
             self.statusBar().showMessage('Error executing query')
 
     def clear_query(self):
@@ -248,6 +274,10 @@ class SQLShell(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    
+    # Set application style
+    app.setStyle('Fusion')
+    
     sql_shell = SQLShell()
     sql_shell.show()
     sys.exit(app.exec())
