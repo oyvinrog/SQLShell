@@ -6,6 +6,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
                            QLabel, QSplitter, QListWidget)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+import numpy as np
+from datetime import datetime
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -82,6 +85,8 @@ class SQLShell(QMainWindow):
         
         self.results_display = QTextEdit()
         self.results_display.setReadOnly(True)
+        # Set monospace font for better table alignment
+        self.results_display.setFont(QFont("Courier New"))
         results_layout.addWidget(self.results_display)
 
         # Add widgets to splitter
@@ -99,6 +104,57 @@ class SQLShell(QMainWindow):
 
         # Status bar
         self.statusBar().showMessage('Ready')
+
+    def format_value(self, value):
+        """Format values for display"""
+        if pd.isna(value):
+            return 'NULL'
+        elif isinstance(value, (int, np.integer)):
+            return f"{value:,}"
+        elif isinstance(value, (float, np.floating)):
+            return f"{value:,.2f}"
+        elif isinstance(value, (datetime, pd.Timestamp)):
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+        return str(value)
+
+    def format_dataframe(self, df):
+        """Format DataFrame as a nice ASCII table"""
+        if len(df) == 0:
+            return "Query returned no results."
+
+        # Convert all values to formatted strings
+        formatted_df = df.applymap(self.format_value)
+
+        # Get maximum width for each column (including header)
+        col_widths = {}
+        for col in df.columns:
+            col_widths[col] = max(
+                len(str(col)),
+                formatted_df[col].astype(str).str.len().max()
+            )
+
+        # Create header
+        header = " | ".join(f"{col:<{col_widths[col]}}" for col in df.columns)
+        separator = "-+-".join("-" * width for width in col_widths.values())
+        
+        # Create rows
+        rows = []
+        for _, row in formatted_df.iterrows():
+            formatted_row = " | ".join(
+                f"{str(val):<{col_widths[col]}}" 
+                for col, val in row.items()
+            )
+            rows.append(formatted_row)
+
+        # Combine all parts
+        table = f"\n{header}\n{separator}\n" + "\n".join(rows)
+        
+        # Add summary
+        summary = f"\n\nNumber of rows: {len(df):,}"
+        if len(df) == 1:
+            summary = f"\n\nNumber of row: 1"
+            
+        return table + summary
 
     def browse_files(self):
         file_names, _ = QFileDialog.getOpenFileNames(
@@ -174,7 +230,8 @@ class SQLShell(QMainWindow):
         
         try:
             result = self.conn.execute(query).fetchdf()
-            self.results_display.setText(result.to_string())
+            formatted_result = self.format_dataframe(result)
+            self.results_display.setText(formatted_result)
             self.statusBar().showMessage('Query executed successfully')
         except Exception as e:
             self.results_display.setText(f'Error executing query: {str(e)}')
