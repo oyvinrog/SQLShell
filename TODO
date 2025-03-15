@@ -1,8 +1,5 @@
 - Syntax highlighting
-- Kan håndtere flere filer på likt
-- Kan svitsje mellom python og SQL 
-- support for loading multiple files
 - testdata should be exported to a separate folder
-- Må formatere output som tabell 
 - when clicking "test", it fills "select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3" in the 
 editor, and loads the test files from create_test_data.py
+- exlude TODO from version control 

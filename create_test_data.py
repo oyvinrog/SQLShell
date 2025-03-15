@@ -1,9 +1,14 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import os
 
 # Set random seed for reproducibility
 np.random.seed(42)
+
+# Define output directory
+OUTPUT_DIR = 'test_data'
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def create_sales_data(num_records=1000):
     # Generate dates for the last 365 days
@@ -85,21 +90,21 @@ def create_product_data():
 if __name__ == '__main__':
     # Create and save sales data
     sales_df = create_sales_data()
-    sales_output = 'sample_sales_data.xlsx'
+    sales_output = os.path.join(OUTPUT_DIR, 'sample_sales_data.xlsx')
     sales_df.to_excel(sales_output, index=False)
     print(f"Created sales data in '{sales_output}'")
     print(f"Number of sales records: {len(sales_df)}")
     
     # Create and save customer data as parquet
     customer_df = create_customer_data()
-    customer_output = 'customer_data.parquet'
+    customer_output = os.path.join(OUTPUT_DIR, 'customer_data.parquet')
     customer_df.to_parquet(customer_output, index=False)
     print(f"\nCreated customer data in '{customer_output}'")
     print(f"Number of customers: {len(customer_df)}")
     
     # Create and save product data
     product_df = create_product_data()
-    product_output = 'product_catalog.xlsx'
+    product_output = os.path.join(OUTPUT_DIR, 'product_catalog.xlsx')
     product_df.to_excel(product_output, index=False)
     print(f"\nCreated product catalog in '{product_output}'")
     print(f"Number of products: {len(product_df)}")
@@ -109,13 +114,13 @@ if __name__ == '__main__':
     print("""
     -- Join sales with customer data
     SELECT s.*, c.FirstName, c.LastName, c.CustomerType
-    FROM sample_sales_data s
-    JOIN customer_data c ON s.CustomerID = c.CustomerID;
+    FROM test_data.sample_sales_data s
+    JOIN test_data.customer_data c ON s.CustomerID = c.CustomerID;
     
     -- Join sales with product data
     SELECT s.*, p.ProductName, p.Category, p.Brand
-    FROM sample_sales_data s
-    JOIN product_catalog p ON s.ProductID = p.ProductID;
+    FROM test_data.sample_sales_data s
+    JOIN test_data.product_catalog p ON s.ProductID = p.ProductID;
     
     -- Three-way join with aggregation
     SELECT 
@@ -124,9 +129,9 @@ if __name__ == '__main__':
         COUNT(*) as NumOrders,
         SUM(s.TotalAmount) as TotalRevenue,
         AVG(s.Quantity) as AvgQuantity
-    FROM sample_sales_data s
-    JOIN customer_data c ON s.CustomerID = c.CustomerID
-    JOIN product_catalog p ON s.ProductID = p.ProductID
+    FROM test_data.sample_sales_data s
+    JOIN test_data.customer_data c ON s.CustomerID = c.CustomerID
+    JOIN test_data.product_catalog p ON s.ProductID = p.ProductID
     GROUP BY p.Category, c.CustomerType
     ORDER BY p.Category, c.CustomerType;
     """) 
