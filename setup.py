@@ -1,8 +1,16 @@
 from setuptools import setup, find_packages
+import os
+
+# Read version from __init__.py
+with open(os.path.join('sqlshell', '__init__.py'), 'r') as f:
+    for line in f:
+        if line.startswith('__version__'):
+            version = line.split('=')[1].strip().strip('"\'')
+            break
 
 setup(
     name="sqlshell",
-    version="0.1.1",
+    version=version,
     packages=find_packages(),
     install_requires=[
         'pandas>=2.0.0',
