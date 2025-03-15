@@ -21,6 +21,12 @@ A GUI application that provides a SQL REPL interface for querying DuckDB databas
    pip install -r requirements.txt
    ```
 
+You can also do:
+
+```bash
+pip install sqlshell
+```
+
 ## Usage
 
 1. Run the application:
