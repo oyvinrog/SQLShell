@@ -35,6 +35,7 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(tables_label)
         
         self.tables_list = QListWidget()
+        self.tables_list.itemClicked.connect(self.show_table_preview)
         left_layout.addWidget(self.tables_list)
         
         # Buttons for table management
@@ -265,6 +266,22 @@ class SQLShell(QMainWindow):
 
     def clear_query(self):
         self.query_edit.clear()
+
+    def show_table_preview(self, item):
+        """Show a preview of the selected table"""
+        if item:
+            table_name = item.text().split(' (')[0]
+            try:
+                preview_df = self.conn.execute(f'SELECT * FROM {table_name} LIMIT 5').fetchdf()
+                self.populate_table(preview_df)
+                self.results_label.setText(f"Preview of {table_name}:")
+                self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
+            except Exception as e:
+                self.results_table.setRowCount(0)
+                self.results_table.setColumnCount(0)
+                self.row_count_label.setText("")
+                self.results_label.setText(f"Error showing preview: {str(e)}")
+                self.statusBar().showMessage('Error showing table preview')
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
