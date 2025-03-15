@@ -2,6 +2,8 @@
 
 A powerful SQL shell with GUI interface for data analysis. SQLShell provides an intuitive interface for working with various data formats (CSV, Excel, Parquet) using SQL queries powered by DuckDB.
 
+![SQLShell Interface](sqlshell_demo.png)
+
 ## Features
 
 - Load and analyze data from CSV, Excel (.xlsx, .xls), and Parquet files
@@ -19,10 +21,12 @@ You can install SQLShell using pip:
 pip install sqlshell
 ```
 
+refer to 
+
 For development installation:
 
 ```bash
-git clone https://github.com/yourusername/sqlshell.git
+git clone https://github.com/oyvinrog/SQLShell.git
 cd sqlshell
 pip install -e .
 ```
