@@ -6,9 +6,10 @@ import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
                            QLabel, QSplitter, QListWidget, QTableWidget,
-                           QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit)
-from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize
-from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat
+                           QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
+                           QCompleter)
+from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel
+from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor
 import numpy as np
 from datetime import datetime
 from sqlshell.sqlshell import create_test_data  # Import from the correct location
@@ -167,8 +168,109 @@ class SQLEditor(QPlainTextEdit):
         
         # Set placeholder text
         self.setPlaceholderText("Enter your SQL query here...")
+        
+        # Initialize completer
+        self.completer = None
+        
+        # SQL Keywords for autocomplete
+        self.sql_keywords = [
+            "SELECT", "FROM", "WHERE", "AND", "OR", "INNER", "OUTER", "LEFT", "RIGHT", "JOIN",
+            "ON", "GROUP", "BY", "HAVING", "ORDER", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT",
+            "CREATE", "TABLE", "INDEX", "VIEW", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE",
+            "TRUNCATE", "ALTER", "ADD", "DROP", "COLUMN", "CONSTRAINT", "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
+            "UNIQUE", "NOT", "NULL", "IS", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END",
+            "AS", "WITH", "BETWEEN", "LIKE", "IN", "EXISTS", "ALL", "ANY", "SOME", "DESC", "ASC",
+            "AVG", "COUNT", "SUM", "MAX", "MIN", "COALESCE", "CAST", "CONVERT"
+        ]
+        
+        # Initialize with SQL keywords
+        self.set_completer(QCompleter(self.sql_keywords))
+
+    def set_completer(self, completer):
+        """Set the completer for the editor"""
+        if self.completer:
+            self.completer.disconnect(self)
+            
+        self.completer = completer
+        
+        if not self.completer:
+            return
+            
+        self.completer.setWidget(self)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.completer.activated.connect(self.insert_completion)
+        
+    def update_completer_model(self, words):
+        """Update the completer model with new words"""
+        if not self.completer:
+            return
+            
+        # Combine SQL keywords with table/column names
+        all_words = self.sql_keywords + words
+        
+        # Create a model with all words
+        model = QStringListModel()
+        model.setStringList(all_words)
+        
+        # Set the model to the completer
+        self.completer.setModel(model)
+        
+    def text_under_cursor(self):
+        """Get the text under the cursor for completion"""
+        tc = self.textCursor()
+        tc.select(QTextCursor.SelectionType.WordUnderCursor)
+        return tc.selectedText()
+        
+    def insert_completion(self, completion):
+        """Insert the completion text"""
+        if self.completer.widget() != self:
+            return
+            
+        tc = self.textCursor()
+        extra = len(completion) - len(self.completer.completionPrefix())
+        tc.movePosition(QTextCursor.MoveOperation.Left)
+        tc.movePosition(QTextCursor.MoveOperation.EndOfWord)
+        tc.insertText(completion[-extra:] + " ")
+        self.setTextCursor(tc)
+        
+    def complete(self):
+        """Show completion popup"""
+        prefix = self.text_under_cursor()
+        
+        if not prefix or len(prefix) < 2:  # Only show completions for words with at least 2 characters
+            if self.completer.popup().isVisible():
+                self.completer.popup().hide()
+            return
+            
+        self.completer.setCompletionPrefix(prefix)
+        
+        # If no completions, hide popup
+        if self.completer.completionCount() == 0:
+            self.completer.popup().hide()
+            return
+            
+        # Get popup and position it under the current text
+        popup = self.completer.popup()
+        popup.setCurrentIndex(self.completer.completionModel().index(0, 0))
+        
+        # Calculate position for the popup
+        cr = self.cursorRect()
+        cr.setWidth(self.completer.popup().sizeHintForColumn(0) + 
+                   self.completer.popup().verticalScrollBar().sizeHint().width())
+        
+        # Show the popup
+        self.completer.complete(cr)
 
     def keyPressEvent(self, event):
+        # Handle completer popup navigation
+        if self.completer and self.completer.popup().isVisible():
+            # Handle navigation keys for the popup
+            if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, 
+                              Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down]:
+                event.ignore()
+                return
+        
         # Handle special key combinations
         if event.key() == Qt.Key.Key_Tab:
             # Insert 4 spaces instead of a tab character
@@ -203,7 +305,8 @@ class SQLEditor(QPlainTextEdit):
         # Handle keyboard shortcuts
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Space:
-                # TODO: Implement auto-completion
+                # Show completion popup
+                self.complete()
                 return
             elif event.key() == Qt.Key.Key_L:
                 # Format the selected SQL (placeholder)
@@ -213,7 +316,12 @@ class SQLEditor(QPlainTextEdit):
                 self.toggle_comment()
                 return
                 
+        # For normal key presses
         super().keyPressEvent(event)
+        
+        # Check for autocomplete after typing
+        if event.text() and not event.text().isspace():
+            self.complete()
 
     def toggle_comment(self):
         cursor = self.textCursor()
@@ -325,6 +433,7 @@ class SQLShell(QMainWindow):
         self.current_db_type = 'duckdb'  # Default to DuckDB
         self.conn = duckdb.connect(':memory:')  # Create in-memory DuckDB connection by default
         self.loaded_tables = {}  # Keep track of loaded tables
+        self.table_columns = {}  # Keep track of table columns
         self.init_ui()
 
     def init_ui(self):
@@ -553,6 +662,9 @@ class SQLShell(QMainWindow):
                 
                 self.loaded_tables[table_name] = file_name
                 
+                # Store column names
+                self.table_columns[table_name] = df.columns.tolist()
+                
                 # Update UI
                 self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
                 self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
@@ -561,6 +673,9 @@ class SQLShell(QMainWindow):
                 preview_df = df.head()
                 self.populate_table(preview_df)
                 self.results_label.setText(f"Preview of {table_name}:")
+                
+                # Update completer with new table and column names
+                self.update_completer()
                 
             except Exception as e:
                 self.statusBar().showMessage(f'Error loading file: {str(e)}')
@@ -587,6 +702,8 @@ class SQLShell(QMainWindow):
                 self.conn.execute(f'DROP VIEW IF EXISTS {table_name}')
                 # Remove from our tracking
                 del self.loaded_tables[table_name]
+                if table_name in self.table_columns:
+                    del self.table_columns[table_name]
                 # Remove from list widget
                 self.tables_list.takeItem(self.tables_list.row(current_item))
                 self.statusBar().showMessage(f'Removed table "{table_name}"')
@@ -594,6 +711,9 @@ class SQLShell(QMainWindow):
                 self.results_table.setColumnCount(0)
                 self.row_count_label.setText("")
                 self.results_label.setText(f"Removed table: {table_name}")
+                
+                # Update completer
+                self.update_completer()
 
     def open_database(self):
         """Open a database file (DuckDB or SQLite)"""
@@ -658,14 +778,46 @@ class SQLShell(QMainWindow):
                 for (table_name,) in tables:
                     self.loaded_tables[table_name] = 'database'
                     self.tables_list.addItem(f"{table_name} (database)")
+                    
+                    # Get column names for each table
+                    try:
+                        column_query = f"PRAGMA table_info({table_name})"
+                        columns = cursor.execute(column_query).fetchall()
+                        self.table_columns[table_name] = [col[1] for col in columns]  # Column name is at index 1
+                    except Exception:
+                        self.table_columns[table_name] = []
             else:  # duckdb
                 query = "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
                 result = self.conn.execute(query).fetchdf()
                 for table_name in result['table_name']:
                     self.loaded_tables[table_name] = 'database'
                     self.tables_list.addItem(f"{table_name} (database)")
+                    
+                    # Get column names for each table
+                    try:
+                        column_query = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND table_schema='main'"
+                        columns = self.conn.execute(column_query).fetchdf()
+                        self.table_columns[table_name] = columns['column_name'].tolist()
+                    except Exception:
+                        self.table_columns[table_name] = []
+                        
+            # Update the completer with table and column names
+            self.update_completer()
         except Exception as e:
             self.statusBar().showMessage(f'Error loading tables: {str(e)}')
+
+    def update_completer(self):
+        """Update the completer with table and column names"""
+        # Collect all table names and column names
+        completion_words = list(self.loaded_tables.keys())
+        
+        # Add column names with table name prefix (for joins)
+        for table, columns in self.table_columns.items():
+            completion_words.extend(columns)
+            completion_words.extend([f"{table}.{col}" for col in columns])
+            
+        # Update the completer in the query editor
+        self.query_edit.update_completer_model(completion_words)
 
     def execute_query(self):
         query = self.query_edit.toPlainText().strip()
@@ -746,6 +898,11 @@ class SQLShell(QMainWindow):
             self.loaded_tables['product_catalog'] = 'test_data/product_catalog.xlsx'
             self.loaded_tables['customer_data'] = 'test_data/customer_data.parquet'
             
+            # Store column names
+            self.table_columns['sample_sales_data'] = sales_df.columns.tolist()
+            self.table_columns['product_catalog'] = product_df.columns.tolist()
+            self.table_columns['customer_data'] = customer_df.columns.tolist()
+            
             # Update UI
             self.tables_list.clear()
             for table_name, file_path in self.loaded_tables.items():
@@ -753,6 +910,9 @@ class SQLShell(QMainWindow):
             
             # Set the sample query
             self.query_edit.setText("select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3")
+            
+            # Update completer
+            self.update_completer()
             
             self.statusBar().showMessage('Test data loaded successfully')
             
