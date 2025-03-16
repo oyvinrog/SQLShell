@@ -1,21 +1,23 @@
 import sys
 import os
 import duckdb
+import sqlite3
 import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
                            QLabel, QSplitter, QListWidget, QTableWidget,
-                           QTableWidgetItem, QHeaderView)
+                           QTableWidgetItem, QHeaderView, QMessageBox)
 from PyQt6.QtCore import Qt, QAbstractTableModel
 from PyQt6.QtGui import QFont, QColor
 import numpy as np
 from datetime import datetime
-import create_test_data  # Import the test data generation module
+from sqlshell.sqlshell import create_test_data  # Import from the correct location
 
 class SQLShell(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.conn = duckdb.connect('pool.db')
+        self.current_db_type = 'duckdb'  # Default to DuckDB
+        self.conn = duckdb.connect(':memory:')  # Create in-memory DuckDB connection by default
         self.loaded_tables = {}  # Keep track of loaded tables
         self.init_ui()
 
@@ -32,7 +34,11 @@ class SQLShell(QMainWindow):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         
-        tables_label = QLabel("Loaded Tables:")
+        # Database info label
+        self.db_info_label = QLabel("No database connected")
+        left_layout.addWidget(self.db_info_label)
+        
+        tables_label = QLabel("Tables:")
         left_layout.addWidget(tables_label)
         
         self.tables_list = QListWidget()
@@ -41,6 +47,8 @@ class SQLShell(QMainWindow):
         
         # Buttons for table management
         table_buttons_layout = QHBoxLayout()
+        self.open_db_btn = QPushButton('Open Database')
+        self.open_db_btn.clicked.connect(self.open_database)
         self.browse_btn = QPushButton('Load Files')
         self.browse_btn.clicked.connect(self.browse_files)
         self.remove_table_btn = QPushButton('Remove Selected')
@@ -48,6 +56,7 @@ class SQLShell(QMainWindow):
         self.test_btn = QPushButton('Test')
         self.test_btn.clicked.connect(self.load_test_data)
         
+        table_buttons_layout.addWidget(self.open_db_btn)
         table_buttons_layout.addWidget(self.browse_btn)
         table_buttons_layout.addWidget(self.remove_table_btn)
         table_buttons_layout.addWidget(self.test_btn)
@@ -176,6 +185,12 @@ class SQLShell(QMainWindow):
         self.row_count_label.setText(f"{len(df):,} {row_text}")
 
     def browse_files(self):
+        if not self.conn:
+            # Create a default in-memory DuckDB connection if none exists
+            self.conn = duckdb.connect(':memory:')
+            self.current_db_type = 'duckdb'
+            self.db_info_label.setText("Connected to: in-memory DuckDB")
+            
         file_names, _ = QFileDialog.getOpenFileNames(
             self,
             "Open Data Files",
@@ -205,8 +220,14 @@ class SQLShell(QMainWindow):
                     table_name = f"{original_name}_{counter}"
                     counter += 1
                 
-                # Register table in DuckDB
-                self.conn.register(table_name, df)
+                # Handle table creation based on database type
+                if self.current_db_type == 'sqlite':
+                    # For SQLite, create a table from the DataFrame
+                    df.to_sql(table_name, self.conn, index=False, if_exists='replace')
+                else:
+                    # For DuckDB, register the DataFrame as a view
+                    self.conn.register(table_name, df)
+                
                 self.loaded_tables[table_name] = file_name
                 
                 # Update UI
@@ -251,13 +272,91 @@ class SQLShell(QMainWindow):
                 self.row_count_label.setText("")
                 self.results_label.setText(f"Removed table: {table_name}")
 
+    def open_database(self):
+        """Open a database file (DuckDB or SQLite)"""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Database File",
+            "",
+            "Database Files (*.db);;All Files (*)"
+        )
+        
+        if not file_name:
+            return
+            
+        try:
+            # Try to detect database type
+            is_sqlite = self.is_sqlite_db(file_name)
+            
+            # Close existing connection if any
+            if self.conn:
+                self.conn.close()
+            
+            # Connect to the database
+            if is_sqlite:
+                self.conn = sqlite3.connect(file_name)
+                self.current_db_type = 'sqlite'
+            else:
+                self.conn = duckdb.connect(file_name)
+                self.current_db_type = 'duckdb'
+            
+            # Clear existing tables
+            self.loaded_tables.clear()
+            self.tables_list.clear()
+            
+            # Load tables
+            self.load_database_tables()
+            
+            # Update UI
+            db_type = "SQLite" if is_sqlite else "DuckDB"
+            self.db_info_label.setText(f"Connected to: {os.path.basename(file_name)} ({db_type})")
+            self.statusBar().showMessage(f'Successfully opened {db_type} database: {file_name}')
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
+            self.statusBar().showMessage('Error opening database')
+
+    def is_sqlite_db(self, filename):
+        """Check if the file is a SQLite database"""
+        try:
+            with open(filename, 'rb') as f:
+                header = f.read(16)
+                return header[:16] == b'SQLite format 3\x00'
+        except:
+            return False
+
+    def load_database_tables(self):
+        """Load all tables from the current database"""
+        try:
+            if self.current_db_type == 'sqlite':
+                query = "SELECT name FROM sqlite_master WHERE type='table'"
+                cursor = self.conn.cursor()
+                tables = cursor.execute(query).fetchall()
+                for (table_name,) in tables:
+                    self.loaded_tables[table_name] = 'database'
+                    self.tables_list.addItem(f"{table_name} (database)")
+            else:  # duckdb
+                query = "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
+                result = self.conn.execute(query).fetchdf()
+                for table_name in result['table_name']:
+                    self.loaded_tables[table_name] = 'database'
+                    self.tables_list.addItem(f"{table_name} (database)")
+        except Exception as e:
+            self.statusBar().showMessage(f'Error loading tables: {str(e)}')
+
     def execute_query(self):
         query = self.query_edit.toPlainText().strip()
         if not query:
             return
         
         try:
-            result = self.conn.execute(query).fetchdf()
+            if self.current_db_type == 'sqlite':
+                # Execute SQLite query and convert to DataFrame
+                result = pd.read_sql_query(query, self.conn)
+            else:
+                # Execute DuckDB query
+                result = self.conn.execute(query).fetchdf()
+                
             self.populate_table(result)
             self.results_label.setText("Query Results:")
             self.statusBar().showMessage('Query executed successfully')
@@ -276,7 +375,11 @@ class SQLShell(QMainWindow):
         if item:
             table_name = item.text().split(' (')[0]
             try:
-                preview_df = self.conn.execute(f'SELECT * FROM {table_name} LIMIT 5').fetchdf()
+                if self.current_db_type == 'sqlite':
+                    preview_df = pd.read_sql_query(f'SELECT * FROM "{table_name}" LIMIT 5', self.conn)
+                else:
+                    preview_df = self.conn.execute(f'SELECT * FROM {table_name} LIMIT 5').fetchdf()
+                    
                 self.populate_table(preview_df)
                 self.results_label.setText(f"Preview of {table_name}:")
                 self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
