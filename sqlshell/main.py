@@ -7,9 +7,10 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
                            QLabel, QSplitter, QListWidget, QTableWidget,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
-                           QCompleter)
-from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel
-from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor
+                           QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
+                           QStyleFactory, QToolBar, QStatusBar)
+from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap
 import numpy as np
 from datetime import datetime
 from sqlshell.sqlshell import create_test_data  # Import from the correct location
@@ -152,7 +153,7 @@ class SQLEditor(QPlainTextEdit):
         self.line_number_area = LineNumberArea(self)
         
         # Set monospaced font
-        font = QFont("Courier New", 10)
+        font = QFont("Consolas", 12)  # Increased font size for better readability
         font.setFixedPitch(True)
         self.setFont(font)
         
@@ -185,6 +186,10 @@ class SQLEditor(QPlainTextEdit):
         
         # Initialize with SQL keywords
         self.set_completer(QCompleter(self.sql_keywords))
+        
+        # Set modern selection color
+        self.selection_color = QColor("#3498DB")
+        self.selection_color.setAlpha(50)  # Make it semi-transparent
 
     def set_completer(self, completer):
         """Set the completer for the editor"""
@@ -278,7 +283,7 @@ class SQLEditor(QPlainTextEdit):
             return
             
         # Auto-indentation for new lines
-        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+        if event.key() in [Qt.Key.Key_Return, Qt.Key.Key_Enter]:
             cursor = self.textCursor()
             block = cursor.block()
             text = block.text()
@@ -308,9 +313,6 @@ class SQLEditor(QPlainTextEdit):
                 # Show completion popup
                 self.complete()
                 return
-            elif event.key() == Qt.Key.Key_L:
-                # Format the selected SQL (placeholder)
-                return
             elif event.key() == Qt.Key.Key_K:
                 # Comment/uncomment the selected lines
                 self.toggle_comment()
@@ -322,6 +324,65 @@ class SQLEditor(QPlainTextEdit):
         # Check for autocomplete after typing
         if event.text() and not event.text().isspace():
             self.complete()
+
+    def paintEvent(self, event):
+        # Call the parent's paintEvent first
+        super().paintEvent(event)
+        
+        # Get the current cursor
+        cursor = self.textCursor()
+        
+        # If there's a selection, paint custom highlight
+        if cursor.hasSelection():
+            # Create a painter for this widget
+            painter = QPainter(self.viewport())
+            
+            # Get the selection start and end positions
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            
+            # Create temporary cursor to get the rectangles
+            temp_cursor = QTextCursor(cursor)
+            
+            # Move to start and get the starting position
+            temp_cursor.setPosition(start)
+            start_pos = self.cursorRect(temp_cursor)
+            
+            # Move to end and get the ending position
+            temp_cursor.setPosition(end)
+            end_pos = self.cursorRect(temp_cursor)
+            
+            # Set the highlight color with transparency
+            painter.setBrush(QBrush(self.selection_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            
+            # Draw the highlight rectangle
+            if start_pos.top() == end_pos.top():
+                # Single line selection
+                painter.drawRect(QRect(start_pos.left(), start_pos.top(),
+                                     end_pos.right() - start_pos.left(), start_pos.height()))
+            else:
+                # Multi-line selection
+                # First line
+                painter.drawRect(QRect(start_pos.left(), start_pos.top(),
+                                     self.viewport().width() - start_pos.left(), start_pos.height()))
+                
+                # Middle lines (if any)
+                if end_pos.top() > start_pos.top() + start_pos.height():
+                    painter.drawRect(QRect(0, start_pos.top() + start_pos.height(),
+                                         self.viewport().width(),
+                                         end_pos.top() - (start_pos.top() + start_pos.height())))
+                
+                # Last line
+                painter.drawRect(QRect(0, end_pos.top(), end_pos.right(), end_pos.height()))
+            
+            painter.end()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        # Show temporary hint in status bar when editor gets focus
+        if hasattr(self.parent(), 'statusBar'):
+            self.parent().parent().parent().statusBar().showMessage('Press Ctrl+Space for autocomplete', 2000)
 
     def toggle_comment(self):
         cursor = self.textCursor()
@@ -434,108 +495,374 @@ class SQLShell(QMainWindow):
         self.conn = duckdb.connect(':memory:')  # Create in-memory DuckDB connection by default
         self.loaded_tables = {}  # Keep track of loaded tables
         self.table_columns = {}  # Keep track of table columns
+        
+        # Define color scheme
+        self.colors = {
+            'primary': "#2C3E50",       # Dark blue-gray
+            'secondary': "#3498DB",     # Bright blue
+            'accent': "#1ABC9C",        # Teal
+            'background': "#ECF0F1",    # Light gray
+            'text': "#2C3E50",          # Dark blue-gray
+            'text_light': "#7F8C8D",    # Medium gray
+            'success': "#2ECC71",       # Green
+            'warning': "#F39C12",       # Orange
+            'error': "#E74C3C",         # Red
+            'dark_bg': "#34495E",       # Darker blue-gray
+            'light_bg': "#F5F5F5",      # Very light gray
+            'border': "#BDC3C7"         # Light gray border
+        }
+        
         self.init_ui()
+        self.apply_stylesheet()
+
+    def apply_stylesheet(self):
+        """Apply custom stylesheet to the application"""
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {self.colors['background']};
+            }}
+            
+            QWidget {{
+                color: {self.colors['text']};
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+            }}
+            
+            QLabel {{
+                font-size: 13px;
+                padding: 2px;
+            }}
+            
+            QLabel#header_label {{
+                font-size: 16px;
+                font-weight: bold;
+                color: {self.colors['primary']};
+                padding: 8px 0;
+            }}
+            
+            QPushButton {{
+                background-color: {self.colors['secondary']};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 13px;
+                min-height: 30px;
+            }}
+            
+            QPushButton:hover {{
+                background-color: #2980B9;
+            }}
+            
+            QPushButton:pressed {{
+                background-color: #1F618D;
+            }}
+            
+            QPushButton#primary_button {{
+                background-color: {self.colors['accent']};
+            }}
+            
+            QPushButton#primary_button:hover {{
+                background-color: #16A085;
+            }}
+            
+            QPushButton#primary_button:pressed {{
+                background-color: #0E6655;
+            }}
+            
+            QPushButton#danger_button {{
+                background-color: {self.colors['error']};
+            }}
+            
+            QPushButton#danger_button:hover {{
+                background-color: #CB4335;
+            }}
+            
+            QToolButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            
+            QToolButton:hover {{
+                background-color: rgba(52, 152, 219, 0.2);
+            }}
+            
+            QFrame#sidebar {{
+                background-color: {self.colors['primary']};
+                border-radius: 0px;
+            }}
+            
+            QFrame#content_panel {{
+                background-color: white;
+                border-radius: 8px;
+                border: 1px solid {self.colors['border']};
+            }}
+            
+            QListWidget {{
+                background-color: white;
+                border-radius: 4px;
+                border: 1px solid {self.colors['border']};
+                padding: 4px;
+                outline: none;
+            }}
+            
+            QListWidget::item {{
+                padding: 8px;
+                border-radius: 4px;
+            }}
+            
+            QListWidget::item:selected {{
+                background-color: {self.colors['secondary']};
+                color: white;
+            }}
+            
+            QListWidget::item:hover:!selected {{
+                background-color: #E3F2FD;
+            }}
+            
+            QTableWidget {{
+                background-color: white;
+                alternate-background-color: #F8F9FA;
+                border-radius: 4px;
+                border: 1px solid {self.colors['border']};
+                gridline-color: #E0E0E0;
+                outline: none;
+            }}
+            
+            QTableWidget::item {{
+                padding: 4px;
+            }}
+            
+            QTableWidget::item:selected {{
+                background-color: rgba(52, 152, 219, 0.2);
+                color: {self.colors['text']};
+            }}
+            
+            QHeaderView::section {{
+                background-color: {self.colors['primary']};
+                color: white;
+                padding: 8px;
+                border: none;
+                font-weight: bold;
+            }}
+            
+            QSplitter::handle {{
+                background-color: {self.colors['border']};
+            }}
+            
+            QStatusBar {{
+                background-color: {self.colors['primary']};
+                color: white;
+                padding: 8px;
+            }}
+            
+            QPlainTextEdit, QTextEdit {{
+                background-color: white;
+                border-radius: 4px;
+                border: 1px solid {self.colors['border']};
+                padding: 8px;
+                selection-background-color: #BBDEFB;
+                selection-color: {self.colors['text']};
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 14px;
+            }}
+        """)
 
     def init_ui(self):
         self.setWindowTitle('SQL Shell')
         self.setGeometry(100, 100, 1400, 800)
-
+        
+        # Create custom status bar
+        status_bar = QStatusBar()
+        self.setStatusBar(status_bar)
+        
         # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
         # Left panel for table list
-        left_panel = QWidget()
+        left_panel = QFrame()
+        left_panel.setObjectName("sidebar")
+        left_panel.setMinimumWidth(300)
+        left_panel.setMaximumWidth(400)
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(16, 16, 16, 16)
+        left_layout.setSpacing(12)
         
-        # Database info label
+        # Database info section
+        db_header = QLabel("DATABASE")
+        db_header.setObjectName("header_label")
+        db_header.setStyleSheet("color: white;")
+        left_layout.addWidget(db_header)
+        
         self.db_info_label = QLabel("No database connected")
+        self.db_info_label.setStyleSheet("color: white; background-color: rgba(255, 255, 255, 0.1); padding: 8px; border-radius: 4px;")
         left_layout.addWidget(self.db_info_label)
         
-        tables_label = QLabel("Tables:")
-        left_layout.addWidget(tables_label)
+        # Database action buttons
+        db_buttons_layout = QHBoxLayout()
+        db_buttons_layout.setSpacing(8)
         
+        self.open_db_btn = QPushButton('Open Database')
+        self.open_db_btn.setIcon(QIcon.fromTheme("document-open"))
+        self.open_db_btn.clicked.connect(self.open_database)
+        
+        self.test_btn = QPushButton('Load Test Data')
+        self.test_btn.clicked.connect(self.load_test_data)
+        
+        db_buttons_layout.addWidget(self.open_db_btn)
+        db_buttons_layout.addWidget(self.test_btn)
+        left_layout.addLayout(db_buttons_layout)
+        
+        # Tables section
+        tables_header = QLabel("TABLES")
+        tables_header.setObjectName("header_label")
+        tables_header.setStyleSheet("color: white; margin-top: 16px;")
+        left_layout.addWidget(tables_header)
+        
+        # Table actions
+        table_actions_layout = QHBoxLayout()
+        table_actions_layout.setSpacing(8)
+        
+        self.browse_btn = QPushButton('Load Files')
+        self.browse_btn.setIcon(QIcon.fromTheme("document-new"))
+        self.browse_btn.clicked.connect(self.browse_files)
+        
+        self.remove_table_btn = QPushButton('Remove')
+        self.remove_table_btn.setObjectName("danger_button")
+        self.remove_table_btn.setIcon(QIcon.fromTheme("edit-delete"))
+        self.remove_table_btn.clicked.connect(self.remove_selected_table)
+        
+        table_actions_layout.addWidget(self.browse_btn)
+        table_actions_layout.addWidget(self.remove_table_btn)
+        left_layout.addLayout(table_actions_layout)
+        
+        # Tables list with custom styling
         self.tables_list = QListWidget()
+        self.tables_list.setStyleSheet("""
+            QListWidget {
+                background-color: rgba(255, 255, 255, 0.1);
+                border: none;
+                border-radius: 4px;
+                color: white;
+            }
+            QListWidget::item:selected {
+                background-color: rgba(255, 255, 255, 0.2);
+            }
+            QListWidget::item:hover:!selected {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
         self.tables_list.itemClicked.connect(self.show_table_preview)
         left_layout.addWidget(self.tables_list)
         
-        # Buttons for table management
-        table_buttons_layout = QHBoxLayout()
-        self.open_db_btn = QPushButton('Open Database')
-        self.open_db_btn.clicked.connect(self.open_database)
-        self.browse_btn = QPushButton('Load Files')
-        self.browse_btn.clicked.connect(self.browse_files)
-        self.remove_table_btn = QPushButton('Remove Selected')
-        self.remove_table_btn.clicked.connect(self.remove_selected_table)
-        self.test_btn = QPushButton('Test')
-        self.test_btn.clicked.connect(self.load_test_data)
+        # Add spacer at the bottom
+        left_layout.addStretch()
         
-        table_buttons_layout.addWidget(self.open_db_btn)
-        table_buttons_layout.addWidget(self.browse_btn)
-        table_buttons_layout.addWidget(self.remove_table_btn)
-        table_buttons_layout.addWidget(self.test_btn)
-        left_layout.addLayout(table_buttons_layout)
-
         # Right panel for query and results
-        right_panel = QWidget()
+        right_panel = QFrame()
+        right_panel.setObjectName("content_panel")
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(16, 16, 16, 16)
+        right_layout.setSpacing(16)
+        
+        # Query section header
+        query_header = QLabel("SQL QUERY")
+        query_header.setObjectName("header_label")
+        right_layout.addWidget(query_header)
         
         # Create splitter for query and results
         splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setHandleWidth(8)
+        splitter.setChildrenCollapsible(False)
         
         # Top part - Query section
-        query_widget = QWidget()
+        query_widget = QFrame()
+        query_widget.setObjectName("content_panel")
         query_layout = QVBoxLayout(query_widget)
+        query_layout.setContentsMargins(16, 16, 16, 16)
+        query_layout.setSpacing(12)
         
-        # Button row
-        button_layout = QHBoxLayout()
-        self.execute_btn = QPushButton('Execute (Ctrl+Enter)')
-        self.execute_btn.clicked.connect(self.execute_query)
-        self.clear_btn = QPushButton('Clear')
-        self.clear_btn.clicked.connect(self.clear_query)
-        
-        # Add export buttons
-        self.export_excel_btn = QPushButton('Export to Excel')
-        self.export_excel_btn.clicked.connect(self.export_to_excel)
-        self.export_parquet_btn = QPushButton('Export to Parquet')
-        self.export_parquet_btn.clicked.connect(self.export_to_parquet)
-        
-        button_layout.addWidget(self.execute_btn)
-        button_layout.addWidget(self.clear_btn)
-        button_layout.addWidget(self.export_excel_btn)
-        button_layout.addWidget(self.export_parquet_btn)
-        button_layout.addStretch()
-        
-        query_layout.addLayout(button_layout)
-
         # Query input
         self.query_edit = SQLEditor()
         # Apply syntax highlighting to the query editor
         self.sql_highlighter = SQLSyntaxHighlighter(self.query_edit.document())
         query_layout.addWidget(self.query_edit)
-
-        # Bottom part - Results section
-        results_widget = QWidget()
-        results_layout = QVBoxLayout(results_widget)
         
-        # Results header with row count
-        results_header = QWidget()
-        results_header_layout = QHBoxLayout(results_header)
-        self.results_label = QLabel("Results:")
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        
+        self.execute_btn = QPushButton('Execute Query')
+        self.execute_btn.setObjectName("primary_button")
+        self.execute_btn.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.execute_btn.clicked.connect(self.execute_query)
+        self.execute_btn.setToolTip("Execute Query (Ctrl+Enter)")
+        
+        self.clear_btn = QPushButton('Clear')
+        self.clear_btn.setIcon(QIcon.fromTheme("edit-clear"))
+        self.clear_btn.clicked.connect(self.clear_query)
+        
+        button_layout.addWidget(self.execute_btn)
+        button_layout.addWidget(self.clear_btn)
+        button_layout.addStretch()
+        
+        query_layout.addLayout(button_layout)
+        
+        # Bottom part - Results section
+        results_widget = QFrame()
+        results_widget.setObjectName("content_panel")
+        results_layout = QVBoxLayout(results_widget)
+        results_layout.setContentsMargins(16, 16, 16, 16)
+        results_layout.setSpacing(12)
+        
+        # Results header with row count and export options
+        results_header_layout = QHBoxLayout()
+        
+        results_title = QLabel("RESULTS")
+        results_title.setObjectName("header_label")
+        
         self.row_count_label = QLabel("")
-        results_header_layout.addWidget(self.results_label)
+        self.row_count_label.setStyleSheet(f"color: {self.colors['text_light']}; font-style: italic;")
+        
+        results_header_layout.addWidget(results_title)
         results_header_layout.addWidget(self.row_count_label)
         results_header_layout.addStretch()
-        results_layout.addWidget(results_header)
         
-        # Table widget for results
+        # Export buttons
+        export_layout = QHBoxLayout()
+        export_layout.setSpacing(8)
+        
+        self.export_excel_btn = QPushButton('Export to Excel')
+        self.export_excel_btn.setIcon(QIcon.fromTheme("x-office-spreadsheet"))
+        self.export_excel_btn.clicked.connect(self.export_to_excel)
+        
+        self.export_parquet_btn = QPushButton('Export to Parquet')
+        self.export_parquet_btn.setIcon(QIcon.fromTheme("document-save"))
+        self.export_parquet_btn.clicked.connect(self.export_to_parquet)
+        
+        export_layout.addWidget(self.export_excel_btn)
+        export_layout.addWidget(self.export_parquet_btn)
+        
+        results_header_layout.addLayout(export_layout)
+        results_layout.addLayout(results_header_layout)
+        
+        # Table widget for results with modern styling
         self.results_table = QTableWidget()
         self.results_table.setSortingEnabled(True)
         self.results_table.setAlternatingRowColors(True)
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.horizontalHeader().setSectionsMovable(True)
         self.results_table.verticalHeader().setVisible(False)
+        self.results_table.setShowGrid(True)
+        self.results_table.setGridStyle(Qt.PenStyle.SolidLine)
+        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        
         results_layout.addWidget(self.results_table)
 
         # Add widgets to splitter
@@ -559,7 +886,8 @@ class SQLShell(QMainWindow):
             "Keyboard Shortcuts:\n"
             "Ctrl+Enter: Execute Query\n"
             "Ctrl+K: Toggle Comment\n"
-            "Tab: Insert 4 spaces"
+            "Tab: Insert 4 spaces\n"
+            "Ctrl+Space: Show autocomplete"
         )
 
     def format_value(self, value):
@@ -604,17 +932,35 @@ class SQLShell(QMainWindow):
                 # Make cells read-only
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 
+                # Apply special styling for NULL values
+                if pd.isna(value):
+                    item.setForeground(QColor(self.colors['text_light']))
+                    item.setBackground(QColor("#F8F9FA"))
+                
                 self.results_table.setItem(i, j, item)
         
         # Auto-adjust column widths while ensuring minimum and maximum sizes
         self.results_table.resizeColumnsToContents()
         for i in range(len(df.columns)):
             width = self.results_table.columnWidth(i)
-            self.results_table.setColumnWidth(i, min(max(width, 50), 300))
+            self.results_table.setColumnWidth(i, min(max(width, 80), 300))
         
         # Update row count
         row_text = "row" if len(df) == 1 else "rows"
         self.row_count_label.setText(f"{len(df):,} {row_text}")
+        
+        # Apply zebra striping
+        for i in range(len(df)):
+            if i % 2 == 0:
+                for j in range(len(df.columns)):
+                    item = self.results_table.item(i, j)
+                    if item and not pd.isna(df.iloc[i, j]):
+                        item.setBackground(QColor("#FFFFFF"))
+            else:
+                for j in range(len(df.columns)):
+                    item = self.results_table.item(i, j)
+                    if item and not pd.isna(df.iloc[i, j]):
+                        item.setBackground(QColor("#F8F9FA"))
 
     def browse_files(self):
         if not self.conn:
@@ -672,17 +1018,22 @@ class SQLShell(QMainWindow):
                 # Show preview of loaded data
                 preview_df = df.head()
                 self.populate_table(preview_df)
-                self.results_label.setText(f"Preview of {table_name}:")
+                
+                # Update results title to show preview
+                results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
+                if results_title and results_title.text() == "RESULTS":
+                    results_title.setText(f"PREVIEW: {table_name}")
                 
                 # Update completer with new table and column names
                 self.update_completer()
                 
             except Exception as e:
-                self.statusBar().showMessage(f'Error loading file: {str(e)}')
+                error_msg = f'Error loading file {os.path.basename(file_name)}: {str(e)}'
+                self.statusBar().showMessage(error_msg)
+                QMessageBox.critical(self, "Error", error_msg)
                 self.results_table.setRowCount(0)
                 self.results_table.setColumnCount(0)
                 self.row_count_label.setText("")
-                self.results_label.setText(f"Error loading file: {str(e)}")
 
     def sanitize_table_name(self, name):
         # Replace invalid characters with underscores
@@ -710,7 +1061,6 @@ class SQLShell(QMainWindow):
                 self.results_table.setRowCount(0)
                 self.results_table.setColumnCount(0)
                 self.row_count_label.setText("")
-                self.results_label.setText(f"Removed table: {table_name}")
                 
                 # Update completer
                 self.update_completer()
@@ -824,7 +1174,21 @@ class SQLShell(QMainWindow):
         if not query:
             return
         
+        if not self.conn:
+            QMessageBox.warning(self, "No Connection", "No database connection available. Creating an in-memory DuckDB database.")
+            self.conn = duckdb.connect(':memory:')
+            self.current_db_type = 'duckdb'
+            self.db_info_label.setText("Connected to: in-memory DuckDB")
+        
+        # Show loading indicator in status bar
+        self.statusBar().showMessage('Executing query...')
+        
         try:
+            # Reset results title
+            results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
+            if results_title:
+                results_title.setText("RESULTS")
+            
             if self.current_db_type == 'sqlite':
                 # Execute SQLite query and convert to DataFrame
                 result = pd.read_sql_query(query, self.conn)
@@ -833,17 +1197,46 @@ class SQLShell(QMainWindow):
                 result = self.conn.execute(query).fetchdf()
                 
             self.populate_table(result)
-            self.results_label.setText("Query Results:")
-            self.statusBar().showMessage('Query executed successfully')
+            
+            # Show success message with query stats
+            execution_time = datetime.now().strftime("%H:%M:%S")
+            row_count = len(result)
+            self.statusBar().showMessage(f'Query executed successfully at {execution_time} - {row_count:,} rows returned')
+            
         except Exception as e:
             self.results_table.setRowCount(0)
             self.results_table.setColumnCount(0)
-            self.row_count_label.setText("")
-            self.results_label.setText(f"Error executing query: {str(e)}")
+            self.row_count_label.setText("Error")
             self.statusBar().showMessage('Error executing query')
+            
+            # Show error message with modern styling
+            error_msg = str(e)
+            if "not found" in error_msg.lower():
+                error_msg += "\nMake sure the table name is correct and the table is loaded."
+            elif "syntax error" in error_msg.lower():
+                error_msg += "\nPlease check your SQL syntax."
+                
+            error_box = QMessageBox(self)
+            error_box.setIcon(QMessageBox.Icon.Critical)
+            error_box.setWindowTitle("Query Error")
+            error_box.setText("Error executing query")
+            error_box.setInformativeText(error_msg)
+            error_box.setDetailedText(f"Query:\n{query}")
+            error_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            error_box.exec()
 
     def clear_query(self):
+        """Clear the query editor with animation"""
+        # Save current text for animation
+        current_text = self.query_edit.toPlainText()
+        if not current_text:
+            return
+        
+        # Clear the editor
         self.query_edit.clear()
+        
+        # Show success message
+        self.statusBar().showMessage('Query cleared', 2000)  # Show for 2 seconds
 
     def show_table_preview(self, item):
         """Show a preview of the selected table"""
@@ -856,25 +1249,33 @@ class SQLShell(QMainWindow):
                     preview_df = self.conn.execute(f'SELECT * FROM {table_name} LIMIT 5').fetchdf()
                     
                 self.populate_table(preview_df)
-                self.results_label.setText(f"Preview of {table_name}:")
                 self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
+                
+                # Update the results title to show which table is being previewed
+                results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
+                if results_title and results_title.text() == "RESULTS":
+                    results_title.setText(f"PREVIEW: {table_name}")
+                
             except Exception as e:
                 self.results_table.setRowCount(0)
                 self.results_table.setColumnCount(0)
                 self.row_count_label.setText("")
-                self.results_label.setText(f"Error showing preview: {str(e)}")
                 self.statusBar().showMessage('Error showing table preview')
-
-    def keyPressEvent(self, event):
-        # Execute query with Ctrl+Enter
-        if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.execute_query()
-        else:
-            super().keyPressEvent(event)
+                
+                # Show error message with modern styling
+                QMessageBox.critical(
+                    self, 
+                    "Error", 
+                    f"Error showing preview: {str(e)}",
+                    QMessageBox.StandardButton.Ok
+                )
 
     def load_test_data(self):
         """Generate and load test data"""
         try:
+            # Show loading indicator
+            self.statusBar().showMessage('Generating test data...')
+            
             # Create test data directory if it doesn't exist
             os.makedirs('test_data', exist_ok=True)
             
@@ -909,15 +1310,37 @@ class SQLShell(QMainWindow):
                 self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
             
             # Set the sample query
-            self.query_edit.setText("select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3")
+            sample_query = """
+SELECT 
+    s.orderid,
+    s.orderdate,
+    c.customername,
+    p.productname,
+    s.quantity,
+    s.unitprice,
+    (s.quantity * s.unitprice) AS total_amount
+FROM 
+    sample_sales_data s
+    INNER JOIN customer_data c ON c.customerid = s.customerid
+    INNER JOIN product_catalog p ON p.productid = s.productid
+ORDER BY 
+    s.orderdate DESC
+LIMIT 10
+"""
+            self.query_edit.setPlainText(sample_query.strip())
             
             # Update completer
             self.update_completer()
             
+            # Show success message
             self.statusBar().showMessage('Test data loaded successfully')
+            
+            # Show a preview of the sales data
+            self.show_table_preview(self.tables_list.item(0))
             
         except Exception as e:
             self.statusBar().showMessage(f'Error loading test data: {str(e)}')
+            QMessageBox.critical(self, "Error", f"Failed to load test data: {str(e)}")
 
     def export_to_excel(self):
         if self.results_table.rowCount() == 0:
@@ -929,12 +1352,25 @@ class SQLShell(QMainWindow):
             return
         
         try:
+            # Show loading indicator
+            self.statusBar().showMessage('Exporting data to Excel...')
+            
             # Convert table data to DataFrame
             df = self.get_table_data_as_dataframe()
             df.to_excel(file_name, index=False)
+            
             self.statusBar().showMessage(f'Data exported to {file_name}')
+            
+            # Show success message
+            QMessageBox.information(
+                self, 
+                "Export Successful", 
+                f"Data has been exported to:\n{file_name}",
+                QMessageBox.StandardButton.Ok
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+            self.statusBar().showMessage('Error exporting data')
 
     def export_to_parquet(self):
         if self.results_table.rowCount() == 0:
@@ -946,12 +1382,25 @@ class SQLShell(QMainWindow):
             return
         
         try:
+            # Show loading indicator
+            self.statusBar().showMessage('Exporting data to Parquet...')
+            
             # Convert table data to DataFrame
             df = self.get_table_data_as_dataframe()
             df.to_parquet(file_name, index=False)
+            
             self.statusBar().showMessage(f'Data exported to {file_name}')
+            
+            # Show success message
+            QMessageBox.information(
+                self, 
+                "Export Successful", 
+                f"Data has been exported to:\n{file_name}",
+                QMessageBox.StandardButton.Ok
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+            self.statusBar().showMessage('Error exporting data')
 
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame"""
@@ -965,13 +1414,58 @@ class SQLShell(QMainWindow):
             data.append(row_data)
         return pd.DataFrame(data, columns=headers)
 
+    def keyPressEvent(self, event):
+        """Handle global keyboard shortcuts"""
+        # Execute query with Ctrl+Enter or Cmd+Enter (for Mac)
+        if event.key() == Qt.Key.Key_Return and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.execute_btn.click()  # Simply click the button instead of animating
+            return
+        
+        # Clear query with Ctrl+L
+        if event.key() == Qt.Key.Key_L and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.clear_btn.click()  # Simply click the button instead of animating
+            return
+        
+        super().keyPressEvent(event)
+
 def main():
     app = QApplication(sys.argv)
     
     # Set application style
     app.setStyle('Fusion')
     
+    # Apply custom palette for the entire application
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#ECF0F1"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#2C3E50"))
+    palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#F5F5F5"))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#2C3E50"))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#2C3E50"))
+    palette.setColor(QPalette.ColorRole.Button, QColor("#3498DB"))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.Link, QColor("#3498DB"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#3498DB"))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+    app.setPalette(palette)
+    
+    # Set default font
+    default_font = QFont("Segoe UI", 10)
+    app.setFont(default_font)
+    
+    # Create and show the application
     sql_shell = SQLShell()
+    
+    # Set application icon (if available)
+    try:
+        app_icon = QIcon("sqlshell/resources/icon.png")
+        sql_shell.setWindowIcon(app_icon)
+    except:
+        # If icon not found, continue without it
+        pass
+    
     sql_shell.show()
     sys.exit(app.exec())
 
