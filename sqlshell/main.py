@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSi
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap
 import numpy as np
 from datetime import datetime
-from sqlshell.sqlshell import create_test_data  # Import from the correct location
+from sqlshell import create_test_data  # Import from the correct location
 
 class SQLSyntaxHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
