@@ -80,8 +80,16 @@ class SQLShell(QMainWindow):
         self.clear_btn = QPushButton('Clear')
         self.clear_btn.clicked.connect(self.clear_query)
         
+        # Add export buttons
+        self.export_excel_btn = QPushButton('Export to Excel')
+        self.export_excel_btn.clicked.connect(self.export_to_excel)
+        self.export_parquet_btn = QPushButton('Export to Parquet')
+        self.export_parquet_btn.clicked.connect(self.export_to_parquet)
+        
         button_layout.addWidget(self.execute_btn)
         button_layout.addWidget(self.clear_btn)
+        button_layout.addWidget(self.export_excel_btn)
+        button_layout.addWidget(self.export_parquet_btn)
         button_layout.addStretch()
         
         query_layout.addLayout(button_layout)
@@ -434,6 +442,52 @@ class SQLShell(QMainWindow):
             
         except Exception as e:
             self.statusBar().showMessage(f'Error loading test data: {str(e)}')
+
+    def export_to_excel(self):
+        if self.results_table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "There is no data to export.")
+            return
+        
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save as Excel", "", "Excel Files (*.xlsx);;All Files (*)")
+        if not file_name:
+            return
+        
+        try:
+            # Convert table data to DataFrame
+            df = self.get_table_data_as_dataframe()
+            df.to_excel(file_name, index=False)
+            self.statusBar().showMessage(f'Data exported to {file_name}')
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+
+    def export_to_parquet(self):
+        if self.results_table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "There is no data to export.")
+            return
+        
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save as Parquet", "", "Parquet Files (*.parquet);;All Files (*)")
+        if not file_name:
+            return
+        
+        try:
+            # Convert table data to DataFrame
+            df = self.get_table_data_as_dataframe()
+            df.to_parquet(file_name, index=False)
+            self.statusBar().showMessage(f'Data exported to {file_name}')
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+
+    def get_table_data_as_dataframe(self):
+        """Helper function to convert table widget data to a DataFrame"""
+        headers = [self.results_table.horizontalHeaderItem(i).text() for i in range(self.results_table.columnCount())]
+        data = []
+        for row in range(self.results_table.rowCount()):
+            row_data = []
+            for column in range(self.results_table.columnCount()):
+                item = self.results_table.item(row, column)
+                row_data.append(item.text() if item else '')
+            data.append(row_data)
+        return pd.DataFrame(data, columns=headers)
 
 def main():
     app = QApplication(sys.argv)
