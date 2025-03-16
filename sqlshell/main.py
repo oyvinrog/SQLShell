@@ -6,12 +6,318 @@ import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
                            QLabel, QSplitter, QListWidget, QTableWidget,
-                           QTableWidgetItem, QHeaderView, QMessageBox)
-from PyQt6.QtCore import Qt, QAbstractTableModel
-from PyQt6.QtGui import QFont, QColor
+                           QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit)
+from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize
+from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat
 import numpy as np
 from datetime import datetime
 from sqlshell.sqlshell import create_test_data  # Import from the correct location
+
+class SQLSyntaxHighlighter(QSyntaxHighlighter):
+    def __init__(self, document):
+        super().__init__(document)
+        self.highlighting_rules = []
+
+        # SQL Keywords
+        keyword_format = QTextCharFormat()
+        keyword_format.setForeground(QColor("#0000FF"))  # Blue
+        keyword_format.setFontWeight(QFont.Weight.Bold)
+        keywords = [
+            "\\bSELECT\\b", "\\bFROM\\b", "\\bWHERE\\b", "\\bAND\\b", "\\bOR\\b",
+            "\\bINNER\\b", "\\bOUTER\\b", "\\bLEFT\\b", "\\bRIGHT\\b", "\\bJOIN\\b",
+            "\\bON\\b", "\\bGROUP\\b", "\\bBY\\b", "\\bHAVING\\b", "\\bORDER\\b",
+            "\\bLIMIT\\b", "\\bOFFSET\\b", "\\bUNION\\b", "\\bEXCEPT\\b", "\\bINTERSECT\\b",
+            "\\bCREATE\\b", "\\bTABLE\\b", "\\bINDEX\\b", "\\bVIEW\\b", "\\bINSERT\\b",
+            "\\bINTO\\b", "\\bVALUES\\b", "\\bUPDATE\\b", "\\bSET\\b", "\\bDELETE\\b",
+            "\\bTRUNCATE\\b", "\\bALTER\\b", "\\bADD\\b", "\\bDROP\\b", "\\bCOLUMN\\b",
+            "\\bCONSTRAINT\\b", "\\bPRIMARY\\b", "\\bKEY\\b", "\\bFOREIGN\\b", "\\bREFERENCES\\b",
+            "\\bUNIQUE\\b", "\\bNOT\\b", "\\bNULL\\b", "\\bIS\\b", "\\bDISTINCT\\b",
+            "\\bCASE\\b", "\\bWHEN\\b", "\\bTHEN\\b", "\\bELSE\\b", "\\bEND\\b",
+            "\\bAS\\b", "\\bWITH\\b", "\\bBETWEEN\\b", "\\bLIKE\\b", "\\bIN\\b",
+            "\\bEXISTS\\b", "\\bALL\\b", "\\bANY\\b", "\\bSOME\\b", "\\bDESC\\b", "\\bASC\\b"
+        ]
+        for pattern in keywords:
+            regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
+            self.highlighting_rules.append((regex, keyword_format))
+
+        # Functions
+        function_format = QTextCharFormat()
+        function_format.setForeground(QColor("#AA00AA"))  # Purple
+        functions = [
+            "\\bAVG\\b", "\\bCOUNT\\b", "\\bSUM\\b", "\\bMAX\\b", "\\bMIN\\b",
+            "\\bCOALESCE\\b", "\\bNVL\\b", "\\bNULLIF\\b", "\\bCAST\\b", "\\bCONVERT\\b",
+            "\\bLOWER\\b", "\\bUPPER\\b", "\\bTRIM\\b", "\\bLTRIM\\b", "\\bRTRIM\\b",
+            "\\bLENGTH\\b", "\\bSUBSTRING\\b", "\\bREPLACE\\b", "\\bCONCAT\\b",
+            "\\bROUND\\b", "\\bFLOOR\\b", "\\bCEIL\\b", "\\bABS\\b", "\\bMOD\\b",
+            "\\bCURRENT_DATE\\b", "\\bCURRENT_TIME\\b", "\\bCURRENT_TIMESTAMP\\b",
+            "\\bEXTRACT\\b", "\\bDATE_PART\\b", "\\bTO_CHAR\\b", "\\bTO_DATE\\b"
+        ]
+        for pattern in functions:
+            regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
+            self.highlighting_rules.append((regex, function_format))
+
+        # Numbers
+        number_format = QTextCharFormat()
+        number_format.setForeground(QColor("#009900"))  # Green
+        self.highlighting_rules.append((
+            QRegularExpression("\\b[0-9]+\\b"),
+            number_format
+        ))
+
+        # Single-line string literals
+        string_format = QTextCharFormat()
+        string_format.setForeground(QColor("#CC6600"))  # Orange/Brown
+        self.highlighting_rules.append((
+            QRegularExpression("'[^']*'"),
+            string_format
+        ))
+        self.highlighting_rules.append((
+            QRegularExpression("\"[^\"]*\""),
+            string_format
+        ))
+
+        # Comments
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor("#777777"))  # Gray
+        comment_format.setFontItalic(True)
+        self.highlighting_rules.append((
+            QRegularExpression("--[^\n]*"),
+            comment_format
+        ))
+        
+        # Multi-line comments
+        self.comment_start_expression = QRegularExpression("/\\*")
+        self.comment_end_expression = QRegularExpression("\\*/")
+        self.multi_line_comment_format = comment_format
+
+    def highlightBlock(self, text):
+        # Apply regular expression highlighting rules
+        for pattern, format in self.highlighting_rules:
+            match_iterator = pattern.globalMatch(text)
+            while match_iterator.hasNext():
+                match = match_iterator.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), format)
+
+        # Handle multi-line comments
+        self.setCurrentBlockState(0)
+        
+        # If previous block was inside a comment, check if this block continues it
+        start_index = 0
+        if self.previousBlockState() != 1:
+            # Find the start of a comment
+            start_match = self.comment_start_expression.match(text)
+            if start_match.hasMatch():
+                start_index = start_match.capturedStart()
+            else:
+                return
+            
+        while start_index >= 0:
+            # Find the end of the comment
+            end_match = self.comment_end_expression.match(text, start_index)
+            
+            # If end match found
+            if end_match.hasMatch():
+                end_index = end_match.capturedStart()
+                comment_length = end_index - start_index + end_match.capturedLength()
+                self.setFormat(start_index, comment_length, self.multi_line_comment_format)
+                
+                # Look for next comment
+                start_match = self.comment_start_expression.match(text, start_index + comment_length)
+                if start_match.hasMatch():
+                    start_index = start_match.capturedStart()
+                else:
+                    start_index = -1
+            else:
+                # No end found, comment continues to next block
+                self.setCurrentBlockState(1)  # Still inside comment
+                comment_length = len(text) - start_index
+                self.setFormat(start_index, comment_length, self.multi_line_comment_format)
+                start_index = -1
+
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self):
+        return QSize(self.editor.line_number_area_width(), 0)
+
+    def paintEvent(self, event):
+        self.editor.line_number_area_paint_event(event)
+
+class SQLEditor(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.line_number_area = LineNumberArea(self)
+        
+        # Set monospaced font
+        font = QFont("Courier New", 10)
+        font.setFixedPitch(True)
+        self.setFont(font)
+        
+        # Connect signals
+        self.blockCountChanged.connect(self.update_line_number_area_width)
+        self.updateRequest.connect(self.update_line_number_area)
+        
+        # Initialize
+        self.update_line_number_area_width(0)
+        
+        # Set tab width to 4 spaces
+        self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(' '))
+        
+        # Set placeholder text
+        self.setPlaceholderText("Enter your SQL query here...")
+
+    def keyPressEvent(self, event):
+        # Handle special key combinations
+        if event.key() == Qt.Key.Key_Tab:
+            # Insert 4 spaces instead of a tab character
+            self.insertPlainText("    ")
+            return
+            
+        # Auto-indentation for new lines
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            cursor = self.textCursor()
+            block = cursor.block()
+            text = block.text()
+            
+            # Get the indentation of the current line
+            indentation = ""
+            for char in text:
+                if char.isspace():
+                    indentation += char
+                else:
+                    break
+            
+            # Check if line ends with an opening bracket or keywords that should increase indentation
+            increase_indent = ""
+            if text.strip().endswith("(") or any(text.strip().upper().endswith(keyword) for keyword in 
+                                               ["SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING"]):
+                increase_indent = "    "
+                
+            # Insert new line with proper indentation
+            super().keyPressEvent(event)
+            self.insertPlainText(indentation + increase_indent)
+            return
+            
+        # Handle keyboard shortcuts
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Space:
+                # TODO: Implement auto-completion
+                return
+            elif event.key() == Qt.Key.Key_L:
+                # Format the selected SQL (placeholder)
+                return
+            elif event.key() == Qt.Key.Key_K:
+                # Comment/uncomment the selected lines
+                self.toggle_comment()
+                return
+                
+        super().keyPressEvent(event)
+
+    def toggle_comment(self):
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            # Get the selected text
+            start = cursor.selectionStart()
+            end = cursor.selectionEnd()
+            
+            # Remember the selection
+            cursor.setPosition(start)
+            start_block = cursor.blockNumber()
+            cursor.setPosition(end)
+            end_block = cursor.blockNumber()
+            
+            # Process each line in the selection
+            cursor.setPosition(start)
+            cursor.beginEditBlock()
+            
+            for _ in range(start_block, end_block + 1):
+                # Move to start of line
+                cursor.movePosition(cursor.MoveOperation.StartOfLine)
+                
+                # Check if the line is already commented
+                line_text = cursor.block().text().lstrip()
+                if line_text.startswith('--'):
+                    # Remove comment
+                    pos = cursor.block().text().find('--')
+                    cursor.setPosition(cursor.block().position() + pos)
+                    cursor.deleteChar()
+                    cursor.deleteChar()
+                else:
+                    # Add comment
+                    cursor.insertText('--')
+                
+                # Move to next line if not at the end
+                if not cursor.atEnd():
+                    cursor.movePosition(cursor.MoveOperation.NextBlock)
+            
+            cursor.endEditBlock()
+        else:
+            # Comment/uncomment current line
+            cursor.movePosition(cursor.MoveOperation.StartOfLine)
+            cursor.movePosition(cursor.MoveOperation.EndOfLine, cursor.MoveMode.KeepAnchor)
+            line_text = cursor.selectedText().lstrip()
+            
+            cursor.movePosition(cursor.MoveOperation.StartOfLine)
+            if line_text.startswith('--'):
+                # Remove comment
+                pos = cursor.block().text().find('--')
+                cursor.setPosition(cursor.block().position() + pos)
+                cursor.deleteChar()
+                cursor.deleteChar()
+            else:
+                # Add comment
+                cursor.insertText('--')
+
+    def line_number_area_width(self):
+        digits = 1
+        max_num = max(1, self.blockCount())
+        while max_num >= 10:
+            max_num //= 10
+            digits += 1
+        
+        space = 3 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def update_line_number_area_width(self, _):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def update_line_number_area(self, rect, dy):
+        if dy:
+            self.line_number_area.scroll(0, dy)
+        else:
+            self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+        
+        if rect.contains(self.viewport().rect()):
+            self.update_line_number_area_width(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+
+    def line_number_area_paint_event(self, event):
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), QColor("#f0f0f0"))  # Light gray background
+        
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + round(self.blockBoundingRect(block).height())
+        
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                painter.setPen(QColor("#808080"))  # Gray text
+                painter.drawText(0, top, self.line_number_area.width() - 5, 
+                                self.fontMetrics().height(),
+                                Qt.AlignmentFlag.AlignRight, number)
+            
+            block = block.next()
+            top = bottom
+            bottom = top + round(self.blockBoundingRect(block).height())
+            block_number += 1
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -95,8 +401,9 @@ class SQLShell(QMainWindow):
         query_layout.addLayout(button_layout)
 
         # Query input
-        self.query_edit = QTextEdit()
-        self.query_edit.setPlaceholderText("Enter your SQL query here...")
+        self.query_edit = SQLEditor()
+        # Apply syntax highlighting to the query editor
+        self.sql_highlighter = SQLSyntaxHighlighter(self.query_edit.document())
         query_layout.addWidget(self.query_edit)
 
         # Bottom part - Results section
@@ -136,7 +443,15 @@ class SQLShell(QMainWindow):
         main_layout.addWidget(right_panel, 4)
 
         # Status bar
-        self.statusBar().showMessage('Ready')
+        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment')
+        
+        # Show keyboard shortcuts in a tooltip for the query editor
+        self.query_edit.setToolTip(
+            "Keyboard Shortcuts:\n"
+            "Ctrl+Enter: Execute Query\n"
+            "Ctrl+K: Toggle Comment\n"
+            "Tab: Insert 4 spaces"
+        )
 
     def format_value(self, value):
         """Format values for display"""
@@ -399,6 +714,7 @@ class SQLShell(QMainWindow):
                 self.statusBar().showMessage('Error showing table preview')
 
     def keyPressEvent(self, event):
+        # Execute query with Ctrl+Enter
         if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             self.execute_query()
         else:
