@@ -16,7 +16,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
-                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog)
+                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog,
+                           QStyledItemDelegate)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath
 import numpy as np
@@ -497,17 +498,108 @@ class SQLEditor(QPlainTextEdit):
             bottom = top + round(self.blockBoundingRect(block).height())
             block_number += 1
 
+class BarChartDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.min_val = 0
+        self.max_val = 1
+        self.bar_color = QColor("#3498DB")
+
+    def set_range(self, min_val, max_val):
+        self.min_val = min_val
+        self.max_val = max_val
+
+    def paint(self, painter, option, index):
+        # Draw the default background
+        super().paint(painter, option, index)
+        
+        try:
+            text = index.data()
+            value = float(text.replace(',', ''))
+            
+            # Calculate normalized value
+            range_val = self.max_val - self.min_val if self.max_val != self.min_val else 1
+            normalized = (value - self.min_val) / range_val
+            
+            # Define bar dimensions
+            bar_height = 16
+            max_bar_width = 100
+            bar_width = max(5, int(max_bar_width * normalized))
+            
+            # Calculate positions
+            text_width = option.fontMetrics.horizontalAdvance(text) + 10
+            bar_x = option.rect.left() + text_width + 10
+            bar_y = option.rect.center().y() - bar_height // 2
+            
+            # Draw the bar
+            bar_rect = QRect(bar_x, bar_y, bar_width, bar_height)
+            painter.fillRect(bar_rect, self.bar_color)
+            
+            # Draw the text
+            text_rect = QRect(option.rect.left() + 4, option.rect.top(),
+                            text_width, option.rect.height())
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+            
+        except (ValueError, AttributeError):
+            # If not a number, just draw the text
+            super().paint(painter, option, index)
+
 class FilterHeader(QHeaderView):
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.filter_buttons = []
         self.active_filters = {}  # Track active filters for each column
+        self.columns_with_bars = set()  # Track which columns show bar charts
+        self.bar_delegates = {}  # Store delegates for columns with bars
         self.setSectionsClickable(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_header_context_menu)
         self.main_window = None  # Store reference to main window
         self.filter_icon_color = QColor("#3498DB")  # Bright blue color for filter icon
-        
+
+    def toggle_bar_chart(self, column_index):
+        """Toggle bar chart visualization for a column"""
+        table = self.parent()
+        if not table:
+            return
+
+        if column_index in self.columns_with_bars:
+            # Remove bars
+            self.columns_with_bars.remove(column_index)
+            if column_index in self.bar_delegates:
+                table.setItemDelegateForColumn(column_index, None)
+                del self.bar_delegates[column_index]
+        else:
+            # Add bars
+            self.columns_with_bars.add(column_index)
+            
+            # Get all values for normalization
+            values = []
+            for row in range(table.rowCount()):
+                item = table.item(row, column_index)
+                if item:
+                    try:
+                        value = float(item.text().replace(',', ''))
+                        values.append(value)
+                    except ValueError:
+                        continue
+
+            if not values:
+                return
+
+            # Calculate min and max for normalization
+            min_val = min(values)
+            max_val = max(values)
+            
+            # Create and set up delegate
+            delegate = BarChartDelegate(table)
+            delegate.set_range(min_val, max_val)
+            self.bar_delegates[column_index] = delegate
+            table.setItemDelegateForColumn(column_index, delegate)
+
+        # Update the view
+        table.viewport().update()
+
     def show_header_context_menu(self, pos):
         """Show context menu for header section"""
         logical_index = self.logicalIndexAt(pos)
@@ -536,6 +628,24 @@ class FilterHeader(QHeaderView):
         sort_desc_action = context_menu.addAction("Sort Descending")
         context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
+        
+        # Add bar chart action if column is numeric
+        table = self.parent()
+        if table and table.rowCount() > 0:
+            try:
+                # Check if column contains numeric values
+                sample_value = table.item(0, logical_index).text()
+                float(sample_value.replace(',', ''))  # Try converting to float
+                
+                context_menu.addSeparator()
+                toggle_bar_action = context_menu.addAction(
+                    "Remove Bar Chart" if logical_index in self.columns_with_bars 
+                    else "Add Bar Chart"
+                )
+            except (ValueError, AttributeError):
+                toggle_bar_action = None
+        else:
+            toggle_bar_action = None
 
         # Show menu and get selected action
         action = context_menu.exec(self.mapToGlobal(pos))
@@ -553,6 +663,8 @@ class FilterHeader(QHeaderView):
             table.sortItems(logical_index, Qt.SortOrder.DescendingOrder)
         elif action == filter_action:
             self.show_filter_menu(logical_index)
+        elif action == toggle_bar_action:
+            self.toggle_bar_chart(logical_index)
 
     def set_main_window(self, window):
         """Set the reference to the main window"""
@@ -1274,6 +1386,13 @@ class SQLShell(QMainWindow):
             # Store the current DataFrame for filtering
             self.current_df = df.copy()
             
+            # Remember which columns had bar charts
+            header = self.results_table.horizontalHeader()
+            if isinstance(header, FilterHeader):
+                columns_with_bars = header.columns_with_bars.copy()
+            else:
+                columns_with_bars = set()
+            
             # Clear existing data
             self.results_table.clearContents()
             self.results_table.setRowCount(0)
@@ -1314,6 +1433,13 @@ class SQLShell(QMainWindow):
             
             # Optimize column widths
             self.results_table.resizeColumnsToContents()
+            
+            # Restore bar charts for columns that previously had them
+            header = self.results_table.horizontalHeader()
+            if isinstance(header, FilterHeader):
+                for col_idx in columns_with_bars:
+                    if col_idx < col_count:  # Only if column still exists
+                        header.toggle_bar_chart(col_idx)
             
             # Update status
             memory_usage = df.memory_usage(deep=True).sum() / (1024 * 1024)  # Convert to MB
