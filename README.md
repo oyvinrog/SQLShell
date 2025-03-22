@@ -15,23 +15,45 @@ A GUI application that provides a SQL REPL interface for querying Excel and parq
 
 ## Installation
 
-1. Make sure you have Python 3.8 or newer installed
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-You can also do:
-
+### Simple Installation (Recommended)
 ```bash
 pip install sqlshell
 ```
+
+After installation, you can run SQLShell by typing:
+```bash
+sqls
+```
+
+### Windows Users - Important Notes
+
+- **Python 3.13+**: The simple installation method above works best with Python 3.13 or newer on Windows
+- **Older Python Versions**: If you encounter an error message about "dtype size changed" when running `sqls`, you have two options:
+
+  1. **Upgrade Python** (Recommended):
+     - Download and install the latest Python version from [python.org](https://www.python.org/downloads/)
+     - Reinstall SQLShell using pip
+
+  2. **Use a Virtual Environment**:
+     ```bash
+     # Create a virtual environment
+     python -m venv venv
+     
+     # Activate it (Windows)
+     venv\Scripts\activate
+     
+     # Install SQLShell
+     pip install sqlshell
+     
+     # Run SQLShell
+     sqls
+     ```
 
 ## Usage
 
 1. Run the application:
    ```bash
-   python sqls.py
+   sqls
    ```
 
 2. The application will automatically connect to a local DuckDB database named 'pool.db'
