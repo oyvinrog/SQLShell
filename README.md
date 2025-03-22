@@ -1,6 +1,7 @@
-# SQL Shell
 
-A GUI application that provides a SQL REPL interface for querying Excel and parquet files (more to come!)
+![SQLShell Interface](sqlshell_logo.png)
+
+A GUI application that provides a SQL REPL interface for querying Excel, parquet and sqlite3-databases.
 
 
 ![SQLShell Interface](sqlshell_demo.png)
