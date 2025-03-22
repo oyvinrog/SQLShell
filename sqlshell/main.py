@@ -16,8 +16,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
                            QCheckBox, QWidgetAction)
-from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer
-from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap
+from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint
+from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath
 import numpy as np
 from datetime import datetime
 from sqlshell import create_test_data
@@ -500,13 +500,141 @@ class FilterHeader(QHeaderView):
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.filter_buttons = []
+        self.active_filters = {}  # Track active filters for each column
         self.setSectionsClickable(True)
-        self.sectionClicked.connect(self.show_filter_menu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_header_context_menu)
         self.main_window = None  # Store reference to main window
+        self.filter_icon_color = QColor("#3498DB")  # Bright blue color for filter icon
         
+    def show_header_context_menu(self, pos):
+        """Show context menu for header section"""
+        logical_index = self.logicalIndexAt(pos)
+        if logical_index < 0:
+            return
+
+        # Create context menu
+        context_menu = QMenu(self)
+        context_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #BDC3C7;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #3498DB;
+                color: white;
+            }
+        """)
+
+        # Add sort actions
+        sort_asc_action = context_menu.addAction("Sort Ascending")
+        sort_desc_action = context_menu.addAction("Sort Descending")
+        context_menu.addSeparator()
+        filter_action = context_menu.addAction("Filter...")
+
+        # Show menu and get selected action
+        action = context_menu.exec(self.mapToGlobal(pos))
+
+        if not action:
+            return
+
+        table = self.parent()
+        if not table:
+            return
+
+        if action == sort_asc_action:
+            table.sortItems(logical_index, Qt.SortOrder.AscendingOrder)
+        elif action == sort_desc_action:
+            table.sortItems(logical_index, Qt.SortOrder.DescendingOrder)
+        elif action == filter_action:
+            self.show_filter_menu(logical_index)
+
     def set_main_window(self, window):
         """Set the reference to the main window"""
         self.main_window = window
+        
+    def paintSection(self, painter, rect, logical_index):
+        """Override paint section to add filter indicator"""
+        super().paintSection(painter, rect, logical_index)
+        
+        if logical_index in self.active_filters:
+            # Draw background highlight for filtered columns
+            highlight_color = QColor(52, 152, 219, 30)  # Light blue background
+            painter.fillRect(rect, highlight_color)
+            
+            # Make icon larger and more visible
+            icon_size = min(rect.height() - 8, 24)  # Larger icon, but not too large
+            margin = 6
+            icon_rect = QRect(
+                rect.right() - icon_size - margin,
+                rect.top() + (rect.height() - icon_size) // 2,
+                icon_size,
+                icon_size
+            )
+            
+            # Draw filter icon with improved visibility
+            painter.save()
+            
+            # Set up the pen for better visibility
+            pen = painter.pen()
+            pen.setWidth(3)  # Thicker lines
+            pen.setColor(self.filter_icon_color)
+            painter.setPen(pen)
+            
+            # Calculate points for larger funnel shape
+            points = [
+                QPoint(icon_rect.left(), icon_rect.top()),
+                QPoint(icon_rect.right(), icon_rect.top()),
+                QPoint(icon_rect.center().x() + icon_size//3, icon_rect.center().y()),
+                QPoint(icon_rect.center().x() + icon_size//3, icon_rect.bottom()),
+                QPoint(icon_rect.center().x() - icon_size//3, icon_rect.bottom()),
+                QPoint(icon_rect.center().x() - icon_size//3, icon_rect.center().y()),
+                QPoint(icon_rect.left(), icon_rect.top())
+            ]
+            
+            # Create and fill path
+            path = QPainterPath()
+            path.moveTo(float(points[0].x()), float(points[0].y()))
+            for point in points[1:]:
+                path.lineTo(float(point.x()), float(point.y()))
+            
+            # Fill with semi-transparent blue
+            painter.fillPath(path, QBrush(QColor(52, 152, 219, 120)))  # More opaque fill
+            
+            # Draw outline
+            painter.drawPolyline(QPolygon(points))
+            
+            # If multiple values are filtered, add a number
+            if len(self.active_filters[logical_index]) > 1:
+                # Draw number with better visibility
+                number_rect = QRect(icon_rect.left(), icon_rect.top(),
+                                  icon_rect.width(), icon_rect.height())
+                painter.setFont(QFont("Arial", icon_size//2, QFont.Weight.Bold))
+                
+                # Draw text shadow for better contrast
+                painter.setPen(QColor("white"))
+                painter.drawText(number_rect.adjusted(1, 1, 1, 1),
+                               Qt.AlignmentFlag.AlignCenter,
+                               str(len(self.active_filters[logical_index])))
+                
+                # Draw main text
+                painter.setPen(self.filter_icon_color)
+                painter.drawText(number_rect, Qt.AlignmentFlag.AlignCenter,
+                               str(len(self.active_filters[logical_index])))
+            
+            painter.restore()
+            
+            # Draw a more visible indicator at the bottom of the header section
+            painter.save()
+            indicator_height = 3  # Thicker indicator line
+            indicator_rect = QRect(rect.left(), rect.bottom() - indicator_height,
+                                 rect.width(), indicator_height)
+            painter.fillRect(indicator_rect, self.filter_icon_color)
+            painter.restore()
         
     def show_filter_menu(self, logical_index):
         if not self.parent() or not isinstance(self.parent(), QTableWidget):
@@ -539,6 +667,9 @@ class FilterHeader(QHeaderView):
             QCheckBox {
                 padding: 5px;
             }
+            QScrollArea {
+                border: none;
+            }
         """)
         
         # Add search box at the top
@@ -562,15 +693,26 @@ class FilterHeader(QHeaderView):
         menu.addAction(select_all_action)
         menu.addSeparator()
         
+        # Create scrollable area for checkboxes
+        scroll_widget = QWidget(menu)
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(2)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        
         # Add checkboxes for unique values
         value_checkboxes = {}
         for value in sorted(unique_values):
-            checkbox = QCheckBox(str(value), menu)
-            checkbox.setChecked(True)
+            checkbox = QCheckBox(str(value), scroll_widget)
+            # Set checked state based on active filters
+            checkbox.setChecked(logical_index not in self.active_filters or 
+                              value in self.active_filters[logical_index])
             value_checkboxes[value] = checkbox
-            checkbox_action = QWidgetAction(menu)
-            checkbox_action.setDefaultWidget(checkbox)
-            menu.addAction(checkbox_action)
+            scroll_layout.addWidget(checkbox)
+        
+        # Add scrollable area to menu
+        scroll_action = QWidgetAction(menu)
+        scroll_action.setDefaultWidget(scroll_widget)
+        menu.addAction(scroll_action)
         
         # Connect search box to filter checkboxes
         def filter_checkboxes(text):
@@ -582,7 +724,8 @@ class FilterHeader(QHeaderView):
         # Connect select all to other checkboxes
         def toggle_all(state):
             for checkbox in value_checkboxes.values():
-                checkbox.setChecked(state)
+                if not checkbox.isHidden():  # Only toggle visible checkboxes
+                    checkbox.setChecked(state)
         
         select_all.stateChanged.connect(toggle_all)
         
@@ -630,31 +773,29 @@ class FilterHeader(QHeaderView):
             selected_values = {value for value, checkbox in value_checkboxes.items() 
                              if checkbox.isChecked()}
             
-            # Hide/show rows based on selection
-            for row in range(table.rowCount()):
-                item = table.item(row, logical_index)
-                if item:
-                    table.setRowHidden(row, item.text() not in selected_values)
+            if len(selected_values) < len(unique_values):
+                # Store active filter only if not all values are selected
+                self.active_filters[logical_index] = selected_values
+            else:
+                # Remove filter if all values are selected
+                self.active_filters.pop(logical_index, None)
+            
+            # Apply all active filters
+            self.apply_all_filters(table)
             
             menu.close()
-            
-            # Update status bar with visible row count
-            if self.main_window:
-                visible_rows = sum(1 for row in range(table.rowCount()) 
-                                 if not table.isRowHidden(row))
-                self.main_window.statusBar().showMessage(
-                    f"Showing {visible_rows:,} rows after filtering")
+            self.updateSection(logical_index)  # Redraw section to show/hide filter icon
         
         def clear_filter():
-            # Show all rows
-            for row in range(table.rowCount()):
-                table.setRowHidden(row, False)
-            menu.close()
+            # Remove filter for this column
+            if logical_index in self.active_filters:
+                del self.active_filters[logical_index]
             
-            # Update status bar
-            if self.main_window:
-                self.main_window.statusBar().showMessage(
-                    f"Showing {table.rowCount():,} rows after clearing filter")
+            # Apply remaining filters
+            self.apply_all_filters(table)
+            
+            menu.close()
+            self.updateSection(logical_index)  # Redraw section to hide filter icon
         
         apply_button.clicked.connect(apply_filter)
         clear_button.clicked.connect(clear_filter)
@@ -663,6 +804,28 @@ class FilterHeader(QHeaderView):
         header_pos = self.mapToGlobal(self.geometry().bottomLeft())
         header_pos.setX(header_pos.x() + self.sectionPosition(logical_index))
         menu.exec(header_pos)
+        
+    def apply_all_filters(self, table):
+        """Apply all active filters to the table"""
+        # Show all rows first
+        for row in range(table.rowCount()):
+            table.setRowHidden(row, False)
+        
+        # Apply each active filter
+        for col_idx, allowed_values in self.active_filters.items():
+            for row in range(table.rowCount()):
+                item = table.item(row, col_idx)
+                if item and not table.isRowHidden(row):
+                    table.setRowHidden(row, item.text() not in allowed_values)
+        
+        # Update status bar with visible row count
+        if self.main_window:
+            visible_rows = sum(1 for row in range(table.rowCount()) 
+                             if not table.isRowHidden(row))
+            total_filters = len(self.active_filters)
+            filter_text = f" ({total_filters} filter{'s' if total_filters != 1 else ''} active)" if total_filters > 0 else ""
+            self.main_window.statusBar().showMessage(
+                f"Showing {visible_rows:,} rows{filter_text}")
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -937,6 +1100,8 @@ class SQLShell(QMainWindow):
             }
         """)
         self.tables_list.itemClicked.connect(self.show_table_preview)
+        self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tables_list.customContextMenuRequested.connect(self.show_tables_context_menu)
         left_layout.addWidget(self.tables_list)
         
         # Add spacer at the bottom
@@ -1652,6 +1817,50 @@ LIMIT 10
             QMessageBox.warning(self, "Cleanup Warning", 
                 f"Warning: Could not properly close database connection:\n{str(e)}")
             event.accept()
+
+    def show_tables_context_menu(self, position):
+        """Show context menu for tables list"""
+        item = self.tables_list.itemAt(position)
+        if not item:
+            return
+
+        # Get table name without the file info in parentheses
+        table_name = item.text().split(' (')[0]
+
+        # Create context menu
+        context_menu = QMenu(self)
+        context_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #BDC3C7;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #3498DB;
+                color: white;
+            }
+        """)
+
+        # Add menu actions
+        select_from_action = context_menu.addAction("Select from")
+        add_to_editor_action = context_menu.addAction("Just add to editor")
+
+        # Show menu and get selected action
+        action = context_menu.exec(self.tables_list.mapToGlobal(position))
+
+        if action == select_from_action:
+            # Insert "SELECT * FROM table_name" at cursor position
+            cursor = self.query_edit.textCursor()
+            cursor.insertText(f"SELECT * FROM {table_name}")
+            self.query_edit.setFocus()
+        elif action == add_to_editor_action:
+            # Just insert the table name at cursor position
+            cursor = self.query_edit.textCursor()
+            cursor.insertText(table_name)
+            self.query_edit.setFocus()
 
 def main():
     app = QApplication(sys.argv)
