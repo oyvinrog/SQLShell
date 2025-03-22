@@ -1,0 +1,10 @@
+include README.md
+include LICENSE
+include sqlshell_logo.png
+include sqlshell_demo.png
+include pool.db
+recursive-include sqlshell/resources *
+recursive-include sqlshell/data *
+recursive-include test_data *
+global-exclude __pycache__
+global-exclude *.py[cod] 

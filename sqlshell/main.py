@@ -1423,56 +1423,37 @@ LIMIT 10
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyle(QStyleFactory.create('Fusion'))
     
-    # Set application style
-    app.setStyle('Fusion')
+    # Ensure we have a valid working directory with pool.db
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    working_dir = os.getcwd()
     
-    # Apply custom palette for the entire application
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#ECF0F1"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#2C3E50"))
-    palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#F5F5F5"))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#2C3E50"))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#FFFFFF"))
-    palette.setColor(QPalette.ColorRole.Text, QColor("#2C3E50"))
-    palette.setColor(QPalette.ColorRole.Button, QColor("#3498DB"))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#FFFFFF"))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor("#FFFFFF"))
-    palette.setColor(QPalette.ColorRole.Link, QColor("#3498DB"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#3498DB"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
-    app.setPalette(palette)
+    # If pool.db doesn't exist in current directory, copy it from package
+    if not os.path.exists(os.path.join(working_dir, 'pool.db')):
+        import shutil
+        package_db = os.path.join(package_dir, 'pool.db')
+        if os.path.exists(package_db):
+            shutil.copy2(package_db, working_dir)
+        else:
+            package_db = os.path.join(os.path.dirname(package_dir), 'pool.db')
+            if os.path.exists(package_db):
+                shutil.copy2(package_db, working_dir)
     
-    # Set default font
-    default_font = QFont("Segoe UI", 10)
-    app.setFont(default_font)
-    
-    # Get the absolute path to the splash screen GIF
-    splash_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "resources", "splash_screen.gif"))
-    print(f"Splash screen path: {splash_path}")  # Debug print
-    
-    # Create and show splash screen
-    splash = AnimatedSplashScreen(splash_path)
+    # Show splash screen
+    splash = AnimatedSplashScreen()
     splash.show()
     
-    # Create the main application window
-    sql_shell = SQLShell()
+    # Create and show main window after delay
+    timer = QTimer()
+    window = SQLShell()
+    timer.timeout.connect(lambda: show_main_window())
+    timer.start(2000)  # 2 second delay
     
-    # Set application icon (if available)
-    try:
-        app_icon = QIcon(os.path.join(os.path.dirname(__file__), "resources", "icon.png"))
-        sql_shell.setWindowIcon(app_icon)
-    except:
-        # If icon not found, continue without it
-        pass
-    
-    # Use timer to ensure splash screen shows for at least 2 seconds
     def show_main_window():
-        sql_shell.show()
-        splash.finish(sql_shell)
-    
-    QTimer.singleShot(2000, show_main_window)  # Show splash for 2 seconds
+        window.show()
+        splash.finish(window)
+        timer.stop()
     
     sys.exit(app.exec())
 

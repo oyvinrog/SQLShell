@@ -4,12 +4,8 @@ from PyQt6.QtGui import QPainter, QColor, QFont, QMovie, QPainterPath, QLinearGr
 import os
 
 class AnimatedSplashScreen(QWidget):
-    def __init__(self, gif_path):
+    def __init__(self):
         super().__init__()
-        
-        # Debug print
-        print(f"Loading splash screen GIF from: {gif_path}")
-        print(f"File exists: {os.path.exists(gif_path)}")
         
         # Set up the window properties
         self.setWindowFlags(
@@ -17,13 +13,11 @@ class AnimatedSplashScreen(QWidget):
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.SplashScreen
         )
-        print(f"Window flags set: {self.windowFlags()}")  # Debug print
         
         # Set widget attributes for proper compositing
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        print(f"Translucent background attribute: {self.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)}")  # Debug print
         
         # Set fixed size
         self.setFixedSize(400, 300)
@@ -37,83 +31,40 @@ class AnimatedSplashScreen(QWidget):
 
         # Create layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
         
-        # Create background label for GIF
-        self.movie_label = QLabel(self)
-        self.movie_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.movie_label.setFixedSize(self.size())
-        
-        # Set up the movie
-        self.movie = QMovie(gif_path)
-        if not self.movie.isValid():
-            print(f"Error loading movie: {self.movie.lastErrorString()}")
-        self.movie.setScaledSize(self.size())
-        self.movie_label.setMovie(self.movie)
-        
-        # Create semi-transparent overlay
-        self.overlay = QLabel(self)
-        self.overlay.setFixedSize(self.size())
-        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 100);")
-        
-        # Create text label
-        self.text_label = QLabel("SQL Shell", self)
-        self.text_label.setFixedSize(self.size())
-        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Set up font
-        try:
-            font = QFont("Segoe UI", 48, QFont.Weight.Bold)
-        except:
-            font = QFont("Arial", 48, QFont.Weight.Bold)
-        self.text_label.setFont(font)
-        
-        # Style the text label
-        self.text_label.setStyleSheet("""
+        # Create title label
+        self.title_label = QLabel("SQLShell", self)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setStyleSheet("""
             QLabel {
-                color: white;
-                background: transparent;
-                text-shadow: 2px 2px 4px rgba(0, 0, 0, 180),
-                            0px 0px 10px rgba(52, 152, 219, 160);
+                color: #3498DB;
+                font-size: 32px;
+                font-weight: bold;
+                font-family: 'Segoe UI', Arial, sans-serif;
             }
         """)
+        layout.addWidget(self.title_label)
         
-        # Create progress bar background
-        self.progress_bg = QLabel(self)
-        self.progress_bg.setFixedSize(200, 4)
-        self.progress_bg.move((self.width() - 200) // 2, self.height() - 30)
-        self.progress_bg.setStyleSheet("background-color: rgba(52, 73, 94, 255);")
+        # Create subtitle label
+        self.subtitle_label = QLabel("Loading...", self)
+        self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subtitle_label.setStyleSheet("""
+            QLabel {
+                color: #2C3E50;
+                font-size: 16px;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+        """)
+        layout.addWidget(self.subtitle_label)
         
-        # Create progress bar
-        self.progress_bar = QLabel(self)
-        self.progress_bar.setFixedSize(0, 4)  # Start with 0 width
-        self.progress_bar.move((self.width() - 200) // 2, self.height() - 30)
-        self.progress_bar.setStyleSheet("background-color: rgba(52, 152, 219, 255);")
-        
-        # Initialize animation properties
+        # Initialize properties for animations
         self._opacity = 0.0
         self._progress = 0.0
         
-        # Create opacity animation
-        self.fade_anim = QPropertyAnimation(self, b"opacity")
-        self.fade_anim.setDuration(1500)  # 1.5 seconds fade-in
-        self.fade_anim.setStartValue(0.0)
-        self.fade_anim.setEndValue(1.0)
-        self.fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-        # Create progress animation
-        self.progress_anim = QPropertyAnimation(self, b"progress")
-        self.progress_anim.setDuration(3000)  # 3 seconds progress
-        self.progress_anim.setStartValue(0.0)
-        self.progress_anim.setEndValue(1.0)
-        self.progress_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        
-        # Store the widget to show later
-        self.next_widget = None
-        
-        # Start animations with a slight delay
-        QTimer.singleShot(100, self.start_animations)
+        # Start animations when shown
+        self.start_animations()
 
     def start_animations(self):
         """Start all animations"""

@@ -45,6 +45,13 @@ setup(
     python_requires=">=3.8",
     include_package_data=True,
     package_data={
-        'sqlshell': ['*.db'],
+        'sqlshell': [
+            '*.db',
+            'resources/*',
+            'data/*',
+            'test_data/*',
+            '*.png',
+            '*.ico'
+        ],
     },
 ) 
