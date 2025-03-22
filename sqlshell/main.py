@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
-                           QCheckBox, QWidgetAction, QMenuBar)
+                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath
 import numpy as np
@@ -1218,8 +1218,13 @@ class SQLShell(QMainWindow):
         self.export_parquet_btn.setIcon(QIcon.fromTheme("document-save"))
         self.export_parquet_btn.clicked.connect(self.export_to_parquet)
         
+        self.export_table_btn = QPushButton('Export to New Table')
+        self.export_table_btn.setIcon(QIcon.fromTheme("table"))
+        self.export_table_btn.clicked.connect(self.export_to_table)
+        
         export_layout.addWidget(self.export_excel_btn)
         export_layout.addWidget(self.export_parquet_btn)
+        export_layout.addWidget(self.export_table_btn)
         
         results_header_layout.addLayout(export_layout)
         results_layout.addLayout(results_header_layout)
@@ -1807,6 +1812,78 @@ LIMIT 10
             QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
             self.statusBar().showMessage('Error exporting data')
 
+    def export_to_table(self):
+        """Export the current results to a new table in the database"""
+        if self.results_table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "There is no data to export.")
+            return
+            
+        if not self.conn:
+            QMessageBox.warning(self, "No Connection", "Please connect to a database first.")
+            return
+            
+        # Get table name from user
+        table_name, ok = QInputDialog.getText(
+            self, 
+            "Export to Table",
+            "Enter new table name:",
+            QLineEdit.EchoMode.Normal
+        )
+        
+        if not ok or not table_name:
+            return
+            
+        # Sanitize table name
+        table_name = self.sanitize_table_name(table_name)
+        
+        try:
+            # Check if table already exists
+            if table_name in self.loaded_tables:
+                reply = QMessageBox.question(
+                    self,
+                    "Table Exists",
+                    f"Table '{table_name}' already exists. Do you want to replace it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+            
+            # Show loading indicator
+            self.statusBar().showMessage('Creating new table...')
+            
+            # Convert table data to DataFrame
+            df = self.get_table_data_as_dataframe()
+            
+            # Create the table based on database type
+            if self.current_connection_type == 'sqlite':
+                df.to_sql(table_name, self.conn, index=False, if_exists='replace')
+            else:  # duckdb
+                self.conn.register(table_name, df)
+            
+            # Update loaded tables tracking
+            self.loaded_tables[table_name] = 'query_result'
+            self.table_columns[table_name] = df.columns.tolist()
+            
+            # Update UI
+            self.tables_list.addItem(f"{table_name} (query result)")
+            
+            # Update completer
+            self.update_completer()
+            
+            self.statusBar().showMessage(f'Created new table: {table_name}')
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Query results have been exported to table:\n{table_name}",
+                QMessageBox.StandardButton.Ok
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create table: {str(e)}")
+            self.statusBar().showMessage('Error creating table')
+
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame"""
         headers = [self.results_table.horizontalHeaderItem(i).text() for i in range(self.results_table.columnCount())]
@@ -1996,8 +2073,15 @@ LIMIT 10
             
             # Save table information
             for table_name, file_path in self.loaded_tables.items():
+                # For database tables and query results, store the special identifier
+                if file_path in ['database', 'query_result']:
+                    source_path = file_path
+                else:
+                    # For file-based tables, store the absolute path
+                    source_path = os.path.abspath(file_path)
+                
                 project_data['tables'][table_name] = {
-                    'file_path': file_path,
+                    'file_path': source_path,
                     'columns': self.table_columns.get(table_name, [])
                 }
             
@@ -2036,8 +2120,21 @@ LIMIT 10
                 # Load tables
                 for table_name, table_info in project_data['tables'].items():
                     file_path = table_info['file_path']
-                    if os.path.exists(file_path):
-                        try:
+                    try:
+                        if file_path == 'database':
+                            # For tables from database, we need to recreate them from their data
+                            # Execute a SELECT to get the data and recreate the table
+                            query = f"SELECT * FROM {table_name}"
+                            df = pd.read_sql_query(query, self.conn)
+                            self.conn.register(table_name, df)
+                            self.loaded_tables[table_name] = 'database'
+                            self.tables_list.addItem(f"{table_name} (database)")
+                        elif file_path == 'query_result':
+                            # For tables from query results, we'll need to re-run the query
+                            # For now, just note it as a query result table
+                            self.loaded_tables[table_name] = 'query_result'
+                            self.tables_list.addItem(f"{table_name} (query result)")
+                        elif os.path.exists(file_path):
                             # Load the file based on its extension
                             if file_path.endswith(('.xlsx', '.xls')):
                                 df = pd.read_excel(file_path)
@@ -2051,12 +2148,18 @@ LIMIT 10
                             # Register the table
                             self.conn.register(table_name, df)
                             self.loaded_tables[table_name] = file_path
-                            self.table_columns[table_name] = table_info['columns']
                             self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
-                            
-                        except Exception as e:
+                        else:
                             QMessageBox.warning(self, "Warning",
-                                f"Failed to load table {table_name} from {file_path}:\n{str(e)}")
+                                f"Could not find file for table {table_name}: {file_path}")
+                            continue
+                            
+                        # Store the columns
+                        self.table_columns[table_name] = table_info['columns']
+                            
+                    except Exception as e:
+                        QMessageBox.warning(self, "Warning",
+                            f"Failed to load table {table_name}:\n{str(e)}")
                 
                 # Restore query
                 if 'query' in project_data:
