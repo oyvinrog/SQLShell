@@ -14,7 +14,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QLabel, QSplitter, QListWidget, QTableWidget,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
-                           QStyleFactory, QToolBar, QStatusBar)
+                           QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
+                           QCheckBox, QWidgetAction)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap
 import numpy as np
@@ -495,6 +496,174 @@ class SQLEditor(QPlainTextEdit):
             bottom = top + round(self.blockBoundingRect(block).height())
             block_number += 1
 
+class FilterHeader(QHeaderView):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.filter_buttons = []
+        self.setSectionsClickable(True)
+        self.sectionClicked.connect(self.show_filter_menu)
+        self.main_window = None  # Store reference to main window
+        
+    def set_main_window(self, window):
+        """Set the reference to the main window"""
+        self.main_window = window
+        
+    def show_filter_menu(self, logical_index):
+        if not self.parent() or not isinstance(self.parent(), QTableWidget):
+            return
+            
+        table = self.parent()
+        unique_values = set()
+        
+        # Collect unique values from the column
+        for row in range(table.rowCount()):
+            item = table.item(row, logical_index)
+            if item and not table.isRowHidden(row):
+                unique_values.add(item.text())
+        
+        # Create and show the filter menu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #BDC3C7;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #3498DB;
+                color: white;
+            }
+            QCheckBox {
+                padding: 5px;
+            }
+        """)
+        
+        # Add search box at the top
+        search_widget = QWidget(menu)
+        search_layout = QVBoxLayout(search_widget)
+        search_edit = QLineEdit(search_widget)
+        search_edit.setPlaceholderText("Search values...")
+        search_layout.addWidget(search_edit)
+        
+        # Add action for search widget
+        search_action = QWidgetAction(menu)
+        search_action.setDefaultWidget(search_widget)
+        menu.addAction(search_action)
+        menu.addSeparator()
+        
+        # Add "Select All" checkbox
+        select_all = QCheckBox("Select All", menu)
+        select_all.setChecked(True)
+        select_all_action = QWidgetAction(menu)
+        select_all_action.setDefaultWidget(select_all)
+        menu.addAction(select_all_action)
+        menu.addSeparator()
+        
+        # Add checkboxes for unique values
+        value_checkboxes = {}
+        for value in sorted(unique_values):
+            checkbox = QCheckBox(str(value), menu)
+            checkbox.setChecked(True)
+            value_checkboxes[value] = checkbox
+            checkbox_action = QWidgetAction(menu)
+            checkbox_action.setDefaultWidget(checkbox)
+            menu.addAction(checkbox_action)
+        
+        # Connect search box to filter checkboxes
+        def filter_checkboxes(text):
+            for value, checkbox in value_checkboxes.items():
+                checkbox.setVisible(text.lower() in str(value).lower())
+        
+        search_edit.textChanged.connect(filter_checkboxes)
+        
+        # Connect select all to other checkboxes
+        def toggle_all(state):
+            for checkbox in value_checkboxes.values():
+                checkbox.setChecked(state)
+        
+        select_all.stateChanged.connect(toggle_all)
+        
+        # Add Apply and Clear buttons
+        menu.addSeparator()
+        apply_button = QPushButton("Apply Filter", menu)
+        apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2ECC71;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #27AE60;
+            }
+        """)
+        
+        clear_button = QPushButton("Clear Filter", menu)
+        clear_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+        """)
+        
+        button_widget = QWidget(menu)
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.addWidget(apply_button)
+        button_layout.addWidget(clear_button)
+        
+        button_action = QWidgetAction(menu)
+        button_action.setDefaultWidget(button_widget)
+        menu.addAction(button_action)
+        
+        def apply_filter():
+            # Get selected values
+            selected_values = {value for value, checkbox in value_checkboxes.items() 
+                             if checkbox.isChecked()}
+            
+            # Hide/show rows based on selection
+            for row in range(table.rowCount()):
+                item = table.item(row, logical_index)
+                if item:
+                    table.setRowHidden(row, item.text() not in selected_values)
+            
+            menu.close()
+            
+            # Update status bar with visible row count
+            if self.main_window:
+                visible_rows = sum(1 for row in range(table.rowCount()) 
+                                 if not table.isRowHidden(row))
+                self.main_window.statusBar().showMessage(
+                    f"Showing {visible_rows:,} rows after filtering")
+        
+        def clear_filter():
+            # Show all rows
+            for row in range(table.rowCount()):
+                table.setRowHidden(row, False)
+            menu.close()
+            
+            # Update status bar
+            if self.main_window:
+                self.main_window.statusBar().showMessage(
+                    f"Showing {table.rowCount():,} rows after clearing filter")
+        
+        apply_button.clicked.connect(apply_filter)
+        clear_button.clicked.connect(clear_filter)
+        
+        # Show menu under the header section
+        header_pos = self.mapToGlobal(self.geometry().bottomLeft())
+        header_pos.setX(header_pos.x() + self.sectionPosition(logical_index))
+        menu.exec(header_pos)
+
 class SQLShell(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -502,6 +671,8 @@ class SQLShell(QMainWindow):
         self.current_connection_type = None
         self.loaded_tables = {}  # Keep track of loaded tables
         self.table_columns = {}  # Keep track of table columns
+        self.current_df = None  # Store the current DataFrame for filtering
+        self.filter_widgets = []  # Store filter line edits
         
         # Define color scheme
         self.colors = {
@@ -863,8 +1034,14 @@ class SQLShell(QMainWindow):
         self.results_table = QTableWidget()
         self.results_table.setSortingEnabled(True)
         self.results_table.setAlternatingRowColors(True)
-        self.results_table.horizontalHeader().setStretchLastSection(True)
-        self.results_table.horizontalHeader().setSectionsMovable(True)
+        
+        # Set custom header for filtering
+        header = FilterHeader(self.results_table)
+        header.set_main_window(self)  # Set reference to main window
+        self.results_table.setHorizontalHeader(header)
+        header.setStretchLastSection(True)
+        header.setSectionsMovable(True)
+        
         self.results_table.verticalHeader().setVisible(False)
         self.results_table.setShowGrid(True)
         self.results_table.setGridStyle(Qt.PenStyle.SolidLine)
@@ -900,6 +1077,9 @@ class SQLShell(QMainWindow):
     def populate_table(self, df):
         """Populate the results table with DataFrame data using memory-efficient chunking"""
         try:
+            # Store the current DataFrame for filtering
+            self.current_df = df.copy()
+            
             # Clear existing data
             self.results_table.clearContents()
             self.results_table.setRowCount(0)
@@ -951,7 +1131,47 @@ class SQLShell(QMainWindow):
             QMessageBox.critical(self, "Error",
                 f"Failed to populate results table:\n\n{str(e)}")
             self.statusBar().showMessage("Failed to display results")
+
+    def apply_filters(self):
+        """Apply filters to the table based on filter inputs"""
+        if self.current_df is None or not self.filter_widgets:
+            return
             
+        try:
+            # Start with the original DataFrame
+            filtered_df = self.current_df.copy()
+            
+            # Apply each non-empty filter
+            for col_idx, filter_widget in enumerate(self.filter_widgets):
+                filter_text = filter_widget.text().strip()
+                if filter_text:
+                    col_name = self.current_df.columns[col_idx]
+                    # Convert column to string for filtering
+                    filtered_df[col_name] = filtered_df[col_name].astype(str)
+                    filtered_df = filtered_df[filtered_df[col_name].str.contains(filter_text, case=False, na=False)]
+            
+            # Update table with filtered data
+            row_count = len(filtered_df)
+            for row_idx in range(row_count):
+                for col_idx, value in enumerate(filtered_df.iloc[row_idx]):
+                    formatted_value = self.format_value(value)
+                    item = QTableWidgetItem(formatted_value)
+                    self.results_table.setItem(row_idx, col_idx, item)
+            
+            # Hide rows that don't match filter
+            for row_idx in range(row_count + 1, self.results_table.rowCount()):
+                self.results_table.hideRow(row_idx)
+            
+            # Show all filtered rows
+            for row_idx in range(1, row_count + 1):
+                self.results_table.showRow(row_idx)
+            
+            # Update status
+            self.statusBar().showMessage(f"Showing {row_count:,} rows after filtering")
+            
+        except Exception as e:
+            self.statusBar().showMessage(f"Error applying filters: {str(e)}")
+
     def format_value(self, value):
         """Format cell values efficiently"""
         if pd.isna(value):
