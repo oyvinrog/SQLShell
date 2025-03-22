@@ -1,22 +1,27 @@
+# SQLShell
+
+<div align="center">
 
 ![SQLShell Interface](sqlshell_logo.png)
 
-A GUI application that provides a SQL REPL interface for querying Excel, parquet and sqlite3-databases.
-
+**A modern SQL REPL interface for seamless querying of Excel, Parquet, and SQLite databases**
 
 ![SQLShell Interface](sqlshell_demo.png)
 
-## Features
+</div>
 
-- SQL query interface with syntax highlighting
-- Support for querying local DuckDB database (pool.db)
-- Import and query Excel files (.xlsx, .xls) and CSV files
-- Results displayed in a clear, tabular format
-- Keyboard shortcuts (Ctrl+Enter to execute queries)
+## 🚀 Key Features
 
-## Installation and Setup
+- **Interactive SQL Interface** - Rich syntax highlighting for enhanced query writing
+- **DuckDB Integration** - Built-in support for local DuckDB database (pool.db)
+- **Multi-Format Support** - Import and query Excel (.xlsx, .xls) and CSV files effortlessly
+- **Modern UI** - Clean, tabular results display with intuitive controls
+- **Productivity Tools** - Streamlined workflow with keyboard shortcuts (e.g., Ctrl+Enter for query execution)
 
-### Using Virtual Environment (Linux)
+## 📦 Installation
+
+### Linux Setup with Virtual Environment
+
 ```bash
 # Create and activate virtual environment
 python3 -m venv ~/.venv/sqlshell
@@ -25,47 +30,62 @@ source ~/.venv/sqlshell/bin/activate
 # Install SQLShell
 pip install sqlshell
 
-# Add alias to your shell configuration (~/.bashrc or ~/.zshrc)
-echo 'alias sqls="~/.venv/sqlshell/bin/sqls"' >> ~/.bashrc  # or ~/.zshrc for Zsh users
+# Configure shell alias
+echo 'alias sqls="~/.venv/sqlshell/bin/sqls"' >> ~/.bashrc  # or ~/.zshrc for Zsh
 source ~/.bashrc  # or source ~/.zshrc
 ```
 
-That's it! Now you can use `sqls` from anywhere.
+### Windows Quick Start
+SQLShell is immediately available via the `sqls` command after installation:
+```bash
+pip install sqlshell
+```
 
-### Quick Install (Windows)
-On Windows, after running `pip install sqlshell`, the `sqls` command will be available immediately in any terminal.
+## 🎯 Getting Started
 
-## Usage
-
-1. Run the application:
+1. **Launch the Application**
    ```bash
    sqls
    ```
 
-2. The application will automatically connect to a local DuckDB database named 'pool.db'
+2. **Database Connection**
+   - SQLShell automatically connects to a local DuckDB database named 'pool.db'
 
-3. To query Excel files:
-   - Click the "Browse Excel" button
-   - Select your Excel file
-   - The file will be loaded as a table named 'imported_data'
-   - Query the data using SQL commands (e.g., `SELECT * FROM imported_data`)
+3. **Working with Excel Files**
+   - Click "Browse Excel" to select your file
+   - File contents are loaded as 'imported_data' table
+   - Query using standard SQL syntax
 
-4. Enter SQL queries in the top text area
-   - Press Ctrl+Enter or click "Execute" to run the query
-   - Results will be displayed in the bottom panel
+4. **Query Execution**
+   - Enter SQL in the editor
+   - Execute using Ctrl+Enter or the "Execute" button
+   - View results in the structured output panel
 
-## Example Queries
+## 📝 Query Examples
 
+### Basic Join Operation
 ```sql
-select * from sample_sales_data cd inner join product_catalog pc on pc.productid = cd.productid limit 3
+SELECT *
+FROM sample_sales_data cd
+INNER JOIN product_catalog pc ON pc.productid = cd.productid
+LIMIT 3;
 ```
 
-you can also do multiple statements, i.e:
-
+### Multi-Statement Queries
 ```sql
-create or replace temporary view test_v as 
-select * from sample_sales_data cd
-inner join product_catalog pc on pc.productid = cd.productid;
+-- Create a temporary view
+CREATE OR REPLACE TEMPORARY VIEW test_v AS
+SELECT *
+FROM sample_sales_data cd
+INNER JOIN product_catalog pc ON pc.productid = cd.productid;
 
-select distinct productid from test_v;
+-- Query the view
+SELECT DISTINCT productid
+FROM test_v;
 ```
+
+## 💡 Pro Tips
+
+- Use temporary views for complex query organization
+- Leverage keyboard shortcuts for efficient workflow
+- Explore the multi-format support for various data sources
