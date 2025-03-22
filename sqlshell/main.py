@@ -492,8 +492,8 @@ class SQLEditor(QPlainTextEdit):
 class SQLShell(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.current_db_type = 'duckdb'  # Default to DuckDB
-        self.conn = duckdb.connect(':memory:')  # Create in-memory DuckDB connection by default
+        self.conn = None
+        self.current_connection_type = None
         self.loaded_tables = {}  # Keep track of loaded tables
         self.table_columns = {}  # Keep track of table columns
         
@@ -891,83 +891,84 @@ class SQLShell(QMainWindow):
             "Ctrl+Space: Show autocomplete"
         )
 
-    def format_value(self, value):
-        """Format values for display"""
-        if pd.isna(value):
-            return 'NULL'
-        elif isinstance(value, (int, np.integer)):
-            return f"{value:,}"
-        elif isinstance(value, (float, np.floating)):
-            return f"{value:,.2f}"
-        elif isinstance(value, (datetime, pd.Timestamp)):
-            return value.strftime('%Y-%m-%d %H:%M:%S')
-        return str(value)
-
     def populate_table(self, df):
-        """Populate the table widget with DataFrame content"""
-        if len(df) == 0:
+        """Populate the results table with DataFrame data using memory-efficient chunking"""
+        try:
+            # Clear existing data
+            self.results_table.clearContents()
             self.results_table.setRowCount(0)
             self.results_table.setColumnCount(0)
-            self.row_count_label.setText("No results")
-            return
-
-        # Set dimensions
-        self.results_table.setRowCount(len(df))
-        self.results_table.setColumnCount(len(df.columns))
-        
-        # Set headers
-        self.results_table.setHorizontalHeaderLabels(df.columns)
-        
-        # Populate data
-        for i, (_, row) in enumerate(df.iterrows()):
-            for j, value in enumerate(row):
-                formatted_value = self.format_value(value)
-                item = QTableWidgetItem(formatted_value)
+            
+            if df.empty:
+                self.statusBar().showMessage("Query returned no results")
+                return
                 
-                # Set alignment based on data type
-                if isinstance(value, (int, float, np.integer, np.floating)):
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                else:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            # Set up the table dimensions
+            row_count = len(df)
+            col_count = len(df.columns)
+            self.results_table.setColumnCount(col_count)
+            
+            # Set column headers
+            headers = [str(col) for col in df.columns]
+            self.results_table.setHorizontalHeaderLabels(headers)
+            
+            # Calculate chunk size (adjust based on available memory)
+            CHUNK_SIZE = 1000
+            
+            # Process data in chunks to avoid memory issues with large datasets
+            for chunk_start in range(0, row_count, CHUNK_SIZE):
+                chunk_end = min(chunk_start + CHUNK_SIZE, row_count)
+                chunk = df.iloc[chunk_start:chunk_end]
                 
-                # Make cells read-only
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                # Add rows for this chunk
+                self.results_table.setRowCount(chunk_end)
                 
-                # Apply special styling for NULL values
-                if pd.isna(value):
-                    item.setForeground(QColor(self.colors['text_light']))
-                    item.setBackground(QColor("#F8F9FA"))
-                
-                self.results_table.setItem(i, j, item)
-        
-        # Auto-adjust column widths while ensuring minimum and maximum sizes
-        self.results_table.resizeColumnsToContents()
-        for i in range(len(df.columns)):
-            width = self.results_table.columnWidth(i)
-            self.results_table.setColumnWidth(i, min(max(width, 80), 300))
-        
-        # Update row count
-        row_text = "row" if len(df) == 1 else "rows"
-        self.row_count_label.setText(f"{len(df):,} {row_text}")
-        
-        # Apply zebra striping
-        for i in range(len(df)):
-            if i % 2 == 0:
-                for j in range(len(df.columns)):
-                    item = self.results_table.item(i, j)
-                    if item and not pd.isna(df.iloc[i, j]):
-                        item.setBackground(QColor("#FFFFFF"))
-            else:
-                for j in range(len(df.columns)):
-                    item = self.results_table.item(i, j)
-                    if item and not pd.isna(df.iloc[i, j]):
-                        item.setBackground(QColor("#F8F9FA"))
+                for row_idx, (_, row_data) in enumerate(chunk.iterrows(), start=chunk_start):
+                    for col_idx, value in enumerate(row_data):
+                        formatted_value = self.format_value(value)
+                        item = QTableWidgetItem(formatted_value)
+                        self.results_table.setItem(row_idx, col_idx, item)
+                        
+                # Process events to keep UI responsive
+                QApplication.processEvents()
+            
+            # Optimize column widths
+            self.results_table.resizeColumnsToContents()
+            
+            # Update status
+            memory_usage = df.memory_usage(deep=True).sum() / (1024 * 1024)  # Convert to MB
+            self.statusBar().showMessage(
+                f"Loaded {row_count:,} rows, {col_count} columns. Memory usage: {memory_usage:.1f} MB"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error",
+                f"Failed to populate results table:\n\n{str(e)}")
+            self.statusBar().showMessage("Failed to display results")
+            
+    def format_value(self, value):
+        """Format cell values efficiently"""
+        if pd.isna(value):
+            return "NULL"
+        elif isinstance(value, (float, np.floating)):
+            if value.is_integer():
+                return str(int(value))
+            return f"{value:.6g}"  # Use general format with up to 6 significant digits
+        elif isinstance(value, (pd.Timestamp, datetime)):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        elif isinstance(value, (np.integer, int)):
+            return str(value)
+        elif isinstance(value, bool):
+            return str(value)
+        elif isinstance(value, (bytes, bytearray)):
+            return value.hex()
+        return str(value)
 
     def browse_files(self):
         if not self.conn:
             # Create a default in-memory DuckDB connection if none exists
             self.conn = duckdb.connect(':memory:')
-            self.current_db_type = 'duckdb'
+            self.current_connection_type = 'duckdb'
             self.db_info_label.setText("Connected to: in-memory DuckDB")
             
         file_names, _ = QFileDialog.getOpenFileNames(
@@ -1000,7 +1001,7 @@ class SQLShell(QMainWindow):
                     counter += 1
                 
                 # Handle table creation based on database type
-                if self.current_db_type == 'sqlite':
+                if self.current_connection_type == 'sqlite':
                     # For SQLite, create a table from the DataFrame
                     df.to_sql(table_name, self.conn, index=False, if_exists='replace')
                 else:
@@ -1067,48 +1068,41 @@ class SQLShell(QMainWindow):
                 self.update_completer()
 
     def open_database(self):
-        """Open a database file (DuckDB or SQLite)"""
-        file_name, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open Database File",
-            "",
-            "Database Files (*.db);;All Files (*)"
-        )
-        
-        if not file_name:
-            return
-            
+        """Open a database connection with proper error handling and resource management"""
         try:
-            # Try to detect database type
-            is_sqlite = self.is_sqlite_db(file_name)
-            
-            # Close existing connection if any
             if self.conn:
-                self.conn.close()
+                # Close existing connection before opening new one
+                if self.current_connection_type == "duckdb":
+                    self.conn.close()
+                else:  # sqlite
+                    self.conn.close()
+                self.conn = None
+                self.current_connection_type = None
             
-            # Connect to the database
-            if is_sqlite:
-                self.conn = sqlite3.connect(file_name)
-                self.current_db_type = 'sqlite'
-            else:
-                self.conn = duckdb.connect(file_name)
-                self.current_db_type = 'duckdb'
+            filename, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open Database",
+                "",
+                "All Database Files (*.db *.sqlite *.sqlite3);;All Files (*)"
+            )
             
-            # Clear existing tables
-            self.loaded_tables.clear()
-            self.tables_list.clear()
-            
-            # Load tables
-            self.load_database_tables()
-            
-            # Update UI
-            db_type = "SQLite" if is_sqlite else "DuckDB"
-            self.db_info_label.setText(f"Connected to: {os.path.basename(file_name)} ({db_type})")
-            self.statusBar().showMessage(f'Successfully opened {db_type} database: {file_name}')
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
-            self.statusBar().showMessage('Error opening database')
+            if filename:
+                if self.is_sqlite_db(filename):
+                    self.conn = sqlite3.connect(filename)
+                    self.current_connection_type = "sqlite"
+                else:
+                    self.conn = duckdb.connect(filename)
+                    self.current_connection_type = "duckdb"
+                
+                self.load_database_tables()
+                self.statusBar().showMessage(f"Connected to database: {filename}")
+                
+        except (sqlite3.Error, duckdb.Error) as e:
+            QMessageBox.critical(self, "Database Connection Error",
+                f"Failed to open database:\n\n{str(e)}")
+            self.statusBar().showMessage("Failed to open database")
+            self.conn = None
+            self.current_connection_type = None
 
     def is_sqlite_db(self, filename):
         """Check if the file is a SQLite database"""
@@ -1122,7 +1116,7 @@ class SQLShell(QMainWindow):
     def load_database_tables(self):
         """Load all tables from the current database"""
         try:
-            if self.current_db_type == 'sqlite':
+            if self.current_connection_type == 'sqlite':
                 query = "SELECT name FROM sqlite_master WHERE type='table'"
                 cursor = self.conn.cursor()
                 tables = cursor.execute(query).fetchall()
@@ -1171,60 +1165,44 @@ class SQLShell(QMainWindow):
         self.query_edit.update_completer_model(completion_words)
 
     def execute_query(self):
-        query = self.query_edit.toPlainText().strip()
-        if not query:
-            return
-        
-        if not self.conn:
-            QMessageBox.warning(self, "No Connection", "No database connection available. Creating an in-memory DuckDB database.")
-            self.conn = duckdb.connect(':memory:')
-            self.current_db_type = 'duckdb'
-            self.db_info_label.setText("Connected to: in-memory DuckDB")
-        
-        # Show loading indicator in status bar
-        self.statusBar().showMessage('Executing query...')
-        
         try:
-            # Reset results title
-            results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
-            if results_title:
-                results_title.setText("RESULTS")
+            query = self.query_edit.toPlainText().strip()
+            if not query:
+                QMessageBox.warning(self, "Empty Query", "Please enter a SQL query to execute.")
+                return
+
+            start_time = datetime.now()
             
-            if self.current_db_type == 'sqlite':
-                # Execute SQLite query and convert to DataFrame
-                result = pd.read_sql_query(query, self.conn)
-            else:
-                # Execute DuckDB query
-                result = self.conn.execute(query).fetchdf()
+            try:
+                if self.current_connection_type == "duckdb":
+                    result = self.conn.execute(query).fetchdf()
+                else:  # sqlite
+                    result = pd.read_sql_query(query, self.conn)
                 
-            self.populate_table(result)
-            
-            # Show success message with query stats
-            execution_time = datetime.now().strftime("%H:%M:%S")
-            row_count = len(result)
-            self.statusBar().showMessage(f'Query executed successfully at {execution_time} - {row_count:,} rows returned')
-            
+                execution_time = (datetime.now() - start_time).total_seconds()
+                self.populate_table(result)
+                self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
+                
+            except (duckdb.Error, sqlite3.Error) as e:
+                error_msg = str(e)
+                if "syntax error" in error_msg.lower():
+                    QMessageBox.critical(self, "SQL Syntax Error", 
+                        f"There is a syntax error in your query:\n\n{error_msg}")
+                elif "no such table" in error_msg.lower():
+                    QMessageBox.critical(self, "Table Not Found", 
+                        f"The referenced table does not exist:\n\n{error_msg}")
+                elif "no such column" in error_msg.lower():
+                    QMessageBox.critical(self, "Column Not Found", 
+                        f"The referenced column does not exist:\n\n{error_msg}")
+                else:
+                    QMessageBox.critical(self, "Database Error", 
+                        f"An error occurred while executing the query:\n\n{error_msg}")
+                self.statusBar().showMessage("Query execution failed")
+                
         except Exception as e:
-            self.results_table.setRowCount(0)
-            self.results_table.setColumnCount(0)
-            self.row_count_label.setText("Error")
-            self.statusBar().showMessage('Error executing query')
-            
-            # Show error message with modern styling
-            error_msg = str(e)
-            if "not found" in error_msg.lower():
-                error_msg += "\nMake sure the table name is correct and the table is loaded."
-            elif "syntax error" in error_msg.lower():
-                error_msg += "\nPlease check your SQL syntax."
-                
-            error_box = QMessageBox(self)
-            error_box.setIcon(QMessageBox.Icon.Critical)
-            error_box.setWindowTitle("Query Error")
-            error_box.setText("Error executing query")
-            error_box.setInformativeText(error_msg)
-            error_box.setDetailedText(f"Query:\n{query}")
-            error_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-            error_box.exec()
+            QMessageBox.critical(self, "Unexpected Error",
+                f"An unexpected error occurred:\n\n{str(e)}")
+            self.statusBar().showMessage("Query execution failed")
 
     def clear_query(self):
         """Clear the query editor with animation"""
@@ -1244,7 +1222,7 @@ class SQLShell(QMainWindow):
         if item:
             table_name = item.text().split(' (')[0]
             try:
-                if self.current_db_type == 'sqlite':
+                if self.current_connection_type == 'sqlite':
                     preview_df = pd.read_sql_query(f'SELECT * FROM "{table_name}" LIMIT 5', self.conn)
                 else:
                     preview_df = self.conn.execute(f'SELECT * FROM {table_name} LIMIT 5').fetchdf()
@@ -1428,6 +1406,20 @@ LIMIT 10
             return
         
         super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        """Ensure proper cleanup of database connections when closing the application"""
+        try:
+            if self.conn:
+                if self.current_connection_type == "duckdb":
+                    self.conn.close()
+                else:  # sqlite
+                    self.conn.close()
+            event.accept()
+        except Exception as e:
+            QMessageBox.warning(self, "Cleanup Warning", 
+                f"Warning: Could not properly close database connection:\n{str(e)}")
+            event.accept()
 
 def main():
     app = QApplication(sys.argv)
