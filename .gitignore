@@ -58,5 +58,5 @@ desktop.ini
 *.manifest
 *.spec 
 *.parquet 
-
+*.sqls
 TODO
