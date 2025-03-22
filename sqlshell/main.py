@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 
 # Ensure proper path setup for resources when running directly
 if __name__ == "__main__":
@@ -15,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
-                           QCheckBox, QWidgetAction)
+                           QCheckBox, QWidgetAction, QMenuBar)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath
 import numpy as np
@@ -836,6 +837,7 @@ class SQLShell(QMainWindow):
         self.table_columns = {}  # Keep track of table columns
         self.current_df = None  # Store the current DataFrame for filtering
         self.filter_widgets = []  # Store filter line edits
+        self.current_project_file = None  # Store the current project file path
         
         # Define color scheme
         self.colors = {
@@ -1014,6 +1016,33 @@ class SQLShell(QMainWindow):
     def init_ui(self):
         self.setWindowTitle('SQL Shell')
         self.setGeometry(100, 100, 1400, 800)
+        
+        # Create menu bar
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu('&File')
+        
+        # Project management actions
+        new_project_action = file_menu.addAction('New Project')
+        new_project_action.setShortcut('Ctrl+N')
+        new_project_action.triggered.connect(self.new_project)
+        
+        open_project_action = file_menu.addAction('Open Project...')
+        open_project_action.setShortcut('Ctrl+O')
+        open_project_action.triggered.connect(self.open_project)
+        
+        save_project_action = file_menu.addAction('Save Project')
+        save_project_action.setShortcut('Ctrl+S')
+        save_project_action.triggered.connect(self.save_project)
+        
+        save_project_as_action = file_menu.addAction('Save Project As...')
+        save_project_as_action.setShortcut('Ctrl+Shift+S')
+        save_project_as_action.triggered.connect(self.save_project_as)
+        
+        file_menu.addSeparator()
+        
+        exit_action = file_menu.addAction('Exit')
+        exit_action.setShortcut('Ctrl+Q')
+        exit_action.triggered.connect(self.close)
         
         # Create custom status bar
         status_bar = QStatusBar()
@@ -1807,6 +1836,21 @@ LIMIT 10
     def closeEvent(self, event):
         """Ensure proper cleanup of database connections when closing the application"""
         try:
+            # Check for unsaved changes
+            if self.has_unsaved_changes():
+                reply = QMessageBox.question(self, 'Save Changes',
+                    'Do you want to save your changes before closing?',
+                    QMessageBox.StandardButton.Save | 
+                    QMessageBox.StandardButton.Discard | 
+                    QMessageBox.StandardButton.Cancel)
+                
+                if reply == QMessageBox.StandardButton.Save:
+                    self.save_project()
+                elif reply == QMessageBox.StandardButton.Cancel:
+                    event.ignore()
+                    return
+            
+            # Close database connections
             if self.conn:
                 if self.current_connection_type == "duckdb":
                     self.conn.close()
@@ -1817,6 +1861,35 @@ LIMIT 10
             QMessageBox.warning(self, "Cleanup Warning", 
                 f"Warning: Could not properly close database connection:\n{str(e)}")
             event.accept()
+
+    def has_unsaved_changes(self):
+        """Check if there are unsaved changes in the project"""
+        if not self.current_project_file:
+            return bool(self.loaded_tables or self.query_edit.toPlainText().strip())
+        
+        try:
+            # Load the last saved state
+            with open(self.current_project_file, 'r') as f:
+                saved_data = json.load(f)
+            
+            # Compare current state with saved state
+            current_data = {
+                'tables': {
+                    name: {
+                        'file_path': path,
+                        'columns': self.table_columns.get(name, [])
+                    }
+                    for name, path in self.loaded_tables.items()
+                },
+                'query': self.query_edit.toPlainText(),
+                'connection_type': self.current_connection_type
+            }
+            
+            return current_data != saved_data
+            
+        except Exception:
+            # If there's any error reading the saved file, assume there are unsaved changes
+            return True
 
     def show_tables_context_menu(self, position):
         """Show context menu for tables list"""
@@ -1861,6 +1934,143 @@ LIMIT 10
             cursor = self.query_edit.textCursor()
             cursor.insertText(table_name)
             self.query_edit.setFocus()
+
+    def new_project(self):
+        """Create a new project by clearing current state"""
+        if self.conn:
+            reply = QMessageBox.question(self, 'New Project',
+                                       'Are you sure you want to start a new project? All unsaved changes will be lost.',
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                # Close existing connection
+                if self.current_connection_type == "duckdb":
+                    self.conn.close()
+                else:  # sqlite
+                    self.conn.close()
+                
+                # Reset state
+                self.conn = None
+                self.current_connection_type = None
+                self.loaded_tables.clear()
+                self.table_columns.clear()
+                self.tables_list.clear()
+                self.query_edit.clear()
+                self.results_table.setRowCount(0)
+                self.results_table.setColumnCount(0)
+                self.current_project_file = None
+                self.setWindowTitle('SQL Shell')
+                self.statusBar().showMessage('New project created')
+
+    def save_project(self):
+        """Save the current project"""
+        if not self.current_project_file:
+            self.save_project_as()
+            return
+            
+        self.save_project_to_file(self.current_project_file)
+
+    def save_project_as(self):
+        """Save the current project to a new file"""
+        file_name, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project",
+            "",
+            "SQL Shell Project (*.sqls);;All Files (*)"
+        )
+        
+        if file_name:
+            if not file_name.endswith('.sqls'):
+                file_name += '.sqls'
+            self.save_project_to_file(file_name)
+            self.current_project_file = file_name
+            self.setWindowTitle(f'SQL Shell - {os.path.basename(file_name)}')
+
+    def save_project_to_file(self, file_name):
+        """Save project data to a file"""
+        try:
+            project_data = {
+                'tables': {},
+                'query': self.query_edit.toPlainText(),
+                'connection_type': self.current_connection_type
+            }
+            
+            # Save table information
+            for table_name, file_path in self.loaded_tables.items():
+                project_data['tables'][table_name] = {
+                    'file_path': file_path,
+                    'columns': self.table_columns.get(table_name, [])
+                }
+            
+            with open(file_name, 'w') as f:
+                json.dump(project_data, f, indent=4)
+                
+            self.statusBar().showMessage(f'Project saved to {file_name}')
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error",
+                f"Failed to save project:\n\n{str(e)}")
+
+    def open_project(self):
+        """Open a project file"""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Project",
+            "",
+            "SQL Shell Project (*.sqls);;All Files (*)"
+        )
+        
+        if file_name:
+            try:
+                with open(file_name, 'r') as f:
+                    project_data = json.load(f)
+                
+                # Start fresh
+                self.new_project()
+                
+                # Create connection if needed
+                if not self.conn:
+                    self.conn = duckdb.connect(':memory:')
+                    self.current_connection_type = 'duckdb'
+                    self.db_info_label.setText("Connected to: in-memory DuckDB")
+                
+                # Load tables
+                for table_name, table_info in project_data['tables'].items():
+                    file_path = table_info['file_path']
+                    if os.path.exists(file_path):
+                        try:
+                            # Load the file based on its extension
+                            if file_path.endswith(('.xlsx', '.xls')):
+                                df = pd.read_excel(file_path)
+                            elif file_path.endswith('.csv'):
+                                df = pd.read_csv(file_path)
+                            elif file_path.endswith('.parquet'):
+                                df = pd.read_parquet(file_path)
+                            else:
+                                continue
+                            
+                            # Register the table
+                            self.conn.register(table_name, df)
+                            self.loaded_tables[table_name] = file_path
+                            self.table_columns[table_name] = table_info['columns']
+                            self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                            
+                        except Exception as e:
+                            QMessageBox.warning(self, "Warning",
+                                f"Failed to load table {table_name} from {file_path}:\n{str(e)}")
+                
+                # Restore query
+                if 'query' in project_data:
+                    self.query_edit.setPlainText(project_data['query'])
+                
+                # Update UI
+                self.current_project_file = file_name
+                self.setWindowTitle(f'SQL Shell - {os.path.basename(file_name)}')
+                self.statusBar().showMessage(f'Project loaded from {file_name}')
+                self.update_completer()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error",
+                    f"Failed to open project:\n\n{str(e)}")
 
 def main():
     app = QApplication(sys.argv)
