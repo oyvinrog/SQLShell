@@ -1,5 +1,11 @@
 import sys
 import os
+
+# Ensure proper path setup for resources when running directly
+if __name__ == "__main__":
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+
 import duckdb
 import sqlite3
 import pandas as pd

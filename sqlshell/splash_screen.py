@@ -7,6 +7,11 @@ class AnimatedSplashScreen(QWidget):
     def __init__(self):
         super().__init__()
         
+        # Initialize properties for animations first
+        self._opacity = 0.0
+        self._progress = 0.0
+        self.next_widget = None
+        
         # Set up the window properties
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
@@ -34,8 +39,14 @@ class AnimatedSplashScreen(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
         
+        # Create background container for the title and subtitle
+        self.content_container = QWidget(self)
+        content_layout = QVBoxLayout(self.content_container)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(10)
+        
         # Create title label
-        self.title_label = QLabel("SQLShell", self)
+        self.title_label = QLabel("SQLShell", self.content_container)
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet("""
             QLabel {
@@ -43,37 +54,79 @@ class AnimatedSplashScreen(QWidget):
                 font-size: 32px;
                 font-weight: bold;
                 font-family: 'Segoe UI', Arial, sans-serif;
+                background: transparent;
             }
         """)
-        layout.addWidget(self.title_label)
+        content_layout.addWidget(self.title_label)
         
         # Create subtitle label
-        self.subtitle_label = QLabel("Loading...", self)
+        self.subtitle_label = QLabel("Loading...", self.content_container)
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitle_label.setStyleSheet("""
             QLabel {
                 color: #2C3E50;
                 font-size: 16px;
                 font-family: 'Segoe UI', Arial, sans-serif;
+                background: transparent;
             }
         """)
-        layout.addWidget(self.subtitle_label)
+        content_layout.addWidget(self.subtitle_label)
         
-        # Initialize properties for animations
-        self._opacity = 0.0
-        self._progress = 0.0
+        # Add content container to main layout
+        layout.addWidget(self.content_container)
         
-        # Start animations when shown
-        self.start_animations()
+        # Create movie label (background)
+        self.movie_label = QLabel(self)
+        self.movie_label.setGeometry(0, 0, self.width(), self.height())
+        self.movie_label.lower()  # Put it at the back
+        
+        # Create overlay for fade effect (between movie and content)
+        self.overlay = QLabel(self)
+        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 0);")
+        self.overlay.setGeometry(0, 0, self.width(), self.height())
+        self.overlay.lower()  # Put it behind the content but above the movie
+        
+        # Create text label for animated text
+        self.text_label = QLabel(self)
+        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.text_label.setStyleSheet("color: rgba(255, 255, 255, 0); background: transparent;")
+        self.text_label.setGeometry(0, 0, self.width(), self.height())
+        self.text_label.lower()  # Put it behind the content
+        
+        # Create progress bar (always on top)
+        self.progress_bar = QLabel(self)
+        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setStyleSheet("background-color: #3498DB; border-radius: 2px;")
+        self.progress_bar.move(100, self.height() - 40)
+        self.progress_bar.setFixedWidth(0)
+        self.progress_bar.raise_()  # Ensure it's on top
+        
+        # Set up the loading animation
+        self.movie = QMovie(os.path.join(os.path.dirname(__file__), "resources", "splash_screen.gif"))
+        self.movie.setScaledSize(self.size())
+        self.movie_label.setMovie(self.movie)
+        
+        # Set up fade animation
+        self.fade_anim = QPropertyAnimation(self, b"opacity")
+        self.fade_anim.setDuration(1000)
+        self.fade_anim.setStartValue(0.0)
+        self.fade_anim.setEndValue(1.0)
+        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
+        # Set up progress animation
+        self.progress_anim = QPropertyAnimation(self, b"progress")
+        self.progress_anim.setDuration(2000)
+        self.progress_anim.setStartValue(0.0)
+        self.progress_anim.setEndValue(1.0)
+        self.progress_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        
+        # Start animations after everything is initialized
+        QTimer.singleShot(100, self.start_animations)  # Small delay to ensure everything is ready
 
     def start_animations(self):
         """Start all animations"""
-        print("Starting animations...")
         self.movie.start()
-        print(f"Movie state: {self.movie.state()}")
-        print(f"Starting fade animation from {self.fade_anim.startValue()} to {self.fade_anim.endValue()}")
         self.fade_anim.start()
-        print(f"Starting progress animation from {self.progress_anim.startValue()} to {self.progress_anim.endValue()}")
         self.progress_anim.start()
         self.progress_anim.finished.connect(self._on_animation_finished)
 
