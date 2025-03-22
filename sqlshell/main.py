@@ -1258,6 +1258,12 @@ class SQLShell(QMainWindow):
     def load_test_data(self):
         """Generate and load test data"""
         try:
+            # Ensure we have a DuckDB connection
+            if not self.conn or self.current_connection_type != 'duckdb':
+                self.conn = duckdb.connect(':memory:')
+                self.current_connection_type = 'duckdb'
+                self.db_info_label.setText("Connected to: in-memory DuckDB")
+
             # Show loading indicator
             self.statusBar().showMessage('Generating test data...')
             
