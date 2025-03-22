@@ -1218,13 +1218,8 @@ class SQLShell(QMainWindow):
         self.export_parquet_btn.setIcon(QIcon.fromTheme("document-save"))
         self.export_parquet_btn.clicked.connect(self.export_to_parquet)
         
-        self.export_table_btn = QPushButton('Export to New Table')
-        self.export_table_btn.setIcon(QIcon.fromTheme("table"))
-        self.export_table_btn.clicked.connect(self.export_to_table)
-        
         export_layout.addWidget(self.export_excel_btn)
         export_layout.addWidget(self.export_parquet_btn)
-        export_layout.addWidget(self.export_table_btn)
         
         results_header_layout.addLayout(export_layout)
         results_layout.addLayout(results_header_layout)
@@ -1811,78 +1806,6 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
             self.statusBar().showMessage('Error exporting data')
-
-    def export_to_table(self):
-        """Export the current results to a new table in the database"""
-        if self.results_table.rowCount() == 0:
-            QMessageBox.warning(self, "No Data", "There is no data to export.")
-            return
-            
-        if not self.conn:
-            QMessageBox.warning(self, "No Connection", "Please connect to a database first.")
-            return
-            
-        # Get table name from user
-        table_name, ok = QInputDialog.getText(
-            self, 
-            "Export to Table",
-            "Enter new table name:",
-            QLineEdit.EchoMode.Normal
-        )
-        
-        if not ok or not table_name:
-            return
-            
-        # Sanitize table name
-        table_name = self.sanitize_table_name(table_name)
-        
-        try:
-            # Check if table already exists
-            if table_name in self.loaded_tables:
-                reply = QMessageBox.question(
-                    self,
-                    "Table Exists",
-                    f"Table '{table_name}' already exists. Do you want to replace it?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply == QMessageBox.StandardButton.No:
-                    return
-            
-            # Show loading indicator
-            self.statusBar().showMessage('Creating new table...')
-            
-            # Convert table data to DataFrame
-            df = self.get_table_data_as_dataframe()
-            
-            # Create the table based on database type
-            if self.current_connection_type == 'sqlite':
-                df.to_sql(table_name, self.conn, index=False, if_exists='replace')
-            else:  # duckdb
-                self.conn.register(table_name, df)
-            
-            # Update loaded tables tracking
-            self.loaded_tables[table_name] = 'query_result'
-            self.table_columns[table_name] = df.columns.tolist()
-            
-            # Update UI
-            self.tables_list.addItem(f"{table_name} (query result)")
-            
-            # Update completer
-            self.update_completer()
-            
-            self.statusBar().showMessage(f'Created new table: {table_name}')
-            
-            # Show success message
-            QMessageBox.information(
-                self,
-                "Export Successful",
-                f"Query results have been exported to table:\n{table_name}",
-                QMessageBox.StandardButton.Ok
-            )
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create table: {str(e)}")
-            self.statusBar().showMessage('Error creating table')
 
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame"""
