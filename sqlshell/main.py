@@ -1764,13 +1764,36 @@ LIMIT 10
             df = self.get_table_data_as_dataframe()
             df.to_excel(file_name, index=False)
             
-            self.statusBar().showMessage(f'Data exported to {file_name}')
+            # Generate table name from file name
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            table_name = self.sanitize_table_name(base_name)
+            
+            # Ensure unique table name
+            original_name = table_name
+            counter = 1
+            while table_name in self.loaded_tables:
+                table_name = f"{original_name}_{counter}"
+                counter += 1
+            
+            # Register the table in DuckDB
+            self.conn.register(table_name, df)
+            
+            # Update tracking
+            self.loaded_tables[table_name] = file_name
+            self.table_columns[table_name] = df.columns.tolist()
+            
+            # Update UI
+            self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
+            self.statusBar().showMessage(f'Data exported to {file_name} and loaded as table "{table_name}"')
+            
+            # Update completer with new table and column names
+            self.update_completer()
             
             # Show success message
             QMessageBox.information(
                 self, 
                 "Export Successful", 
-                f"Data has been exported to:\n{file_name}",
+                f"Data has been exported to:\n{file_name}\nand loaded as table: {table_name}",
                 QMessageBox.StandardButton.Ok
             )
         except Exception as e:
@@ -1794,13 +1817,36 @@ LIMIT 10
             df = self.get_table_data_as_dataframe()
             df.to_parquet(file_name, index=False)
             
-            self.statusBar().showMessage(f'Data exported to {file_name}')
+            # Generate table name from file name
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            table_name = self.sanitize_table_name(base_name)
+            
+            # Ensure unique table name
+            original_name = table_name
+            counter = 1
+            while table_name in self.loaded_tables:
+                table_name = f"{original_name}_{counter}"
+                counter += 1
+            
+            # Register the table in DuckDB
+            self.conn.register(table_name, df)
+            
+            # Update tracking
+            self.loaded_tables[table_name] = file_name
+            self.table_columns[table_name] = df.columns.tolist()
+            
+            # Update UI
+            self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
+            self.statusBar().showMessage(f'Data exported to {file_name} and loaded as table "{table_name}"')
+            
+            # Update completer with new table and column names
+            self.update_completer()
             
             # Show success message
             QMessageBox.information(
                 self, 
                 "Export Successful", 
-                f"Data has been exported to:\n{file_name}",
+                f"Data has been exported to:\n{file_name}\nand loaded as table: {table_name}",
                 QMessageBox.StandardButton.Ok
             )
         except Exception as e:
