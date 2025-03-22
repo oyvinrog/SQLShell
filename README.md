@@ -13,41 +13,26 @@ A GUI application that provides a SQL REPL interface for querying Excel and parq
 - Results displayed in a clear, tabular format
 - Keyboard shortcuts (Ctrl+Enter to execute queries)
 
-## Installation
+## Installation and Setup
 
-### Simple Installation (Recommended)
+### Using Virtual Environment (Linux)
 ```bash
+# Create and activate virtual environment
+python3 -m venv ~/.venv/sqlshell
+source ~/.venv/sqlshell/bin/activate
+
+# Install SQLShell
 pip install sqlshell
+
+# Add alias to your shell configuration (~/.bashrc or ~/.zshrc)
+echo 'alias sqls="~/.venv/sqlshell/bin/sqls"' >> ~/.bashrc  # or ~/.zshrc for Zsh users
+source ~/.bashrc  # or source ~/.zshrc
 ```
 
-After installation, you can run SQLShell by typing:
-```bash
-sqls
-```
+That's it! Now you can use `sqls` from anywhere.
 
-### Windows Users - Important Notes
-
-- **Python 3.13+**: The simple installation method above works best with Python 3.13 or newer on Windows
-- **Older Python Versions**: If you encounter an error message about "dtype size changed" when running `sqls`, you have two options:
-
-  1. **Upgrade Python** (Recommended):
-     - Download and install the latest Python version from [python.org](https://www.python.org/downloads/)
-     - Reinstall SQLShell using pip
-
-  2. **Use a Virtual Environment**:
-     ```bash
-     # Create a virtual environment
-     python -m venv venv
-     
-     # Activate it (Windows)
-     venv\Scripts\activate
-     
-     # Install SQLShell
-     pip install sqlshell
-     
-     # Run SQLShell
-     sqls
-     ```
+### Quick Install (Windows)
+On Windows, after running `pip install sqlshell`, the `sqls` command will be available immediately in any terminal.
 
 ## Usage
 
@@ -81,5 +66,5 @@ create or replace temporary view test_v as
 select * from sample_sales_data cd
 inner join product_catalog pc on pc.productid = cd.productid;
 
-select distinct productid from test_v ;
+select distinct productid from test_v;
 ```
