@@ -1,0 +1,1 @@
+# SQLShell resources package initialization 

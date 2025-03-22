@@ -9,11 +9,12 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar)
-from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap
 import numpy as np
 from datetime import datetime
-from sqlshell import create_test_data  # Import from the correct location
+from sqlshell import create_test_data
+from sqlshell.splash_screen import AnimatedSplashScreen
 
 class SQLSyntaxHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
@@ -1455,18 +1456,32 @@ def main():
     default_font = QFont("Segoe UI", 10)
     app.setFont(default_font)
     
-    # Create and show the application
+    # Get the absolute path to the splash screen GIF
+    splash_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "resources", "splash_screen.gif"))
+    print(f"Splash screen path: {splash_path}")  # Debug print
+    
+    # Create and show splash screen
+    splash = AnimatedSplashScreen(splash_path)
+    splash.show()
+    
+    # Create the main application window
     sql_shell = SQLShell()
     
     # Set application icon (if available)
     try:
-        app_icon = QIcon("sqlshell/resources/icon.png")
+        app_icon = QIcon(os.path.join(os.path.dirname(__file__), "resources", "icon.png"))
         sql_shell.setWindowIcon(app_icon)
     except:
         # If icon not found, continue without it
         pass
     
-    sql_shell.show()
+    # Use timer to ensure splash screen shows for at least 2 seconds
+    def show_main_window():
+        sql_shell.show()
+        splash.finish(sql_shell)
+    
+    QTimer.singleShot(2000, show_main_window)  # Show splash for 2 seconds
+    
     sys.exit(app.exec())
 
 if __name__ == '__main__':
