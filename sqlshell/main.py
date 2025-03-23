@@ -480,6 +480,11 @@ class SQLShell(QMainWindow):
         self.current_df = None  # Store the current DataFrame for filtering
         self.filter_widgets = []  # Store filter line edits
         self.current_project_file = None  # Store the current project file path
+        self.recent_projects = []  # Store list of recent projects
+        self.max_recent_projects = 10  # Maximum number of recent projects to track
+        
+        # Load recent projects from settings
+        self.load_recent_projects()
         
         # Define color scheme
         self.colors = {
@@ -671,6 +676,10 @@ class SQLShell(QMainWindow):
         open_project_action = file_menu.addAction('Open Project...')
         open_project_action.setShortcut('Ctrl+O')
         open_project_action.triggered.connect(self.open_project)
+        
+        # Add Recent Projects submenu
+        self.recent_projects_menu = file_menu.addMenu('Recent Projects')
+        self.update_recent_projects_menu()
         
         save_project_action = file_menu.addAction('Save Project')
         save_project_action.setShortcut('Ctrl+S')
@@ -1735,20 +1744,24 @@ LIMIT 10
             with open(file_name, 'w') as f:
                 json.dump(project_data, f, indent=4)
                 
+            # Add to recent projects
+            self.add_recent_project(os.path.abspath(file_name))
+                
             self.statusBar().showMessage(f'Project saved to {file_name}')
             
         except Exception as e:
             QMessageBox.critical(self, "Error",
                 f"Failed to save project:\n\n{str(e)}")
 
-    def open_project(self):
+    def open_project(self, file_name=None):
         """Open a project file"""
-        file_name, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open Project",
-            "",
-            "SQL Shell Project (*.sqls);;All Files (*)"
-        )
+        if not file_name:
+            file_name, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open Project",
+                "",
+                "SQL Shell Project (*.sqls);;All Files (*)"
+            )
         
         if file_name:
             try:
@@ -1815,6 +1828,10 @@ LIMIT 10
                 # Update UI
                 self.current_project_file = file_name
                 self.setWindowTitle(f'SQL Shell - {os.path.basename(file_name)}')
+                
+                # Add to recent projects
+                self.add_recent_project(os.path.abspath(file_name))
+                
                 self.statusBar().showMessage(f'Project loaded from {file_name}')
                 self.update_completer()
                 
@@ -1856,6 +1873,78 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to rename table:\n\n{str(e)}")
             return False
+
+    def load_recent_projects(self):
+        """Load recent projects from settings file"""
+        try:
+            settings_file = os.path.join(os.path.expanduser('~'), '.sqlshell_settings.json')
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                    self.recent_projects = settings.get('recent_projects', [])
+        except Exception:
+            self.recent_projects = []
+
+    def save_recent_projects(self):
+        """Save recent projects to settings file"""
+        try:
+            settings_file = os.path.join(os.path.expanduser('~'), '.sqlshell_settings.json')
+            settings = {}
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+            settings['recent_projects'] = self.recent_projects
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            print(f"Error saving recent projects: {e}")
+
+    def add_recent_project(self, project_path):
+        """Add a project to recent projects list"""
+        if project_path in self.recent_projects:
+            self.recent_projects.remove(project_path)
+        self.recent_projects.insert(0, project_path)
+        self.recent_projects = self.recent_projects[:self.max_recent_projects]
+        self.save_recent_projects()
+        self.update_recent_projects_menu()
+
+    def update_recent_projects_menu(self):
+        """Update the recent projects menu"""
+        self.recent_projects_menu.clear()
+        
+        if not self.recent_projects:
+            no_recent = self.recent_projects_menu.addAction("No Recent Projects")
+            no_recent.setEnabled(False)
+            return
+            
+        for project_path in self.recent_projects:
+            if os.path.exists(project_path):
+                action = self.recent_projects_menu.addAction(os.path.basename(project_path))
+                action.setData(project_path)
+                action.triggered.connect(lambda checked, path=project_path: self.open_recent_project(path))
+        
+        if self.recent_projects:
+            self.recent_projects_menu.addSeparator()
+            clear_action = self.recent_projects_menu.addAction("Clear Recent Projects")
+            clear_action.triggered.connect(self.clear_recent_projects)
+
+    def open_recent_project(self, project_path):
+        """Open a project from the recent projects list"""
+        if os.path.exists(project_path):
+            self.current_project_file = project_path
+            self.open_project(project_path)
+        else:
+            QMessageBox.warning(self, "Warning",
+                f"Project file not found:\n{project_path}")
+            self.recent_projects.remove(project_path)
+            self.save_recent_projects()
+            self.update_recent_projects_menu()
+
+    def clear_recent_projects(self):
+        """Clear the list of recent projects"""
+        self.recent_projects.clear()
+        self.save_recent_projects()
+        self.update_recent_projects_menu()
 
 def main():
     app = QApplication(sys.argv)
