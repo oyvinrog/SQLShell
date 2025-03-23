@@ -1615,6 +1615,10 @@ LIMIT 10
         # Add menu actions
         select_from_action = context_menu.addAction("Select from")
         add_to_editor_action = context_menu.addAction("Just add to editor")
+        context_menu.addSeparator()
+        rename_action = context_menu.addAction("Rename table...")
+        delete_action = context_menu.addAction("Delete table")
+        delete_action.setIcon(QIcon.fromTheme("edit-delete"))
 
         # Show menu and get selected action
         action = context_menu.exec(self.tables_list.mapToGlobal(position))
@@ -1629,6 +1633,31 @@ LIMIT 10
             cursor = self.query_edit.textCursor()
             cursor.insertText(table_name)
             self.query_edit.setFocus()
+        elif action == rename_action:
+            # Show rename dialog
+            new_name, ok = QInputDialog.getText(
+                self,
+                "Rename Table",
+                "Enter new table name:",
+                QLineEdit.EchoMode.Normal,
+                table_name
+            )
+            if ok and new_name:
+                if self.rename_table(table_name, new_name):
+                    # Update the item text
+                    source = item.text().split(' (')[1][:-1]  # Get the source part
+                    item.setText(f"{new_name} ({source})")
+                    self.statusBar().showMessage(f'Table renamed to "{new_name}"')
+        elif action == delete_action:
+            # Show confirmation dialog
+            reply = QMessageBox.question(
+                self,
+                "Delete Table",
+                f"Are you sure you want to delete table '{table_name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.remove_selected_table()
 
     def new_project(self):
         """Create a new project by clearing current state"""
@@ -1792,6 +1821,41 @@ LIMIT 10
             except Exception as e:
                 QMessageBox.critical(self, "Error",
                     f"Failed to open project:\n\n{str(e)}")
+
+    def rename_table(self, old_name, new_name):
+        """Rename a table in the database and update tracking"""
+        try:
+            # Sanitize the new name
+            new_name = self.sanitize_table_name(new_name)
+            
+            # Check if new name already exists
+            if new_name in self.loaded_tables:
+                raise ValueError(f"Table '{new_name}' already exists")
+                
+            # Rename in database
+            if self.current_connection_type == 'sqlite':
+                self.conn.execute(f'ALTER TABLE "{old_name}" RENAME TO "{new_name}"')
+            else:  # duckdb
+                # For DuckDB, we need to:
+                # 1. Get the data from the old view/table
+                df = self.conn.execute(f'SELECT * FROM {old_name}').fetchdf()
+                # 2. Drop the old view
+                self.conn.execute(f'DROP VIEW IF EXISTS {old_name}')
+                # 3. Register the data under the new name
+                self.conn.register(new_name, df)
+            
+            # Update tracking
+            self.loaded_tables[new_name] = self.loaded_tables.pop(old_name)
+            self.table_columns[new_name] = self.table_columns.pop(old_name)
+            
+            # Update completer
+            self.update_completer()
+            
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to rename table:\n\n{str(e)}")
+            return False
 
 def main():
     app = QApplication(sys.argv)
