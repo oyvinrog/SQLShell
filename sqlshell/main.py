@@ -1843,19 +1843,12 @@ class SQLShell(QMainWindow):
             # Set the sample query
             sample_query = """
 SELECT 
-    s.orderid,
-    s.orderdate,
-    c.customername,
-    p.productname,
-    s.quantity,
-    s.unitprice,
-    (s.quantity * s.unitprice) AS total_amount
+    DISTINCT
+    c.customername     
 FROM 
     sample_sales_data s
     INNER JOIN customer_data c ON c.customerid = s.customerid
     INNER JOIN product_catalog p ON p.productid = s.productid
-ORDER BY 
-    s.orderdate DESC
 LIMIT 10
 """
             self.query_edit.setPlainText(sample_query.strip())

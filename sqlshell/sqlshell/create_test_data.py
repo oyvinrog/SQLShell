@@ -110,28 +110,9 @@ if __name__ == '__main__':
     print(f"Number of products: {len(product_df)}")
     
     # Print sample queries
-    print("\nSample SQL queries for joining the data:")
+    print("\nSample SQL queries")
     print("""
-    -- Join sales with customer data
-    SELECT s.*, c.FirstName, c.LastName, c.CustomerType
-    FROM test_data.sample_sales_data s
-    JOIN test_data.customer_data c ON s.CustomerID = c.CustomerID;
-    
-    -- Join sales with product data
-    SELECT s.*, p.ProductName, p.Category, p.Brand
-    FROM test_data.sample_sales_data s
-    JOIN test_data.product_catalog p ON s.ProductID = p.ProductID;
-    
-    -- Three-way join with aggregation
-    SELECT 
-        p.Category,
-        c.CustomerType,
-        COUNT(*) as NumOrders,
-        SUM(s.TotalAmount) as TotalRevenue,
-        AVG(s.Quantity) as AvgQuantity
-    FROM test_data.sample_sales_data s
-    JOIN test_data.customer_data c ON s.CustomerID = c.CustomerID
-    JOIN test_data.product_catalog p ON s.ProductID = p.ProductID
-    GROUP BY p.Category, c.CustomerType
-    ORDER BY p.Category, c.CustomerType;
+    select * from product_catalog;
+    select * from customer_data;
+    select * from sample_sales_data;
     """) 
