@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
-                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog)
+                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog, QProgressDialog)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath
 import numpy as np
@@ -699,14 +699,70 @@ class SQLShell(QMainWindow):
             self.statusBar().showMessage("Error opening database")
 
     def update_completer(self):
-        """Update the completer with table and column names"""
-        # Get completion words from the database manager
-        completion_words = self.db_manager.get_all_table_columns()
-        
-        # Update the completer in all tab query editors
-        for i in range(self.tab_widget.count()):
-            tab = self.tab_widget.widget(i)
-            tab.query_edit.update_completer_model(completion_words)
+        """Update the completer with table and column names in a non-blocking way"""
+        try:
+            # Check if any tabs exist
+            if self.tab_widget.count() == 0:
+                return
+            
+            # Start a background update with a timer
+            self.statusBar().showMessage("Updating auto-completion...", 2000)
+            
+            # Get completion words from the database manager
+            completion_words = self.db_manager.get_all_table_columns()
+            
+            # Limit to a reasonable number of items to prevent performance issues
+            MAX_COMPLETION_ITEMS = 1000
+            if len(completion_words) > MAX_COMPLETION_ITEMS:
+                # If too many items, prioritize table names and common SQL keywords
+                tables = list(self.db_manager.loaded_tables.keys())
+                # Sort by priority: tables first, then limit to max items
+                completion_words = sorted(completion_words, 
+                    key=lambda w: (0 if w in tables else 1, w))[:MAX_COMPLETION_ITEMS]
+            
+            # Use a single model for all tabs to save memory and improve performance
+            model = QStringListModel(completion_words)
+            
+            # Only update the current tab immediately
+            current_index = self.tab_widget.currentIndex()
+            if current_index >= 0:
+                current_tab = self.tab_widget.widget(current_index)
+                if current_tab:
+                    current_tab.query_edit.update_completer_model(model)
+            
+            # Schedule other tab updates with progressive delays
+            if self.tab_widget.count() > 1:
+                # Calculate a reasonable maximum delay (ms)
+                max_delay = min(500, 50 * self.tab_widget.count())
+                
+                # Schedule updates for other tabs with increasing delays
+                for i in range(self.tab_widget.count()):
+                    if i != current_index:
+                        tab = self.tab_widget.widget(i)
+                        delay = int((i + 1) / self.tab_widget.count() * max_delay)
+                        
+                        timer = QTimer()
+                        timer.setSingleShot(True)
+                        # Use a lambda with default arguments to avoid closure issues
+                        timer.timeout.connect(
+                            lambda tab=tab, model=model: self._update_tab_completer(tab, model))
+                        timer.start(delay)
+            
+            # Process events to keep UI responsive
+            QApplication.processEvents()
+            
+        except Exception as e:
+            # Catch any errors to prevent hanging
+            self.statusBar().showMessage(f"Auto-completion update error: {str(e)}", 2000)
+
+    def _update_tab_completer(self, tab, model):
+        """Helper method to update a tab's completer with the given model"""
+        if tab and not tab.isHidden():  # Only update visible tabs
+            try:
+                tab.query_edit.update_completer_model(model)
+                QApplication.processEvents()  # Keep UI responsive
+            except Exception:
+                pass  # Ignore errors in background updates
 
     def execute_query(self):
         try:
@@ -1293,19 +1349,47 @@ LIMIT 10
         
         if file_name:
             try:
+                # Create a progress dialog to keep UI responsive
+                progress = QProgressDialog("Loading project...", "Cancel", 0, 100, self)
+                progress.setWindowTitle("Opening Project")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.setMinimumDuration(500)  # Show after 500ms delay
+                progress.setValue(0)
+                
+                # Load project data
                 with open(file_name, 'r') as f:
                     project_data = json.load(f)
                 
+                # Update progress
+                progress.setValue(10)
+                QApplication.processEvents()
+                
                 # Start fresh
                 self.new_project()
+                progress.setValue(20)
+                QApplication.processEvents()
                 
                 # Create connection if needed
                 if not self.db_manager.is_connected():
                     connection_info = self.db_manager.create_memory_connection()
                     self.db_info_label.setText(connection_info)
                 
+                progress.setValue(30)
+                QApplication.processEvents()
+                
+                # Calculate progress steps for loading tables
+                table_count = len(project_data.get('tables', {}))
+                table_progress_start = 30
+                table_progress_end = 70
+                table_progress_step = (table_progress_end - table_progress_start) / max(1, table_count)
+                current_progress = table_progress_start
+                
                 # Load tables
-                for table_name, table_info in project_data['tables'].items():
+                for table_name, table_info in project_data.get('tables', {}).items():
+                    if progress.wasCanceled():
+                        break
+                        
+                    progress.setLabelText(f"Loading table: {table_name}")
                     file_path = table_info['file_path']
                     try:
                         if file_path == 'database':
@@ -1323,8 +1407,8 @@ LIMIT 10
                         elif os.path.exists(file_path):
                             # Use the database manager to load the file
                             try:
-                                table_name, df = self.db_manager.load_file(file_path)
-                                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                                loaded_table_name, df = self.db_manager.load_file(file_path)
+                                self.tables_list.addItem(f"{loaded_table_name} ({os.path.basename(file_path)})")
                             except Exception as e:
                                 QMessageBox.warning(self, "Warning",
                                     f"Failed to load file for table {table_name}:\n{str(e)}")
@@ -1334,22 +1418,89 @@ LIMIT 10
                                 f"Could not find file for table {table_name}: {file_path}")
                             continue
                             
-                        # The columns are already set by the database manager
-                            
                     except Exception as e:
                         QMessageBox.warning(self, "Warning",
                             f"Failed to load table {table_name}:\n{str(e)}")
                 
-                # Load tabs
+                    # Update progress for this table
+                    current_progress += table_progress_step
+                    progress.setValue(int(current_progress))
+                    QApplication.processEvents()  # Keep UI responsive
+                
+                # Check if the operation was canceled
+                if progress.wasCanceled():
+                    self.statusBar().showMessage("Project loading was canceled")
+                    progress.close()
+                    return
+                
+                progress.setValue(75)
+                progress.setLabelText("Setting up tabs...")
+                QApplication.processEvents()
+                
+                # Load tabs in a more efficient way
                 if 'tabs' in project_data and project_data['tabs']:
-                    # Remove the default tab
-                    while self.tab_widget.count() > 0:
-                        self.close_tab(0)
+                    try:
+                        # Temporarily disable signals
+                        self.tab_widget.blockSignals(True)
                         
-                    # Create tabs from saved data
-                    for tab_data in project_data['tabs']:
-                        tab = self.add_tab(tab_data.get('title', 'Query'))
-                        tab.set_query_text(tab_data.get('query', ''))
+                        # First, pre-remove any existing tabs
+                        while self.tab_widget.count() > 0:
+                            widget = self.tab_widget.widget(0)
+                            self.tab_widget.removeTab(0)
+                            if widget in self.tabs:
+                                self.tabs.remove(widget)
+                            widget.deleteLater()
+                        
+                        # Then create all tab widgets at once (empty)
+                        tab_count = len(project_data['tabs'])
+                        tab_progress_step = 15 / max(1, tab_count)
+                        progress.setValue(80)
+                        QApplication.processEvents()
+                        
+                        # Create all tab widgets first without setting content
+                        for i, tab_data in enumerate(project_data['tabs']):
+                            # Create a new tab
+                            tab = QueryTab(self)
+                            self.tabs.append(tab)
+                            
+                            # Add to tab widget
+                            title = tab_data.get('title', f'Query {i+1}')
+                            self.tab_widget.addTab(tab, title)
+                            
+                            progress.setValue(int(80 + i * tab_progress_step/2))
+                            QApplication.processEvents()
+                        
+                        # Now set the content for each tab
+                        for i, tab_data in enumerate(project_data['tabs']):
+                            # Get the tab and set its query text
+                            tab = self.tab_widget.widget(i)
+                            if tab and 'query' in tab_data:
+                                tab.set_query_text(tab_data['query'])
+                            
+                            progress.setValue(int(87 + i * tab_progress_step/2))
+                            QApplication.processEvents()
+                        
+                        # Re-enable signals
+                        self.tab_widget.blockSignals(False)
+                        
+                        # Set current tab
+                        if self.tab_widget.count() > 0:
+                            self.tab_widget.setCurrentIndex(0)
+                            
+                    except Exception as e:
+                        # If there's an error, ensure we restore signals
+                        self.tab_widget.blockSignals(False)
+                        self.statusBar().showMessage(f"Error loading tabs: {str(e)}")
+                        # Create a single default tab if all fails
+                        if self.tab_widget.count() == 0:
+                            self.add_tab()
+                else:
+                    # Create default tab if no tabs in project
+                    self.add_tab()
+                
+                progress.setValue(90)
+                progress.setLabelText("Finishing up...")
+                QApplication.processEvents()
                 
                 # Update UI
                 self.current_project_file = file_name
@@ -1358,8 +1509,22 @@ LIMIT 10
                 # Add to recent projects
                 self.add_recent_project(os.path.abspath(file_name))
                 
+                # Defer the auto-completer update to after loading is complete
+                # This helps prevent UI freezing during project loading
+                progress.setValue(95)
+                QApplication.processEvents()
+                
+                # Use a timer to update the completer after the UI is responsive
+                complete_timer = QTimer()
+                complete_timer.setSingleShot(True)
+                complete_timer.timeout.connect(self.update_completer)
+                complete_timer.start(100)  # Short delay before updating completer
+                
+                progress.setValue(100)
+                QApplication.processEvents()
+                
                 self.statusBar().showMessage(f'Project loaded from {file_name}')
-                self.update_completer()
+                progress.close()
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error",
@@ -1462,19 +1627,19 @@ LIMIT 10
         # Create a new tab with a unique name if needed
         if title == "Query 1" and self.tab_widget.count() > 0:
             # Generate a unique tab name (Query 2, Query 3, etc.)
+            # Use a more efficient approach to find a unique name
             base_name = "Query"
+            existing_names = set()
+            
+            # Collect existing tab names first (more efficient than checking each time)
+            for i in range(self.tab_widget.count()):
+                existing_names.add(self.tab_widget.tabText(i))
+            
+            # Find the next available number
             counter = 1
-            while True:
+            while f"{base_name} {counter}" in existing_names:
                 counter += 1
-                test_name = f"{base_name} {counter}"
-                found = False
-                for i in range(self.tab_widget.count()):
-                    if self.tab_widget.tabText(i) == test_name:
-                        found = True
-                        break
-                if not found:
-                    title = test_name
-                    break
+            title = f"{base_name} {counter}"
         
         # Create the tab content
         tab = QueryTab(self)
@@ -1482,12 +1647,21 @@ LIMIT 10
         # Add to our list of tabs
         self.tabs.append(tab)
         
+        # Block signals temporarily to improve performance when adding many tabs
+        was_blocked = self.tab_widget.blockSignals(True)
+        
         # Add tab to widget
         index = self.tab_widget.addTab(tab, title)
         self.tab_widget.setCurrentIndex(index)
         
+        # Restore signals
+        self.tab_widget.blockSignals(was_blocked)
+        
         # Focus the new tab's query editor
         tab.query_edit.setFocus()
+        
+        # Process events to keep UI responsive
+        QApplication.processEvents()
         
         return tab
     
@@ -1540,21 +1714,32 @@ LIMIT 10
         if self.tab_widget.count() <= 1:
             # Don't close the last tab, just clear it
             tab = self.get_tab_at_index(index)
-            tab.set_query_text("")
-            tab.results_table.setRowCount(0)
-            tab.results_table.setColumnCount(0)
+            if tab:
+                tab.set_query_text("")
+                tab.results_table.clearContents()
+                tab.results_table.setRowCount(0)
+                tab.results_table.setColumnCount(0)
             return
             
+        # Block signals temporarily to improve performance when removing multiple tabs
+        was_blocked = self.tab_widget.blockSignals(True)
+        
         # Remove the tab
         widget = self.tab_widget.widget(index)
         self.tab_widget.removeTab(index)
+        
+        # Restore signals
+        self.tab_widget.blockSignals(was_blocked)
         
         # Remove from our list of tabs
         if widget in self.tabs:
             self.tabs.remove(widget)
         
-        # Delete the widget to free resources
+        # Schedule the widget for deletion instead of immediate deletion
         widget.deleteLater()
+        
+        # Process events to keep UI responsive
+        QApplication.processEvents()
     
     def close_current_tab(self):
         """Close the current tab"""

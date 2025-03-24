@@ -72,15 +72,30 @@ class SQLEditor(QPlainTextEdit):
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.completer.activated.connect(self.insert_completion)
         
-    def update_completer_model(self, words):
-        """Update the completer model with new words"""
+    def update_completer_model(self, words_or_model):
+        """Update the completer model with new words or a new model
+        
+        Args:
+            words_or_model: Either a list of words or a QStringListModel
+        """
         if not self.completer:
             return
-            
-        # Combine SQL keywords with table/column names
-        all_words = self.sql_keywords + words
         
-        # Create a model with all words
+        # If a model is passed directly, use it
+        if isinstance(words_or_model, QStringListModel):
+            self.completer.setModel(words_or_model)
+            return
+        
+        # Otherwise, combine SQL keywords with table/column names and create a new model
+        # Use set operations for efficiency
+        words_set = set(words_or_model)  # Remove duplicates
+        sql_keywords_set = set(self.sql_keywords)
+        all_words = list(sql_keywords_set.union(words_set))
+        
+        # Sort the combined words for better autocomplete experience
+        all_words.sort(key=lambda x: (not x.isupper(), x))  # Prioritize SQL keywords (all uppercase)
+        
+        # Create an optimized model with all words
         model = QStringListModel()
         model.setStringList(all_words)
         

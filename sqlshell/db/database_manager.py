@@ -204,11 +204,57 @@ class DatabaseManager:
             ValueError: If the file format is unsupported or there's an error
         """
         try:
-            # Read the file into a DataFrame
+            # Read the file into a DataFrame, using optimized loading strategies
             if file_path.endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(file_path)
+                # Try to use a streaming approach for Excel files
+                try:
+                    # For Excel files, we first check if it's a large file
+                    # If it's large, we may want to show only a subset
+                    excel_file = pd.ExcelFile(file_path)
+                    sheet_name = excel_file.sheet_names[0]  # Default to first sheet
+                    
+                    # Read the first row to get column names
+                    df_preview = pd.read_excel(excel_file, sheet_name=sheet_name, nrows=5)
+                    
+                    # If the file is very large, use chunksize
+                    file_size = os.path.getsize(file_path) / (1024 * 1024)  # Size in MB
+                    
+                    if file_size > 50:  # If file is larger than 50MB
+                        # Use a limited subset for large files to avoid memory issues
+                        df = pd.read_excel(excel_file, sheet_name=sheet_name, nrows=100000)  # Cap at 100k rows
+                    else:
+                        # For smaller files, read everything
+                        df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                except Exception:
+                    # Fallback to standard reading method
+                    df = pd.read_excel(file_path)
             elif file_path.endswith('.csv'):
-                df = pd.read_csv(file_path)
+                # For CSV files, we can use chunking for large files
+                try:
+                    # Check if it's a large file
+                    file_size = os.path.getsize(file_path) / (1024 * 1024)  # Size in MB
+                    
+                    if file_size > 50:  # If file is larger than 50MB
+                        # Read the first chunk to get column types
+                        df_preview = pd.read_csv(file_path, nrows=1000)
+                        
+                        # Use optimized dtypes for better memory usage
+                        dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
+                        
+                        # Read again with chunk processing, combining up to 100k rows
+                        chunks = []
+                        for chunk in pd.read_csv(file_path, dtype=dtypes, chunksize=10000):
+                            chunks.append(chunk)
+                            if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
+                                break
+                        
+                        df = pd.concat(chunks, ignore_index=True)
+                    else:
+                        # For smaller files, read everything at once
+                        df = pd.read_csv(file_path)
+                except Exception:
+                    # Fallback to standard reading method
+                    df = pd.read_csv(file_path)
             elif file_path.endswith('.parquet'):
                 df = pd.read_parquet(file_path)
             else:
@@ -232,7 +278,19 @@ class DatabaseManager:
             # Handle table creation based on database type
             if self.connection_type == 'sqlite':
                 # For SQLite, create a table from the DataFrame
-                df.to_sql(table_name, self.conn, index=False, if_exists='replace')
+                # For large dataframes, use a chunked approach to avoid memory issues
+                if len(df) > 10000:
+                    # Create the table with the first chunk
+                    df.iloc[:1000].to_sql(table_name, self.conn, index=False, if_exists='replace')
+                    
+                    # Append the rest in chunks
+                    chunk_size = 5000
+                    for i in range(1000, len(df), chunk_size):
+                        end = min(i + chunk_size, len(df))
+                        df.iloc[i:end].to_sql(table_name, self.conn, index=False, if_exists='append')
+                else:
+                    # For smaller dataframes, do it in one go
+                    df.to_sql(table_name, self.conn, index=False, if_exists='replace')
             else:
                 # For DuckDB, register the DataFrame as a view
                 self.conn.register(table_name, df)
@@ -243,6 +301,8 @@ class DatabaseManager:
             
             return table_name, df
             
+        except MemoryError:
+            raise ValueError("Not enough memory to load this file. Try using a smaller file or increasing available memory.")
         except Exception as e:
             raise ValueError(f"Error loading file: {str(e)}")
     
@@ -396,11 +456,44 @@ class DatabaseManager:
         Returns:
             List of completion words (table names and column names)
         """
-        completion_words = list(self.loaded_tables.keys())
+        # Start with table names
+        completion_words = set(self.loaded_tables.keys())
         
-        # Add column names with table name prefix (for joins)
-        for table, columns in self.table_columns.items():
-            completion_words.extend(columns)
-            completion_words.extend([f"{table}.{col}" for col in columns])
+        # Add column names with and without table prefixes, up to reasonable limits
+        MAX_COLUMNS_PER_TABLE = 100  # Limit columns to prevent memory issues
+        MAX_TABLES_WITH_COLUMNS = 20  # Limit the number of tables to process
+        
+        # Sort tables by name to ensure consistent behavior
+        table_items = sorted(list(self.table_columns.items()))
+        
+        # Process only a limited number of tables
+        for table, columns in table_items[:MAX_TABLES_WITH_COLUMNS]:
+            # Add each column name by itself
+            for col in columns[:MAX_COLUMNS_PER_TABLE]:
+                completion_words.add(col)
             
-        return completion_words 
+            # Add qualified column names (table.column)
+            for col in columns[:MAX_COLUMNS_PER_TABLE]:
+                completion_words.add(f"{table}.{col}")
+        
+        # Add SQL functions and keywords that are commonly used
+        sql_functions = [
+            "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", 
+            "CAST(", "CONVERT(", "COALESCE(", "NULLIF(",
+            "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"
+        ]
+        
+        # Add common SQL patterns
+        sql_patterns = [
+            "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET",
+            "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN",
+            "ON", "WHERE", "AND", "OR", "NOT", "IS NULL", "IS NOT NULL",
+            "IN (", "NOT IN (", "BETWEEN", "LIKE"
+        ]
+        
+        # Add all SQL extras to the completion words
+        completion_words.update(sql_functions)
+        completion_words.update(sql_patterns)
+        
+        # Convert set back to list
+        return list(completion_words) 
