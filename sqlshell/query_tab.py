@@ -1,0 +1,152 @@
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                             QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
+
+from sqlshell.editor import SQLEditor
+from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
+from sqlshell.ui import FilterHeader
+
+class QueryTab(QWidget):
+    def __init__(self, parent, results_title="RESULTS"):
+        super().__init__()
+        self.parent = parent
+        self.current_df = None
+        self.filter_widgets = []
+        self.results_title_text = results_title
+        self.init_ui()
+        
+    def init_ui(self):
+        """Initialize the tab's UI components"""
+        # Set main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Create splitter for query and results
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter.setHandleWidth(8)
+        self.splitter.setChildrenCollapsible(False)
+        
+        # Top part - Query section
+        query_widget = QFrame()
+        query_widget.setObjectName("content_panel")
+        query_layout = QVBoxLayout(query_widget)
+        query_layout.setContentsMargins(16, 16, 16, 16)
+        query_layout.setSpacing(12)
+        
+        # Query input
+        self.query_edit = SQLEditor()
+        # Apply syntax highlighting to the query editor
+        self.sql_highlighter = SQLSyntaxHighlighter(self.query_edit.document())
+        query_layout.addWidget(self.query_edit)
+        
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        
+        self.execute_btn = QPushButton('Execute Query')
+        self.execute_btn.setObjectName("primary_button")
+        self.execute_btn.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.execute_btn.clicked.connect(self.execute_query)
+        self.execute_btn.setToolTip("Execute Query (Ctrl+Enter)")
+        
+        self.clear_btn = QPushButton('Clear')
+        self.clear_btn.setIcon(QIcon.fromTheme("edit-clear"))
+        self.clear_btn.clicked.connect(self.clear_query)
+        
+        button_layout.addWidget(self.execute_btn)
+        button_layout.addWidget(self.clear_btn)
+        button_layout.addStretch()
+        
+        query_layout.addLayout(button_layout)
+        
+        # Bottom part - Results section
+        results_widget = QFrame()
+        results_widget.setObjectName("content_panel")
+        results_layout = QVBoxLayout(results_widget)
+        results_layout.setContentsMargins(16, 16, 16, 16)
+        results_layout.setSpacing(12)
+        
+        # Results header with row count and export options
+        results_header_layout = QHBoxLayout()
+        
+        self.results_title = QLabel(self.results_title_text)
+        self.results_title.setObjectName("header_label")
+        
+        self.row_count_label = QLabel("")
+        self.row_count_label.setStyleSheet(f"color: {self.parent.colors['text_light']}; font-style: italic;")
+        
+        results_header_layout.addWidget(self.results_title)
+        results_header_layout.addWidget(self.row_count_label)
+        results_header_layout.addStretch()
+        
+        # Export buttons
+        export_layout = QHBoxLayout()
+        export_layout.setSpacing(8)
+        
+        self.export_excel_btn = QPushButton('Export to Excel')
+        self.export_excel_btn.setIcon(QIcon.fromTheme("x-office-spreadsheet"))
+        self.export_excel_btn.clicked.connect(self.export_to_excel)
+        
+        self.export_parquet_btn = QPushButton('Export to Parquet')
+        self.export_parquet_btn.setIcon(QIcon.fromTheme("document-save"))
+        self.export_parquet_btn.clicked.connect(self.export_to_parquet)
+        
+        export_layout.addWidget(self.export_excel_btn)
+        export_layout.addWidget(self.export_parquet_btn)
+        
+        results_header_layout.addLayout(export_layout)
+        results_layout.addLayout(results_header_layout)
+        
+        # Table widget for results with modern styling
+        self.results_table = QTableWidget()
+        self.results_table.setSortingEnabled(True)
+        self.results_table.setAlternatingRowColors(True)
+        
+        # Set custom header for filtering
+        header = FilterHeader(self.results_table)
+        header.set_main_window(self.parent)  # Set reference to main window
+        self.results_table.setHorizontalHeader(header)
+        header.setStretchLastSection(True)
+        header.setSectionsMovable(True)
+        
+        self.results_table.verticalHeader().setVisible(False)
+        self.results_table.setShowGrid(True)
+        self.results_table.setGridStyle(Qt.PenStyle.SolidLine)
+        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        
+        results_layout.addWidget(self.results_table)
+
+        # Add widgets to splitter
+        self.splitter.addWidget(query_widget)
+        self.splitter.addWidget(results_widget)
+        
+        # Set initial sizes for splitter
+        self.splitter.setSizes([300, 500])
+        
+        main_layout.addWidget(self.splitter)
+        
+    def get_query_text(self):
+        """Get the current query text"""
+        return self.query_edit.toPlainText()
+        
+    def set_query_text(self, text):
+        """Set the query text"""
+        self.query_edit.setPlainText(text)
+        
+    def execute_query(self):
+        """Execute the current query"""
+        self.parent.execute_query()
+        
+    def clear_query(self):
+        """Clear the query editor"""
+        self.parent.clear_query()
+        
+    def export_to_excel(self):
+        """Export results to Excel"""
+        self.parent.export_to_excel()
+        
+    def export_to_parquet(self):
+        """Export results to Parquet"""
+        self.parent.export_to_parquet() 

@@ -26,6 +26,7 @@ from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
 from sqlshell.editor import LineNumberArea, SQLEditor
 from sqlshell.ui import FilterHeader, BarChartDelegate
 from sqlshell.db import DatabaseManager
+from sqlshell.query_tab import QueryTab
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -36,6 +37,7 @@ class SQLShell(QMainWindow):
         self.current_project_file = None  # Store the current project file path
         self.recent_projects = []  # Store list of recent projects
         self.max_recent_projects = 10  # Maximum number of recent projects to track
+        self.tabs = []  # Store list of all tabs
         
         # Load recent projects from settings
         self.load_recent_projects()
@@ -58,6 +60,9 @@ class SQLShell(QMainWindow):
         
         self.init_ui()
         self.apply_stylesheet()
+        
+        # Create initial tab
+        self.add_tab()
 
     def apply_stylesheet(self):
         """Apply custom stylesheet to the application"""
@@ -202,6 +207,44 @@ class SQLShell(QMainWindow):
                 padding: 8px;
             }}
             
+            QTabWidget::pane {{
+                border: 1px solid {self.colors['border']};
+                border-radius: 4px;
+                top: -1px;
+                background-color: white;
+            }}
+            
+            QTabBar::tab {{
+                background-color: {self.colors['light_bg']};
+                color: {self.colors['text']};
+                border: 1px solid {self.colors['border']};
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 8px 12px;
+                margin-right: 2px;
+                min-width: 80px;
+            }}
+            
+            QTabBar::tab:selected {{
+                background-color: white;
+                border-bottom: 1px solid white;
+            }}
+            
+            QTabBar::tab:hover:!selected {{
+                background-color: #E3F2FD;
+            }}
+            
+            QTabBar::close-button {{
+                image: url(close.png);
+                subcontrol-position: right;
+            }}
+            
+            QTabBar::close-button:hover {{
+                background-color: rgba(255, 0, 0, 0.2);
+                border-radius: 2px;
+            }}
+            
             QPlainTextEdit, QTextEdit {{
                 background-color: white;
                 border-radius: 4px;
@@ -248,6 +291,25 @@ class SQLShell(QMainWindow):
         exit_action = file_menu.addAction('Exit')
         exit_action.setShortcut('Ctrl+Q')
         exit_action.triggered.connect(self.close)
+        
+        # Add Tab menu
+        tab_menu = menubar.addMenu('&Tab')
+        
+        new_tab_action = tab_menu.addAction('New Tab')
+        new_tab_action.setShortcut('Ctrl+T')
+        new_tab_action.triggered.connect(self.add_tab)
+        
+        duplicate_tab_action = tab_menu.addAction('Duplicate Current Tab')
+        duplicate_tab_action.setShortcut('Ctrl+D')
+        duplicate_tab_action.triggered.connect(self.duplicate_current_tab)
+        
+        rename_tab_action = tab_menu.addAction('Rename Current Tab')
+        rename_tab_action.setShortcut('Ctrl+R')
+        rename_tab_action.triggered.connect(self.rename_current_tab)
+        
+        close_tab_action = tab_menu.addAction('Close Current Tab')
+        close_tab_action.setShortcut('Ctrl+W')
+        close_tab_action.triggered.connect(self.close_current_tab)
         
         # Create custom status bar
         status_bar = QStatusBar()
@@ -341,7 +403,7 @@ class SQLShell(QMainWindow):
         # Add spacer at the bottom
         left_layout.addStretch()
         
-        # Right panel for query and results
+        # Right panel for query tabs and results
         right_panel = QFrame()
         right_panel.setObjectName("content_panel")
         right_layout = QVBoxLayout(right_panel)
@@ -353,143 +415,79 @@ class SQLShell(QMainWindow):
         query_header.setObjectName("header_label")
         right_layout.addWidget(query_header)
         
-        # Create splitter for query and results
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setHandleWidth(8)
-        splitter.setChildrenCollapsible(False)
+        # Create tab widget for multiple queries
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.setMovable(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab)
         
-        # Top part - Query section
-        query_widget = QFrame()
-        query_widget.setObjectName("content_panel")
-        query_layout = QVBoxLayout(query_widget)
-        query_layout.setContentsMargins(16, 16, 16, 16)
-        query_layout.setSpacing(12)
+        # Add a "+" button to the tab bar
+        self.tab_widget.setCornerWidget(self.create_tab_corner_widget())
         
-        # Query input
-        self.query_edit = SQLEditor()
-        # Apply syntax highlighting to the query editor
-        self.sql_highlighter = SQLSyntaxHighlighter(self.query_edit.document())
-        query_layout.addWidget(self.query_edit)
-        
-        # Button row
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
-        
-        self.execute_btn = QPushButton('Execute Query')
-        self.execute_btn.setObjectName("primary_button")
-        self.execute_btn.setIcon(QIcon.fromTheme("media-playback-start"))
-        self.execute_btn.clicked.connect(self.execute_query)
-        self.execute_btn.setToolTip("Execute Query (Ctrl+Enter)")
-        
-        self.clear_btn = QPushButton('Clear')
-        self.clear_btn.setIcon(QIcon.fromTheme("edit-clear"))
-        self.clear_btn.clicked.connect(self.clear_query)
-        
-        button_layout.addWidget(self.execute_btn)
-        button_layout.addWidget(self.clear_btn)
-        button_layout.addStretch()
-        
-        query_layout.addLayout(button_layout)
-        
-        # Bottom part - Results section
-        results_widget = QFrame()
-        results_widget.setObjectName("content_panel")
-        results_layout = QVBoxLayout(results_widget)
-        results_layout.setContentsMargins(16, 16, 16, 16)
-        results_layout.setSpacing(12)
-        
-        # Results header with row count and export options
-        results_header_layout = QHBoxLayout()
-        
-        results_title = QLabel("RESULTS")
-        results_title.setObjectName("header_label")
-        
-        self.row_count_label = QLabel("")
-        self.row_count_label.setStyleSheet(f"color: {self.colors['text_light']}; font-style: italic;")
-        
-        results_header_layout.addWidget(results_title)
-        results_header_layout.addWidget(self.row_count_label)
-        results_header_layout.addStretch()
-        
-        # Export buttons
-        export_layout = QHBoxLayout()
-        export_layout.setSpacing(8)
-        
-        self.export_excel_btn = QPushButton('Export to Excel')
-        self.export_excel_btn.setIcon(QIcon.fromTheme("x-office-spreadsheet"))
-        self.export_excel_btn.clicked.connect(self.export_to_excel)
-        
-        self.export_parquet_btn = QPushButton('Export to Parquet')
-        self.export_parquet_btn.setIcon(QIcon.fromTheme("document-save"))
-        self.export_parquet_btn.clicked.connect(self.export_to_parquet)
-        
-        export_layout.addWidget(self.export_excel_btn)
-        export_layout.addWidget(self.export_parquet_btn)
-        
-        results_header_layout.addLayout(export_layout)
-        results_layout.addLayout(results_header_layout)
-        
-        # Table widget for results with modern styling
-        self.results_table = QTableWidget()
-        self.results_table.setSortingEnabled(True)
-        self.results_table.setAlternatingRowColors(True)
-        
-        # Set custom header for filtering
-        header = FilterHeader(self.results_table)
-        header.set_main_window(self)  # Set reference to main window
-        self.results_table.setHorizontalHeader(header)
-        header.setStretchLastSection(True)
-        header.setSectionsMovable(True)
-        
-        self.results_table.verticalHeader().setVisible(False)
-        self.results_table.setShowGrid(True)
-        self.results_table.setGridStyle(Qt.PenStyle.SolidLine)
-        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        
-        results_layout.addWidget(self.results_table)
-
-        # Add widgets to splitter
-        splitter.addWidget(query_widget)
-        splitter.addWidget(results_widget)
-        
-        # Set initial sizes for splitter
-        splitter.setSizes([300, 500])
-        
-        right_layout.addWidget(splitter)
+        right_layout.addWidget(self.tab_widget)
 
         # Add panels to main layout
         main_layout.addWidget(left_panel, 1)
         main_layout.addWidget(right_panel, 4)
 
         # Status bar
-        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment')
+        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
         
-        # Show keyboard shortcuts in a tooltip for the query editor
-        self.query_edit.setToolTip(
-            "Keyboard Shortcuts:\n"
-            "Ctrl+Enter: Execute Query\n"
-            "Ctrl+K: Toggle Comment\n"
-            "Tab: Insert 4 spaces\n"
-            "Ctrl+Space: Show autocomplete"
-        )
+    def create_tab_corner_widget(self):
+        """Create a corner widget with a + button to add new tabs"""
+        corner_widget = QWidget()
+        layout = QHBoxLayout(corner_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        add_tab_btn = QToolButton()
+        add_tab_btn.setText("+")
+        add_tab_btn.setToolTip("Add new tab (Ctrl+T)")
+        add_tab_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #3498DB;
+            }
+            QToolButton:hover {
+                background-color: rgba(52, 152, 219, 0.2);
+            }
+            QToolButton:pressed {
+                background-color: rgba(52, 152, 219, 0.4);
+            }
+        """)
+        add_tab_btn.clicked.connect(self.add_tab)
+        
+        layout.addWidget(add_tab_btn)
+        return corner_widget
 
     def populate_table(self, df):
         """Populate the results table with DataFrame data using memory-efficient chunking"""
         try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                return
+                
             # Store the current DataFrame for filtering
-            self.current_df = df.copy()
+            current_tab.current_df = df.copy()
+            self.current_df = df.copy()  # Keep this for compatibility with existing code
             
             # Remember which columns had bar charts
-            header = self.results_table.horizontalHeader()
+            header = current_tab.results_table.horizontalHeader()
             if isinstance(header, FilterHeader):
                 columns_with_bars = header.columns_with_bars.copy()
             else:
                 columns_with_bars = set()
             
             # Clear existing data
-            self.results_table.clearContents()
-            self.results_table.setRowCount(0)
-            self.results_table.setColumnCount(0)
+            current_tab.results_table.clearContents()
+            current_tab.results_table.setRowCount(0)
+            current_tab.results_table.setColumnCount(0)
             
             if df.empty:
                 self.statusBar().showMessage("Query returned no results")
@@ -498,11 +496,11 @@ class SQLShell(QMainWindow):
             # Set up the table dimensions
             row_count = len(df)
             col_count = len(df.columns)
-            self.results_table.setColumnCount(col_count)
+            current_tab.results_table.setColumnCount(col_count)
             
             # Set column headers
             headers = [str(col) for col in df.columns]
-            self.results_table.setHorizontalHeaderLabels(headers)
+            current_tab.results_table.setHorizontalHeaderLabels(headers)
             
             # Calculate chunk size (adjust based on available memory)
             CHUNK_SIZE = 1000
@@ -513,26 +511,29 @@ class SQLShell(QMainWindow):
                 chunk = df.iloc[chunk_start:chunk_end]
                 
                 # Add rows for this chunk
-                self.results_table.setRowCount(chunk_end)
+                current_tab.results_table.setRowCount(chunk_end)
                 
                 for row_idx, (_, row_data) in enumerate(chunk.iterrows(), start=chunk_start):
                     for col_idx, value in enumerate(row_data):
                         formatted_value = self.format_value(value)
                         item = QTableWidgetItem(formatted_value)
-                        self.results_table.setItem(row_idx, col_idx, item)
+                        current_tab.results_table.setItem(row_idx, col_idx, item)
                         
                 # Process events to keep UI responsive
                 QApplication.processEvents()
             
             # Optimize column widths
-            self.results_table.resizeColumnsToContents()
+            current_tab.results_table.resizeColumnsToContents()
             
             # Restore bar charts for columns that previously had them
-            header = self.results_table.horizontalHeader()
+            header = current_tab.results_table.horizontalHeader()
             if isinstance(header, FilterHeader):
                 for col_idx in columns_with_bars:
                     if col_idx < col_count:  # Only if column still exists
                         header.toggle_bar_chart(col_idx)
+            
+            # Update row count label
+            current_tab.row_count_label.setText(f"{row_count:,} rows")
             
             # Update status
             memory_usage = df.memory_usage(deep=True).sum() / (1024 * 1024)  # Convert to MB
@@ -702,12 +703,19 @@ class SQLShell(QMainWindow):
         # Get completion words from the database manager
         completion_words = self.db_manager.get_all_table_columns()
         
-        # Update the completer in the query editor
-        self.query_edit.update_completer_model(completion_words)
+        # Update the completer in all tab query editors
+        for i in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(i)
+            tab.query_edit.update_completer_model(completion_words)
 
     def execute_query(self):
         try:
-            query = self.query_edit.toPlainText().strip()
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                return
+                
+            query = current_tab.get_query_text().strip()
             if not query:
                 QMessageBox.warning(self, "Empty Query", "Please enter a SQL query to execute.")
                 return
@@ -739,46 +747,56 @@ class SQLShell(QMainWindow):
 
     def clear_query(self):
         """Clear the query editor with animation"""
+        # Get the current tab
+        current_tab = self.get_current_tab()
+        if not current_tab:
+            return
+            
         # Save current text for animation
-        current_text = self.query_edit.toPlainText()
+        current_text = current_tab.get_query_text()
         if not current_text:
             return
         
         # Clear the editor
-        self.query_edit.clear()
+        current_tab.set_query_text("")
         
         # Show success message
         self.statusBar().showMessage('Query cleared', 2000)  # Show for 2 seconds
 
     def show_table_preview(self, item):
         """Show a preview of the selected table"""
-        if item:
-            table_name = item.text().split(' (')[0]
-            try:
-                # Use the database manager to get a preview of the table
-                preview_df = self.db_manager.get_table_preview(table_name)
-                    
-                self.populate_table(preview_df)
-                self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
+        if not item:
+            return
+            
+        # Get the current tab
+        current_tab = self.get_current_tab()
+        if not current_tab:
+            return
+            
+        table_name = item.text().split(' (')[0]
+        try:
+            # Use the database manager to get a preview of the table
+            preview_df = self.db_manager.get_table_preview(table_name)
                 
-                # Update the results title to show which table is being previewed
-                results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
-                if results_title and results_title.text() == "RESULTS":
-                    results_title.setText(f"PREVIEW: {table_name}")
-                
-            except Exception as e:
-                self.results_table.setRowCount(0)
-                self.results_table.setColumnCount(0)
-                self.row_count_label.setText("")
-                self.statusBar().showMessage('Error showing table preview')
-                
-                # Show error message with modern styling
-                QMessageBox.critical(
-                    self, 
-                    "Error", 
-                    f"Error showing preview: {str(e)}",
-                    QMessageBox.StandardButton.Ok
-                )
+            self.populate_table(preview_df)
+            self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
+            
+            # Update the results title to show which table is being previewed
+            current_tab.results_title.setText(f"PREVIEW: {table_name}")
+            
+        except Exception as e:
+            current_tab.results_table.setRowCount(0)
+            current_tab.results_table.setColumnCount(0)
+            current_tab.row_count_label.setText("")
+            self.statusBar().showMessage('Error showing table preview')
+            
+            # Show error message with modern styling
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Error showing preview: {str(e)}",
+                QMessageBox.StandardButton.Ok
+            )
 
     def load_test_data(self):
         """Generate and load test data"""
@@ -814,8 +832,10 @@ class SQLShell(QMainWindow):
             for table_name, file_path in self.db_manager.loaded_tables.items():
                 self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
             
-            # Set the sample query
-            sample_query = """
+            # Set the sample query in the current tab
+            current_tab = self.get_current_tab()
+            if current_tab:
+                sample_query = """
 SELECT 
     DISTINCT
     c.customername     
@@ -825,7 +845,7 @@ FROM
     INNER JOIN product_catalog p ON p.productid = s.productid
 LIMIT 10
 """
-            self.query_edit.setPlainText(sample_query.strip())
+                current_tab.set_query_text(sample_query.strip())
             
             # Update completer
             self.update_completer()
@@ -841,7 +861,12 @@ LIMIT 10
             QMessageBox.critical(self, "Error", f"Failed to load test data: {str(e)}")
 
     def export_to_excel(self):
-        if self.results_table.rowCount() == 0:
+        # Get the current tab
+        current_tab = self.get_current_tab()
+        if not current_tab:
+            return
+            
+        if current_tab.results_table.rowCount() == 0:
             QMessageBox.warning(self, "No Data", "There is no data to export.")
             return
         
@@ -894,7 +919,12 @@ LIMIT 10
             self.statusBar().showMessage('Error exporting data')
 
     def export_to_parquet(self):
-        if self.results_table.rowCount() == 0:
+        # Get the current tab
+        current_tab = self.get_current_tab()
+        if not current_tab:
+            return
+            
+        if current_tab.results_table.rowCount() == 0:
             QMessageBox.warning(self, "No Data", "There is no data to export.")
             return
         
@@ -948,12 +978,17 @@ LIMIT 10
 
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame"""
-        headers = [self.results_table.horizontalHeaderItem(i).text() for i in range(self.results_table.columnCount())]
+        # Get the current tab
+        current_tab = self.get_current_tab()
+        if not current_tab:
+            return pd.DataFrame()
+            
+        headers = [current_tab.results_table.horizontalHeaderItem(i).text() for i in range(current_tab.results_table.columnCount())]
         data = []
-        for row in range(self.results_table.rowCount()):
+        for row in range(current_tab.results_table.rowCount()):
             row_data = []
-            for column in range(self.results_table.columnCount()):
-                item = self.results_table.item(row, column)
+            for column in range(current_tab.results_table.columnCount()):
+                item = current_tab.results_table.item(row, column)
                 row_data.append(item.text() if item else '')
             data.append(row_data)
         return pd.DataFrame(data, columns=headers)
@@ -962,12 +997,27 @@ LIMIT 10
         """Handle global keyboard shortcuts"""
         # Execute query with Ctrl+Enter or Cmd+Enter (for Mac)
         if event.key() == Qt.Key.Key_Return and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            self.execute_btn.click()  # Simply click the button instead of animating
+            self.execute_query()
             return
         
-        # Clear query with Ctrl+L
-        if event.key() == Qt.Key.Key_L and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            self.clear_btn.click()  # Simply click the button instead of animating
+        # Add new tab with Ctrl+T
+        if event.key() == Qt.Key.Key_T and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.add_tab()
+            return
+            
+        # Close current tab with Ctrl+W
+        if event.key() == Qt.Key.Key_W and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.close_current_tab()
+            return
+            
+        # Duplicate tab with Ctrl+D
+        if event.key() == Qt.Key.Key_D and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.duplicate_current_tab()
+            return
+            
+        # Rename tab with Ctrl+R
+        if event.key() == Qt.Key.Key_R and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.rename_current_tab()
             return
         
         super().keyPressEvent(event)
@@ -1000,12 +1050,23 @@ LIMIT 10
     def has_unsaved_changes(self):
         """Check if there are unsaved changes in the project"""
         if not self.current_project_file:
-            return bool(self.db_manager.loaded_tables or self.query_edit.toPlainText().strip())
+            return (self.tab_widget.count() > 0 and any(self.tab_widget.widget(i).get_query_text().strip() 
+                                                        for i in range(self.tab_widget.count()))) or bool(self.db_manager.loaded_tables)
         
         try:
             # Load the last saved state
             with open(self.current_project_file, 'r') as f:
                 saved_data = json.load(f)
+            
+            # Prepare current tab data
+            current_tabs_data = []
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                tab_data = {
+                    'title': self.tab_widget.tabText(i),
+                    'query': tab.get_query_text()
+                }
+                current_tabs_data.append(tab_data)
             
             # Compare current state with saved state
             current_data = {
@@ -1016,11 +1077,27 @@ LIMIT 10
                     }
                     for name, path in self.db_manager.loaded_tables.items()
                 },
-                'query': self.query_edit.toPlainText(),
+                'tabs': current_tabs_data,
                 'connection_type': self.db_manager.connection_type
             }
             
-            return current_data != saved_data
+            # Compare tables and connection type
+            if (current_data['connection_type'] != saved_data.get('connection_type') or
+                len(current_data['tables']) != len(saved_data.get('tables', {}))):
+                return True
+                
+            # Compare tab data
+            if 'tabs' not in saved_data or len(current_data['tabs']) != len(saved_data['tabs']):
+                return True
+                
+            for i, tab_data in enumerate(current_data['tabs']):
+                saved_tab = saved_data['tabs'][i]
+                if (tab_data['title'] != saved_tab.get('title', '') or
+                    tab_data['query'] != saved_tab.get('query', '')):
+                    return True
+            
+            # If we get here, everything matches
+            return False
             
         except Exception:
             # If there's any error reading the saved file, assume there are unsaved changes
@@ -1030,6 +1107,11 @@ LIMIT 10
         """Show context menu for tables list"""
         item = self.tables_list.itemAt(position)
         if not item:
+            return
+
+        # Get current tab
+        current_tab = self.get_current_tab()
+        if not current_tab:
             return
 
         # Get table name without the file info in parentheses
@@ -1065,14 +1147,14 @@ LIMIT 10
 
         if action == select_from_action:
             # Insert "SELECT * FROM table_name" at cursor position
-            cursor = self.query_edit.textCursor()
+            cursor = current_tab.query_edit.textCursor()
             cursor.insertText(f"SELECT * FROM {table_name}")
-            self.query_edit.setFocus()
+            current_tab.query_edit.setFocus()
         elif action == add_to_editor_action:
             # Just insert the table name at cursor position
-            cursor = self.query_edit.textCursor()
+            cursor = current_tab.query_edit.textCursor()
             cursor.insertText(table_name)
-            self.query_edit.setFocus()
+            current_tab.query_edit.setFocus()
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -1111,9 +1193,20 @@ LIMIT 10
                 
                 # Reset state
                 self.tables_list.clear()
-                self.query_edit.clear()
-                self.results_table.setRowCount(0)
-                self.results_table.setColumnCount(0)
+                
+                # Clear all tabs except one
+                while self.tab_widget.count() > 1:
+                    self.close_tab(1)  # Always close tab at index 1 to keep at least one tab
+                
+                # Clear the remaining tab
+                first_tab = self.get_tab_at_index(0)
+                if first_tab:
+                    first_tab.set_query_text("")
+                    first_tab.results_table.setRowCount(0)
+                    first_tab.results_table.setColumnCount(0)
+                    first_tab.row_count_label.setText("")
+                    first_tab.results_title.setText("RESULTS")
+                
                 self.current_project_file = None
                 self.setWindowTitle('SQL Shell')
                 self.db_info_label.setText("No database connected")
@@ -1146,9 +1239,19 @@ LIMIT 10
     def save_project_to_file(self, file_name):
         """Save project data to a file"""
         try:
+            # Save tab information
+            tabs_data = []
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                tab_data = {
+                    'title': self.tab_widget.tabText(i),
+                    'query': tab.get_query_text()
+                }
+                tabs_data.append(tab_data)
+            
             project_data = {
                 'tables': {},
-                'query': self.query_edit.toPlainText(),
+                'tabs': tabs_data,
                 'connection_type': self.db_manager.connection_type
             }
             
@@ -1237,9 +1340,16 @@ LIMIT 10
                         QMessageBox.warning(self, "Warning",
                             f"Failed to load table {table_name}:\n{str(e)}")
                 
-                # Restore query
-                if 'query' in project_data:
-                    self.query_edit.setPlainText(project_data['query'])
+                # Load tabs
+                if 'tabs' in project_data and project_data['tabs']:
+                    # Remove the default tab
+                    while self.tab_widget.count() > 0:
+                        self.close_tab(0)
+                        
+                    # Create tabs from saved data
+                    for tab_data in project_data['tabs']:
+                        tab = self.add_tab(tab_data.get('title', 'Query'))
+                        tab.set_query_text(tab_data.get('query', ''))
                 
                 # Update UI
                 self.current_project_file = file_name
@@ -1343,6 +1453,127 @@ LIMIT 10
         self.recent_projects.clear()
         self.save_recent_projects()
         self.update_recent_projects_menu()
+
+    def add_tab(self, title="Query 1"):
+        """Add a new query tab"""
+        # Ensure title is a string
+        title = str(title)
+        
+        # Create a new tab with a unique name if needed
+        if title == "Query 1" and self.tab_widget.count() > 0:
+            # Generate a unique tab name (Query 2, Query 3, etc.)
+            base_name = "Query"
+            counter = 1
+            while True:
+                counter += 1
+                test_name = f"{base_name} {counter}"
+                found = False
+                for i in range(self.tab_widget.count()):
+                    if self.tab_widget.tabText(i) == test_name:
+                        found = True
+                        break
+                if not found:
+                    title = test_name
+                    break
+        
+        # Create the tab content
+        tab = QueryTab(self)
+        
+        # Add to our list of tabs
+        self.tabs.append(tab)
+        
+        # Add tab to widget
+        index = self.tab_widget.addTab(tab, title)
+        self.tab_widget.setCurrentIndex(index)
+        
+        # Focus the new tab's query editor
+        tab.query_edit.setFocus()
+        
+        return tab
+    
+    def duplicate_current_tab(self):
+        """Duplicate the current tab"""
+        if self.tab_widget.count() == 0:
+            return self.add_tab()
+            
+        current_idx = self.tab_widget.currentIndex()
+        if current_idx == -1:
+            return
+            
+        # Get current tab data
+        current_tab = self.get_current_tab()
+        current_title = self.tab_widget.tabText(current_idx)
+        
+        # Create a new tab with "(Copy)" suffix
+        new_title = f"{current_title} (Copy)"
+        new_tab = self.add_tab(new_title)
+        
+        # Copy query text
+        new_tab.set_query_text(current_tab.get_query_text())
+        
+        # Return focus to the new tab
+        new_tab.query_edit.setFocus()
+        
+        return new_tab
+    
+    def rename_current_tab(self):
+        """Rename the current tab"""
+        current_idx = self.tab_widget.currentIndex()
+        if current_idx == -1:
+            return
+            
+        current_title = self.tab_widget.tabText(current_idx)
+        
+        new_title, ok = QInputDialog.getText(
+            self,
+            "Rename Tab",
+            "Enter new tab name:",
+            QLineEdit.EchoMode.Normal,
+            current_title
+        )
+        
+        if ok and new_title:
+            self.tab_widget.setTabText(current_idx, new_title)
+    
+    def close_tab(self, index):
+        """Close the tab at the given index"""
+        if self.tab_widget.count() <= 1:
+            # Don't close the last tab, just clear it
+            tab = self.get_tab_at_index(index)
+            tab.set_query_text("")
+            tab.results_table.setRowCount(0)
+            tab.results_table.setColumnCount(0)
+            return
+            
+        # Remove the tab
+        widget = self.tab_widget.widget(index)
+        self.tab_widget.removeTab(index)
+        
+        # Remove from our list of tabs
+        if widget in self.tabs:
+            self.tabs.remove(widget)
+        
+        # Delete the widget to free resources
+        widget.deleteLater()
+    
+    def close_current_tab(self):
+        """Close the current tab"""
+        current_idx = self.tab_widget.currentIndex()
+        if current_idx != -1:
+            self.close_tab(current_idx)
+    
+    def get_current_tab(self):
+        """Get the currently active tab"""
+        current_idx = self.tab_widget.currentIndex()
+        if current_idx == -1:
+            return None
+        return self.tab_widget.widget(current_idx)
+        
+    def get_tab_at_index(self, index):
+        """Get the tab at the specified index"""
+        if index < 0 or index >= self.tab_widget.count():
+            return None
+        return self.tab_widget.widget(index)
 
 def main():
     app = QApplication(sys.argv)
