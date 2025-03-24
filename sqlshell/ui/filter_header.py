@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QHeaderView, QMenu, QCheckBox, QWidgetAction, 
-                           QWidget, QVBoxLayout, QLineEdit, QHBoxLayout, QPushButton)
+                           QWidget, QVBoxLayout, QLineEdit, QHBoxLayout, QPushButton, QTableWidget)
 from PyQt6.QtCore import Qt, QRect, QPoint
 from PyQt6.QtGui import QColor, QFont, QPolygon, QPainterPath, QBrush
 
@@ -214,9 +214,6 @@ class FilterHeader(QHeaderView):
     def show_filter_menu(self, logical_index):
         if not self.parent() or not isinstance(self.parent(), QTableWidget):
             return
-            
-        # Import QTableWidget here to avoid circular imports
-        from PyQt6.QtWidgets import QTableWidget
             
         table = self.parent()
         unique_values = set()

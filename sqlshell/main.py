@@ -7,8 +7,6 @@ if __name__ == "__main__":
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
 
-import duckdb
-import sqlite3
 import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTextEdit, QPushButton, QFileDialog,
@@ -27,14 +25,12 @@ from sqlshell.splash_screen import AnimatedSplashScreen
 from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
 from sqlshell.editor import LineNumberArea, SQLEditor
 from sqlshell.ui import FilterHeader, BarChartDelegate
+from sqlshell.db import DatabaseManager
 
 class SQLShell(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.conn = None
-        self.current_connection_type = None
-        self.loaded_tables = {}  # Keep track of loaded tables
-        self.table_columns = {}  # Keep track of table columns
+        self.db_manager = DatabaseManager()
         self.current_df = None  # Store the current DataFrame for filtering
         self.filter_widgets = []  # Store filter line edits
         self.current_project_file = None  # Store the current project file path
@@ -608,11 +604,10 @@ class SQLShell(QMainWindow):
         return str(value)
 
     def browse_files(self):
-        if not self.conn:
+        if not self.db_manager.is_connected():
             # Create a default in-memory DuckDB connection if none exists
-            self.conn = duckdb.connect(':memory:')
-            self.current_connection_type = 'duckdb'
-            self.db_info_label.setText("Connected to: in-memory DuckDB")
+            connection_info = self.db_manager.create_memory_connection()
+            self.db_info_label.setText(connection_info)
             
         file_names, _ = QFileDialog.getOpenFileNames(
             self,
@@ -623,38 +618,8 @@ class SQLShell(QMainWindow):
         
         for file_name in file_names:
             try:
-                if file_name.endswith(('.xlsx', '.xls')):
-                    df = pd.read_excel(file_name)
-                elif file_name.endswith('.csv'):
-                    df = pd.read_csv(file_name)
-                elif file_name.endswith('.parquet'):
-                    df = pd.read_parquet(file_name)
-                else:
-                    raise ValueError("Unsupported file format")
-                
-                # Generate table name from file name
-                base_name = os.path.splitext(os.path.basename(file_name))[0]
-                table_name = self.sanitize_table_name(base_name)
-                
-                # Ensure unique table name
-                original_name = table_name
-                counter = 1
-                while table_name in self.loaded_tables:
-                    table_name = f"{original_name}_{counter}"
-                    counter += 1
-                
-                # Handle table creation based on database type
-                if self.current_connection_type == 'sqlite':
-                    # For SQLite, create a table from the DataFrame
-                    df.to_sql(table_name, self.conn, index=False, if_exists='replace')
-                else:
-                    # For DuckDB, register the DataFrame as a view
-                    self.conn.register(table_name, df)
-                
-                self.loaded_tables[table_name] = file_name
-                
-                # Store column names
-                self.table_columns[table_name] = df.columns.tolist()
+                # Use the database manager to load the file
+                table_name, df = self.db_manager.load_file(file_name)
                 
                 # Update UI
                 self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
@@ -680,26 +645,11 @@ class SQLShell(QMainWindow):
                 self.results_table.setColumnCount(0)
                 self.row_count_label.setText("")
 
-    def sanitize_table_name(self, name):
-        # Replace invalid characters with underscores
-        import re
-        name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
-        # Ensure it starts with a letter
-        if not name[0].isalpha():
-            name = 'table_' + name
-        return name.lower()
-
     def remove_selected_table(self):
         current_item = self.tables_list.currentItem()
         if current_item:
             table_name = current_item.text().split(' (')[0]
-            if table_name in self.loaded_tables:
-                # Remove from DuckDB
-                self.conn.execute(f'DROP VIEW IF EXISTS {table_name}')
-                # Remove from our tracking
-                del self.loaded_tables[table_name]
-                if table_name in self.table_columns:
-                    del self.table_columns[table_name]
+            if self.db_manager.remove_table(table_name):
                 # Remove from list widget
                 self.tables_list.takeItem(self.tables_list.row(current_item))
                 self.statusBar().showMessage(f'Removed table "{table_name}"')
@@ -713,15 +663,6 @@ class SQLShell(QMainWindow):
     def open_database(self):
         """Open a database connection with proper error handling and resource management"""
         try:
-            if self.conn:
-                # Close existing connection before opening new one
-                if self.current_connection_type == "duckdb":
-                    self.conn.close()
-                else:  # sqlite
-                    self.conn.close()
-                self.conn = None
-                self.current_connection_type = None
-            
             filename, _ = QFileDialog.getOpenFileName(
                 self,
                 "Open Database",
@@ -730,80 +671,37 @@ class SQLShell(QMainWindow):
             )
             
             if filename:
-                if self.is_sqlite_db(filename):
-                    self.conn = sqlite3.connect(filename)
-                    self.current_connection_type = "sqlite"
-                else:
-                    self.conn = duckdb.connect(filename)
-                    self.current_connection_type = "duckdb"
-                
-                self.load_database_tables()
-                self.statusBar().showMessage(f"Connected to database: {filename}")
-                
-        except (sqlite3.Error, duckdb.Error) as e:
-            QMessageBox.critical(self, "Database Connection Error",
-                f"Failed to open database:\n\n{str(e)}")
-            self.statusBar().showMessage("Failed to open database")
-            self.conn = None
-            self.current_connection_type = None
-
-    def is_sqlite_db(self, filename):
-        """Check if the file is a SQLite database"""
-        try:
-            with open(filename, 'rb') as f:
-                header = f.read(16)
-                return header[:16] == b'SQLite format 3\x00'
-        except:
-            return False
-
-    def load_database_tables(self):
-        """Load all tables from the current database"""
-        try:
-            if self.current_connection_type == 'sqlite':
-                query = "SELECT name FROM sqlite_master WHERE type='table'"
-                cursor = self.conn.cursor()
-                tables = cursor.execute(query).fetchall()
-                for (table_name,) in tables:
-                    self.loaded_tables[table_name] = 'database'
-                    self.tables_list.addItem(f"{table_name} (database)")
+                try:
+                    # Use the database manager to open the database
+                    self.db_manager.open_database(filename)
                     
-                    # Get column names for each table
-                    try:
-                        column_query = f"PRAGMA table_info({table_name})"
-                        columns = cursor.execute(column_query).fetchall()
-                        self.table_columns[table_name] = [col[1] for col in columns]  # Column name is at index 1
-                    except Exception:
-                        self.table_columns[table_name] = []
-            else:  # duckdb
-                query = "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
-                result = self.conn.execute(query).fetchdf()
-                for table_name in result['table_name']:
-                    self.loaded_tables[table_name] = 'database'
-                    self.tables_list.addItem(f"{table_name} (database)")
+                    # Update UI with tables from the database
+                    self.tables_list.clear()
+                    for table_name in self.db_manager.loaded_tables:
+                        self.tables_list.addItem(f"{table_name} (database)")
                     
-                    # Get column names for each table
-                    try:
-                        column_query = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND table_schema='main'"
-                        columns = self.conn.execute(column_query).fetchdf()
-                        self.table_columns[table_name] = columns['column_name'].tolist()
-                    except Exception:
-                        self.table_columns[table_name] = []
-                        
-            # Update the completer with table and column names
-            self.update_completer()
+                    # Update the completer with table and column names
+                    self.update_completer()
+                    
+                    # Update status bar
+                    self.statusBar().showMessage(f"Connected to database: {filename}")
+                    self.db_info_label.setText(self.db_manager.get_connection_info())
+                    
+                except Exception as e:
+                    QMessageBox.critical(self, "Database Connection Error",
+                        f"Failed to open database:\n\n{str(e)}")
+                    self.statusBar().showMessage("Failed to open database")
+                
         except Exception as e:
-            self.statusBar().showMessage(f'Error loading tables: {str(e)}')
+            QMessageBox.critical(self, "Error", 
+                f"Unexpected error:\n\n{str(e)}")
+            self.statusBar().showMessage("Error opening database")
 
     def update_completer(self):
         """Update the completer with table and column names"""
-        # Collect all table names and column names
-        completion_words = list(self.loaded_tables.keys())
+        # Get completion words from the database manager
+        completion_words = self.db_manager.get_all_table_columns()
         
-        # Add column names with table name prefix (for joins)
-        for table, columns in self.table_columns.items():
-            completion_words.extend(columns)
-            completion_words.extend([f"{table}.{col}" for col in columns])
-            
         # Update the completer in the query editor
         self.query_edit.update_completer_model(completion_words)
 
@@ -817,29 +715,21 @@ class SQLShell(QMainWindow):
             start_time = datetime.now()
             
             try:
-                if self.current_connection_type == "duckdb":
-                    result = self.conn.execute(query).fetchdf()
-                else:  # sqlite
-                    result = pd.read_sql_query(query, self.conn)
+                # Use the database manager to execute the query
+                result = self.db_manager.execute_query(query)
                 
                 execution_time = (datetime.now() - start_time).total_seconds()
                 self.populate_table(result)
                 self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
                 
-            except (duckdb.Error, sqlite3.Error) as e:
-                error_msg = str(e)
-                if "syntax error" in error_msg.lower():
-                    QMessageBox.critical(self, "SQL Syntax Error", 
-                        f"There is a syntax error in your query:\n\n{error_msg}")
-                elif "no such table" in error_msg.lower():
-                    QMessageBox.critical(self, "Table Not Found", 
-                        f"The referenced table does not exist:\n\n{error_msg}")
-                elif "no such column" in error_msg.lower():
-                    QMessageBox.critical(self, "Column Not Found", 
-                        f"The referenced column does not exist:\n\n{error_msg}")
-                else:
-                    QMessageBox.critical(self, "Database Error", 
-                        f"An error occurred while executing the query:\n\n{error_msg}")
+            except SyntaxError as e:
+                QMessageBox.critical(self, "SQL Syntax Error", str(e))
+                self.statusBar().showMessage("Query execution failed: syntax error")
+            except ValueError as e:
+                QMessageBox.critical(self, "Query Error", str(e))
+                self.statusBar().showMessage("Query execution failed")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", str(e))
                 self.statusBar().showMessage("Query execution failed")
                 
         except Exception as e:
@@ -865,10 +755,8 @@ class SQLShell(QMainWindow):
         if item:
             table_name = item.text().split(' (')[0]
             try:
-                if self.current_connection_type == 'sqlite':
-                    preview_df = pd.read_sql_query(f'SELECT * FROM "{table_name}" LIMIT 5', self.conn)
-                else:
-                    preview_df = self.conn.execute(f'SELECT * FROM {table_name} LIMIT 5').fetchdf()
+                # Use the database manager to get a preview of the table
+                preview_df = self.db_manager.get_table_preview(table_name)
                     
                 self.populate_table(preview_df)
                 self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
@@ -896,10 +784,9 @@ class SQLShell(QMainWindow):
         """Generate and load test data"""
         try:
             # Ensure we have a DuckDB connection
-            if not self.conn or self.current_connection_type != 'duckdb':
-                self.conn = duckdb.connect(':memory:')
-                self.current_connection_type = 'duckdb'
-                self.db_info_label.setText("Connected to: in-memory DuckDB")
+            if not self.db_manager.is_connected() or self.db_manager.connection_type != 'duckdb':
+                connection_info = self.db_manager.create_memory_connection()
+                self.db_info_label.setText(connection_info)
 
             # Show loading indicator
             self.statusBar().showMessage('Generating test data...')
@@ -917,24 +804,14 @@ class SQLShell(QMainWindow):
             customer_df.to_parquet('test_data/customer_data.parquet', index=False)
             product_df.to_excel('test_data/product_catalog.xlsx', index=False)
             
-            # Load the files into DuckDB
-            self.conn.register('sample_sales_data', sales_df)
-            self.conn.register('product_catalog', product_df)
-            self.conn.register('customer_data', customer_df)
-            
-            # Update loaded tables tracking
-            self.loaded_tables['sample_sales_data'] = 'test_data/sample_sales_data.xlsx'
-            self.loaded_tables['product_catalog'] = 'test_data/product_catalog.xlsx'
-            self.loaded_tables['customer_data'] = 'test_data/customer_data.parquet'
-            
-            # Store column names
-            self.table_columns['sample_sales_data'] = sales_df.columns.tolist()
-            self.table_columns['product_catalog'] = product_df.columns.tolist()
-            self.table_columns['customer_data'] = customer_df.columns.tolist()
+            # Register the tables in the database manager
+            self.db_manager.register_dataframe(sales_df, 'sample_sales_data', 'test_data/sample_sales_data.xlsx')
+            self.db_manager.register_dataframe(product_df, 'product_catalog', 'test_data/product_catalog.xlsx')
+            self.db_manager.register_dataframe(customer_df, 'customer_data', 'test_data/customer_data.parquet')
             
             # Update UI
             self.tables_list.clear()
-            for table_name, file_path in self.loaded_tables.items():
+            for table_name, file_path in self.db_manager.loaded_tables.items():
                 self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
             
             # Set the sample query
@@ -982,21 +859,21 @@ LIMIT 10
             
             # Generate table name from file name
             base_name = os.path.splitext(os.path.basename(file_name))[0]
-            table_name = self.sanitize_table_name(base_name)
+            table_name = self.db_manager.sanitize_table_name(base_name)
             
             # Ensure unique table name
             original_name = table_name
             counter = 1
-            while table_name in self.loaded_tables:
+            while table_name in self.db_manager.loaded_tables:
                 table_name = f"{original_name}_{counter}"
                 counter += 1
             
-            # Register the table in DuckDB
-            self.conn.register(table_name, df)
+            # Register the table in the database manager
+            self.db_manager.register_dataframe(df, table_name, file_name)
             
             # Update tracking
-            self.loaded_tables[table_name] = file_name
-            self.table_columns[table_name] = df.columns.tolist()
+            self.db_manager.loaded_tables[table_name] = file_name
+            self.db_manager.table_columns[table_name] = df.columns.tolist()
             
             # Update UI
             self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
@@ -1035,21 +912,21 @@ LIMIT 10
             
             # Generate table name from file name
             base_name = os.path.splitext(os.path.basename(file_name))[0]
-            table_name = self.sanitize_table_name(base_name)
+            table_name = self.db_manager.sanitize_table_name(base_name)
             
             # Ensure unique table name
             original_name = table_name
             counter = 1
-            while table_name in self.loaded_tables:
+            while table_name in self.db_manager.loaded_tables:
                 table_name = f"{original_name}_{counter}"
                 counter += 1
             
-            # Register the table in DuckDB
-            self.conn.register(table_name, df)
+            # Register the table in the database manager
+            self.db_manager.register_dataframe(df, table_name, file_name)
             
             # Update tracking
-            self.loaded_tables[table_name] = file_name
-            self.table_columns[table_name] = df.columns.tolist()
+            self.db_manager.loaded_tables[table_name] = file_name
+            self.db_manager.table_columns[table_name] = df.columns.tolist()
             
             # Update UI
             self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
@@ -1113,11 +990,7 @@ LIMIT 10
                     return
             
             # Close database connections
-            if self.conn:
-                if self.current_connection_type == "duckdb":
-                    self.conn.close()
-                else:  # sqlite
-                    self.conn.close()
+            self.db_manager.close_connection()
             event.accept()
         except Exception as e:
             QMessageBox.warning(self, "Cleanup Warning", 
@@ -1127,7 +1000,7 @@ LIMIT 10
     def has_unsaved_changes(self):
         """Check if there are unsaved changes in the project"""
         if not self.current_project_file:
-            return bool(self.loaded_tables or self.query_edit.toPlainText().strip())
+            return bool(self.db_manager.loaded_tables or self.query_edit.toPlainText().strip())
         
         try:
             # Load the last saved state
@@ -1139,12 +1012,12 @@ LIMIT 10
                 'tables': {
                     name: {
                         'file_path': path,
-                        'columns': self.table_columns.get(name, [])
+                        'columns': self.db_manager.table_columns.get(name, [])
                     }
-                    for name, path in self.loaded_tables.items()
+                    for name, path in self.db_manager.loaded_tables.items()
                 },
                 'query': self.query_edit.toPlainText(),
-                'connection_type': self.current_connection_type
+                'connection_type': self.db_manager.connection_type
             }
             
             return current_data != saved_data
@@ -1228,28 +1101,22 @@ LIMIT 10
 
     def new_project(self):
         """Create a new project by clearing current state"""
-        if self.conn:
+        if self.db_manager.is_connected():
             reply = QMessageBox.question(self, 'New Project',
                                        'Are you sure you want to start a new project? All unsaved changes will be lost.',
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 # Close existing connection
-                if self.current_connection_type == "duckdb":
-                    self.conn.close()
-                else:  # sqlite
-                    self.conn.close()
+                self.db_manager.close_connection()
                 
                 # Reset state
-                self.conn = None
-                self.current_connection_type = None
-                self.loaded_tables.clear()
-                self.table_columns.clear()
                 self.tables_list.clear()
                 self.query_edit.clear()
                 self.results_table.setRowCount(0)
                 self.results_table.setColumnCount(0)
                 self.current_project_file = None
                 self.setWindowTitle('SQL Shell')
+                self.db_info_label.setText("No database connected")
                 self.statusBar().showMessage('New project created')
 
     def save_project(self):
@@ -1282,11 +1149,11 @@ LIMIT 10
             project_data = {
                 'tables': {},
                 'query': self.query_edit.toPlainText(),
-                'connection_type': self.current_connection_type
+                'connection_type': self.db_manager.connection_type
             }
             
             # Save table information
-            for table_name, file_path in self.loaded_tables.items():
+            for table_name, file_path in self.db_manager.loaded_tables.items():
                 # For database tables and query results, store the special identifier
                 if file_path in ['database', 'query_result']:
                     source_path = file_path
@@ -1296,7 +1163,7 @@ LIMIT 10
                 
                 project_data['tables'][table_name] = {
                     'file_path': source_path,
-                    'columns': self.table_columns.get(table_name, [])
+                    'columns': self.db_manager.table_columns.get(table_name, [])
                 }
             
             with open(file_name, 'w') as f:
@@ -1330,10 +1197,9 @@ LIMIT 10
                 self.new_project()
                 
                 # Create connection if needed
-                if not self.conn:
-                    self.conn = duckdb.connect(':memory:')
-                    self.current_connection_type = 'duckdb'
-                    self.db_info_label.setText("Connected to: in-memory DuckDB")
+                if not self.db_manager.is_connected():
+                    connection_info = self.db_manager.create_memory_connection()
+                    self.db_info_label.setText(connection_info)
                 
                 # Load tables
                 for table_name, table_info in project_data['tables'].items():
@@ -1343,37 +1209,29 @@ LIMIT 10
                             # For tables from database, we need to recreate them from their data
                             # Execute a SELECT to get the data and recreate the table
                             query = f"SELECT * FROM {table_name}"
-                            df = pd.read_sql_query(query, self.conn)
-                            self.conn.register(table_name, df)
-                            self.loaded_tables[table_name] = 'database'
+                            df = self.db_manager.execute_query(query)
+                            self.db_manager.register_dataframe(df, table_name, 'database')
                             self.tables_list.addItem(f"{table_name} (database)")
                         elif file_path == 'query_result':
                             # For tables from query results, we'll need to re-run the query
                             # For now, just note it as a query result table
-                            self.loaded_tables[table_name] = 'query_result'
+                            self.db_manager.loaded_tables[table_name] = 'query_result'
                             self.tables_list.addItem(f"{table_name} (query result)")
                         elif os.path.exists(file_path):
-                            # Load the file based on its extension
-                            if file_path.endswith(('.xlsx', '.xls')):
-                                df = pd.read_excel(file_path)
-                            elif file_path.endswith('.csv'):
-                                df = pd.read_csv(file_path)
-                            elif file_path.endswith('.parquet'):
-                                df = pd.read_parquet(file_path)
-                            else:
+                            # Use the database manager to load the file
+                            try:
+                                table_name, df = self.db_manager.load_file(file_path)
+                                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                            except Exception as e:
+                                QMessageBox.warning(self, "Warning",
+                                    f"Failed to load file for table {table_name}:\n{str(e)}")
                                 continue
-                            
-                            # Register the table
-                            self.conn.register(table_name, df)
-                            self.loaded_tables[table_name] = file_path
-                            self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
                         else:
                             QMessageBox.warning(self, "Warning",
                                 f"Could not find file for table {table_name}: {file_path}")
                             continue
                             
-                        # Store the columns
-                        self.table_columns[table_name] = table_info['columns']
+                        # The columns are already set by the database manager
                             
                     except Exception as e:
                         QMessageBox.warning(self, "Warning",
@@ -1400,33 +1258,15 @@ LIMIT 10
     def rename_table(self, old_name, new_name):
         """Rename a table in the database and update tracking"""
         try:
-            # Sanitize the new name
-            new_name = self.sanitize_table_name(new_name)
+            # Use the database manager to rename the table
+            result = self.db_manager.rename_table(old_name, new_name)
             
-            # Check if new name already exists
-            if new_name in self.loaded_tables:
-                raise ValueError(f"Table '{new_name}' already exists")
-                
-            # Rename in database
-            if self.current_connection_type == 'sqlite':
-                self.conn.execute(f'ALTER TABLE "{old_name}" RENAME TO "{new_name}"')
-            else:  # duckdb
-                # For DuckDB, we need to:
-                # 1. Get the data from the old view/table
-                df = self.conn.execute(f'SELECT * FROM {old_name}').fetchdf()
-                # 2. Drop the old view
-                self.conn.execute(f'DROP VIEW IF EXISTS {old_name}')
-                # 3. Register the data under the new name
-                self.conn.register(new_name, df)
+            if result:
+                # Update completer
+                self.update_completer()
+                return True
             
-            # Update tracking
-            self.loaded_tables[new_name] = self.loaded_tables.pop(old_name)
-            self.table_columns[new_name] = self.table_columns.pop(old_name)
-            
-            # Update completer
-            self.update_completer()
-            
-            return True
+            return False
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to rename table:\n\n{str(e)}")
