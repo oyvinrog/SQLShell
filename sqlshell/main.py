@@ -523,6 +523,9 @@ class SQLShell(QMainWindow):
         self.tab_widget.setMovable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
         
+        # Connect double-click signal for direct tab renaming
+        self.tab_widget.tabBarDoubleClicked.connect(self.handle_tab_double_click)
+        
         # Add a "+" button to the tab bar
         self.tab_widget.setCornerWidget(self.create_tab_corner_widget())
         
@@ -1810,6 +1813,24 @@ LIMIT 10
         
         if ok and new_title:
             self.tab_widget.setTabText(current_idx, new_title)
+    
+    def handle_tab_double_click(self, index):
+        """Handle double-clicking on a tab by starting rename immediately"""
+        if index == -1:
+            return
+            
+        current_title = self.tab_widget.tabText(index)
+        
+        new_title, ok = QInputDialog.getText(
+            self,
+            "Rename Tab",
+            "Enter new tab name:",
+            QLineEdit.EchoMode.Normal,
+            current_title
+        )
+        
+        if ok and new_title:
+            self.tab_widget.setTabText(index, new_title)
     
     def close_tab(self, index):
         """Close the tab at the given index"""
