@@ -481,9 +481,33 @@ class SQLEditor(QPlainTextEdit):
             else:
                 table_name = text
                 
-            # Insert table name at current cursor position
+            # Get current cursor position and surrounding text
             cursor = self.textCursor()
-            cursor.insertText(table_name)
+            document = self.document()
+            current_block = cursor.block()
+            block_text = current_block.text()
+            position_in_block = cursor.positionInBlock()
+            
+            # Get text before cursor in current line
+            text_before = block_text[:position_in_block].strip().upper()
+            
+            # Determine how to insert the table name based on context
+            if (text_before.endswith("FROM") or
+                text_before.endswith("JOIN") or
+                text_before.endswith("INTO") or
+                text_before.endswith("UPDATE") or
+                text_before.endswith(",")):
+                # Just insert the table name with a space before it
+                cursor.insertText(f" {table_name}")
+            elif text_before.endswith("FROM ") or text_before.endswith("JOIN ") or text_before.endswith("INTO ") or text_before.endswith(", "):
+                # Just insert the table name without a space
+                cursor.insertText(table_name)
+            elif not text_before and not block_text:
+                # If at empty line, insert a SELECT statement
+                cursor.insertText(f"SELECT * FROM {table_name}")
+            else:
+                # Default: just insert the table name at cursor position
+                cursor.insertText(table_name)
             
             # Accept the action
             event.acceptProposedAction()

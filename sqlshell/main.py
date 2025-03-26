@@ -71,28 +71,68 @@ class DraggableTablesList(QListWidget):
         drag = QDrag(self)
         drag.setMimeData(mime_data)
         
-        # Optional: Set a custom pixmap for the drag
+        # Create a visually appealing drag pixmap
         font = self.font()
         font.setBold(True)
         metrics = self.fontMetrics()
         text_width = metrics.horizontalAdvance(table_name)
         text_height = metrics.height()
         
-        pixmap = QPixmap(text_width + 10, text_height + 6)
+        # Make the pixmap large enough for the text plus padding and a small icon
+        padding = 10
+        pixmap = QPixmap(text_width + padding * 2 + 16, text_height + padding)
         pixmap.fill(Qt.GlobalColor.transparent)
         
+        # Begin painting
         painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw a nice rounded rectangle background
+        bg_color = QColor(44, 62, 80, 220)  # Dark blue with transparency
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, pixmap.width(), pixmap.height(), 5, 5)
+        
+        # Draw text
         painter.setPen(Qt.GlobalColor.white)
         painter.setFont(font)
-        painter.fillRect(0, 0, text_width + 10, text_height + 6, QColor(52, 152, 219, 180))  # Semi-transparent blue background
-        painter.drawText(5, text_height + 2, table_name)
+        painter.drawText(int(padding + 16), int(text_height + (padding / 2) - 2), table_name)
+        
+        # Draw a small database icon (simulated)
+        icon_x = padding / 2
+        icon_y = (pixmap.height() - 12) / 2
+        
+        # Draw a simple database icon as a blue circle with lines
+        table_icon_color = QColor("#3498DB")
+        painter.setBrush(QBrush(table_icon_color))
+        painter.setPen(Qt.GlobalColor.white)
+        painter.drawEllipse(int(icon_x), int(icon_y), 12, 12)
+        
+        # Draw "table" lines inside the circle
+        painter.setPen(Qt.GlobalColor.white)
+        painter.drawLine(int(icon_x + 3), int(icon_y + 4), int(icon_x + 9), int(icon_y + 4))
+        painter.drawLine(int(icon_x + 3), int(icon_y + 6), int(icon_x + 9), int(icon_y + 6))
+        painter.drawLine(int(icon_x + 3), int(icon_y + 8), int(icon_x + 9), int(icon_y + 8))
+        
         painter.end()
         
+        # Set the drag pixmap
         drag.setPixmap(pixmap)
-        drag.setHotSpot(QPoint(5, pixmap.height() // 2))
+        
+        # Set hotspot to be at the top-left corner of the text
+        drag.setHotSpot(QPoint(padding, pixmap.height() // 2))
         
         # Execute drag operation
-        drag.exec(supportedActions)
+        result = drag.exec(supportedActions)
+        
+        # Optional: add a highlight effect after dragging
+        if result == Qt.DropAction.CopyAction and item:
+            # Briefly highlight the dragged item
+            orig_bg = item.background()
+            item.setBackground(QBrush(QColor(26, 188, 156, 100)))  # Light green highlight
+            
+            # Reset after a short delay
+            QTimer.singleShot(300, lambda: item.setBackground(orig_bg))
 
 class SQLShell(QMainWindow):
     def __init__(self):
