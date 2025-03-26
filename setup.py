@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 import os
 
 # Read version from __init__.py
-with open(os.path.join('sqlshell', '__init__.py'), 'r') as f:
+with open(os.path.join('sqlshell', '__init__.py'), 'r', encoding='utf-8') as f:
     for line in f:
         if line.startswith('__version__'):
             version = line.split('=')[1].strip().strip('"\'')
@@ -29,7 +29,7 @@ setup(
     },
     author="SQLShell Team",
     description="A powerful SQL shell with GUI interface for data analysis",
-    long_description=open('README.md').read(),
+    long_description=open('README.md', encoding='utf-8').read(),
     long_description_content_type="text/markdown",
     keywords="sql, data analysis, gui, duckdb",
     url="https://github.com/yourusername/sqlshell",
