@@ -2,8 +2,6 @@
 
 <div align="center">
 
-![Page Icon](sqlshell_sqlshell_logo.png)
-   
 ![SQLShell Interface](sqlshell_logo.png)
 
 **A modern SQL REPL interface for seamless querying of Excel, Parquet, and SQLite databases**
