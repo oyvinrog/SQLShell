@@ -380,4 +380,26 @@ class AnimatedSplashScreen(QWidget):
 
     def finish(self, widget):
         """Store the widget to show after animation completes"""
-        self.next_widget = widget 
+        self.next_widget = widget
+        
+        # On Windows, we need to explicitly trigger the finish process
+        # instead of waiting for the animation to complete
+        
+        # First forcibly stop all animations
+        if hasattr(self, 'animation_timer') and self.animation_timer:
+            self.animation_timer.stop()
+            
+        # Stop the z-order timer
+        if hasattr(self, 'z_order_timer'):
+            self.z_order_timer.stop()
+            
+        if self.movie:
+            self.movie.stop()
+        if self.fade_anim:
+            self.fade_anim.stop()
+        if self.progress_anim:
+            self.progress_anim.stop()
+            
+        # Close the splash screen and show the main window directly
+        # Use a very short timer to allow the event loop to process
+        QTimer.singleShot(50, self._finish_splash) 

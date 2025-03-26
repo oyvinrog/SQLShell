@@ -2380,9 +2380,15 @@ def main():
                 print("Failsafe timer activated - showing main window")
                 if splash:
                     try:
-                        splash.close()
-                    except:
-                        pass
+                        # First try to use the proper finish method
+                        splash.finish(window)
+                    except Exception as e:
+                        print(f"Error in failsafe finish: {e}")
+                        try:
+                            # Fall back to direct close if finish fails
+                            splash.close()
+                        except Exception:
+                            pass
                 window.show()
         
         # Create and show main window after delay
