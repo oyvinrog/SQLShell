@@ -2,7 +2,7 @@
 
 <div align="center">
 
-!SQLShell Icon
+![Page Icon](sqlshell_sqlshell_logo.png)
    
 ![SQLShell Interface](sqlshell_logo.png)
 
