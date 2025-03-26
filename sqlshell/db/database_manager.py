@@ -459,6 +459,12 @@ class DatabaseManager:
         # Start with table names
         completion_words = set(self.loaded_tables.keys())
         
+        # Track column data types for smarter autocompletion
+        column_data_types = {}  # {table.column: data_type}
+        
+        # Detect potential table relationships for JOIN suggestions
+        potential_relationships = []  # [(table1, column1, table2, column2)]
+        
         # Add column names with and without table prefixes, up to reasonable limits
         MAX_COLUMNS_PER_TABLE = 100  # Limit columns to prevent memory issues
         MAX_TABLES_WITH_COLUMNS = 20  # Limit the number of tables to process
@@ -475,25 +481,194 @@ class DatabaseManager:
             # Add qualified column names (table.column)
             for col in columns[:MAX_COLUMNS_PER_TABLE]:
                 completion_words.add(f"{table}.{col}")
+            
+            # Try to infer table relationships based on column naming
+            self._detect_relationships(table, columns, potential_relationships)
+            
+            # Try to infer column data types when possible
+            if self.is_connected():
+                try:
+                    self._detect_column_types(table, column_data_types)
+                except Exception:
+                    pass
         
-        # Add SQL functions and keywords that are commonly used
+        # Add common SQL functions and aggregations with context-aware completions
         sql_functions = [
-            "COUNT(*)", "SUM(", "AVG(", "MIN(", "MAX(", 
-            "CAST(", "CONVERT(", "COALESCE(", "NULLIF(",
-            "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"
+            # Aggregation functions with completed parentheses
+            "COUNT(*)", "COUNT(DISTINCT ", "SUM(", "AVG(", "MIN(", "MAX(", 
+            
+            # String functions
+            "CONCAT(", "SUBSTR(", "LOWER(", "UPPER(", "TRIM(", "REPLACE(", "LENGTH(", 
+            "REGEXP_REPLACE(", "REGEXP_EXTRACT(", "REGEXP_MATCH(",
+            
+            # Date/time functions
+            "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "NOW()", 
+            "EXTRACT(", "DATE_TRUNC(", "DATE_PART(", "DATEADD(", "DATEDIFF(",
+            
+            # Type conversion
+            "CAST( AS ", "CONVERT(", "TRY_CAST( AS ", "FORMAT(", 
+            
+            # Conditional functions
+            "COALESCE(", "NULLIF(", "GREATEST(", "LEAST(", "IFF(", "IFNULL(",
+            
+            # Window functions
+            "ROW_NUMBER() OVER (", "RANK() OVER (", "DENSE_RANK() OVER (",
+            "LEAD( OVER (", "LAG( OVER (", "FIRST_VALUE( OVER (", "LAST_VALUE( OVER ("
         ]
         
-        # Add common SQL patterns
+        # Add common SQL patterns with context awareness
         sql_patterns = [
-            "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET",
-            "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN",
-            "ON", "WHERE", "AND", "OR", "NOT", "IS NULL", "IS NOT NULL",
-            "IN (", "NOT IN (", "BETWEEN", "LIKE"
+            # Basic query patterns
+            "SELECT * FROM ", "SELECT COUNT(*) FROM ", 
+            "SELECT DISTINCT ", "GROUP BY ", "ORDER BY ", "HAVING ",
+            "LIMIT ", "OFFSET ", "WHERE ",
+            
+            # JOIN patterns - complete with ON and common join points
+            "INNER JOIN ", "LEFT JOIN ", "RIGHT JOIN ", "FULL OUTER JOIN ",
+            "LEFT OUTER JOIN ", "RIGHT OUTER JOIN ", "CROSS JOIN ",
+            
+            # Advanced patterns
+            "WITH _ AS (", "CASE WHEN _ THEN _ ELSE _ END",
+            "OVER (PARTITION BY _ ORDER BY _)",
+            "EXISTS (SELECT 1 FROM _ WHERE _)",
+            "NOT EXISTS (SELECT 1 FROM _ WHERE _)",
+            
+            # Common operator patterns
+            "BETWEEN _ AND _", "IN (", "NOT IN (", "IS NULL", "IS NOT NULL",
+            "LIKE '%_%'", "NOT LIKE ", "ILIKE ", 
+            
+            # Data manipulation patterns
+            "INSERT INTO _ VALUES (", "INSERT INTO _ (_) VALUES (_)",
+            "UPDATE _ SET _ = _ WHERE _", "DELETE FROM _ WHERE _"
         ]
+        
+        # Add table relationships as suggested JOIN patterns
+        for table1, col1, table2, col2 in potential_relationships:
+            join_pattern = f"JOIN {table2} ON {table1}.{col1} = {table2}.{col2}"
+            completion_words.add(join_pattern)
+            
+            # Also add the reverse relationship
+            join_pattern_rev = f"JOIN {table1} ON {table2}.{col2} = {table1}.{col1}"
+            completion_words.add(join_pattern_rev)
         
         # Add all SQL extras to the completion words
         completion_words.update(sql_functions)
         completion_words.update(sql_patterns)
         
-        # Convert set back to list
-        return list(completion_words) 
+        # Add common data-specific comparison patterns based on column types
+        for col_name, data_type in column_data_types.items():
+            if 'INT' in data_type.upper() or 'NUM' in data_type.upper() or 'FLOAT' in data_type.upper():
+                # Numeric columns
+                completion_words.add(f"{col_name} > ")
+                completion_words.add(f"{col_name} < ")
+                completion_words.add(f"{col_name} >= ")
+                completion_words.add(f"{col_name} <= ")
+                completion_words.add(f"{col_name} BETWEEN ")
+            elif 'DATE' in data_type.upper() or 'TIME' in data_type.upper():
+                # Date/time columns
+                completion_words.add(f"{col_name} > CURRENT_DATE")
+                completion_words.add(f"{col_name} < CURRENT_DATE")
+                completion_words.add(f"{col_name} BETWEEN CURRENT_DATE - INTERVAL ")
+                completion_words.add(f"EXTRACT(YEAR FROM {col_name})")
+                completion_words.add(f"DATE_TRUNC('month', {col_name})")
+            elif 'CHAR' in data_type.upper() or 'TEXT' in data_type.upper() or 'VARCHAR' in data_type.upper():
+                # String columns
+                completion_words.add(f"{col_name} LIKE '%")
+                completion_words.add(f"{col_name} ILIKE '%")
+                completion_words.add(f"LOWER({col_name}) = ")
+                completion_words.add(f"UPPER({col_name}) = ")
+        
+        # Convert set back to list and sort for better usability
+        completion_list = list(completion_words)
+        completion_list.sort(key=lambda x: (not x.isupper(), x))  # Prioritize SQL keywords
+        
+        return completion_list
+        
+    def _detect_relationships(self, table, columns, potential_relationships):
+        """
+        Detect potential relationships between tables based on column naming patterns.
+        
+        Args:
+            table: Current table name
+            columns: List of column names in this table
+            potential_relationships: List to populate with detected relationships
+        """
+        # Look for columns that might be foreign keys (common patterns)
+        for col in columns:
+            # Common ID patterns: table_id, tableId, TableID, etc.
+            if col.lower().endswith('_id') or col.lower().endswith('id'):
+                # Extract potential table name from column name
+                if col.lower().endswith('_id'):
+                    potential_table = col[:-3]  # Remove '_id'
+                else:
+                    # Try to extract tablename from camelCase or PascalCase
+                    potential_table = col[:-2]  # Remove 'Id'
+                
+                # Normalize to lowercase for comparison
+                potential_table = potential_table.lower()
+                
+                # Check if this potential table exists in our loaded tables
+                for existing_table in self.loaded_tables.keys():
+                    # Normalize for comparison
+                    existing_lower = existing_table.lower()
+                    
+                    # If we find a matching table, it's likely a relationship
+                    if existing_lower == potential_table or existing_lower.endswith(f"_{potential_table}"):
+                        # Add this relationship
+                        # We assume the target column in the referenced table is 'id'
+                        potential_relationships.append((table, col, existing_table, 'id'))
+                        break
+            
+            # Also detect columns with same name across tables (potential join points)
+            for other_table, other_columns in self.table_columns.items():
+                if other_table != table and col in other_columns:
+                    # Same column name in different tables - potential join point
+                    potential_relationships.append((table, col, other_table, col))
+    
+    def _detect_column_types(self, table, column_data_types):
+        """
+        Detect column data types for a table to enable smarter autocompletion.
+        
+        Args:
+            table: Table name to analyze
+            column_data_types: Dictionary to populate with column data types
+        """
+        if not self.is_connected():
+            return
+            
+        try:
+            if self.connection_type == 'sqlite':
+                # Get column info from SQLite
+                cursor = self.conn.cursor()
+                cursor.execute(f"PRAGMA table_info({table})")
+                columns_info = cursor.fetchall()
+                
+                for column_info in columns_info:
+                    col_name = column_info[1]  # Column name is at index 1
+                    data_type = column_info[2]  # Data type is at index 2
+                    
+                    # Store as table.column: data_type for qualified lookups
+                    column_data_types[f"{table}.{col_name}"] = data_type
+                    # Also store just column: data_type for unqualified lookups
+                    column_data_types[col_name] = data_type
+                    
+            elif self.connection_type == 'duckdb':
+                # Get column info from DuckDB
+                query = f"""
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name='{table}' AND table_schema='main'
+                """
+                result = self.conn.execute(query).fetchdf()
+                
+                for _, row in result.iterrows():
+                    col_name = row['column_name']
+                    data_type = row['data_type']
+                    
+                    # Store as table.column: data_type for qualified lookups
+                    column_data_types[f"{table}.{col_name}"] = data_type
+                    # Also store just column: data_type for unqualified lookups
+                    column_data_types[col_name] = data_type
+        except Exception:
+            # Ignore errors in type detection - this is just for enhancement
+            pass 

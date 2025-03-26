@@ -813,17 +813,82 @@ class SQLShell(QMainWindow):
             # Start a background update with a timer
             self.statusBar().showMessage("Updating auto-completion...", 2000)
             
+            # Track query history and frequently used terms
+            if not hasattr(self, 'query_history'):
+                self.query_history = []
+                self.completion_usage = {}  # Track usage frequency
+            
             # Get completion words from the database manager
             completion_words = self.db_manager.get_all_table_columns()
             
+            # Add frequently used terms from query history with higher priority
+            if hasattr(self, 'completion_usage') and self.completion_usage:
+                # Get the most frequently used terms (top 100)
+                frequent_terms = sorted(
+                    self.completion_usage.items(), 
+                    key=lambda x: x[1], 
+                    reverse=True
+                )[:100]
+                
+                # Add these to our completion words
+                for term, _ in frequent_terms:
+                    if term not in completion_words:
+                        completion_words.append(term)
+            
             # Limit to a reasonable number of items to prevent performance issues
-            MAX_COMPLETION_ITEMS = 1000
+            MAX_COMPLETION_ITEMS = 2000  # Increased from 1000 to accommodate more smart suggestions
             if len(completion_words) > MAX_COMPLETION_ITEMS:
-                # If too many items, prioritize table names and common SQL keywords
+                # Create a more advanced prioritization strategy
+                prioritized_words = []
+                
+                # First, include all table names
                 tables = list(self.db_manager.loaded_tables.keys())
-                # Sort by priority: tables first, then limit to max items
-                completion_words = sorted(completion_words, 
-                    key=lambda w: (0 if w in tables else 1, w))[:MAX_COMPLETION_ITEMS]
+                prioritized_words.extend(tables)
+                
+                # Then add most common SQL keywords and patterns
+                sql_keywords = [w for w in completion_words if w.isupper() and len(w) > 1]
+                prioritized_words.extend(sql_keywords[:200])  # Cap at 200 keywords
+                
+                # Add frequently used items
+                if hasattr(self, 'completion_usage'):
+                    frequent_items = [
+                        item for item, _ in sorted(
+                            self.completion_usage.items(), 
+                            key=lambda x: x[1], 
+                            reverse=True
+                        )[:100]  # Top 100 most used
+                    ]
+                    prioritized_words.extend(frequent_items)
+                
+                # Add table.column patterns which are very useful
+                qualified_columns = [w for w in completion_words if '.' in w and w.split('.')[0] in tables]
+                prioritized_words.extend(qualified_columns[:300])  # Cap at 300 qualified columns
+                
+                # Add common completion patterns
+                patterns = [w for w in completion_words if ' ' in w]  # Spaces indicate phrases/patterns
+                prioritized_words.extend(patterns[:200])  # Cap at 200 patterns
+                
+                # Finally add other columns
+                remaining_slots = MAX_COMPLETION_ITEMS - len(prioritized_words)
+                remaining_words = [
+                    w for w in completion_words 
+                    if w not in prioritized_words 
+                    and not w.isupper() 
+                    and '.' not in w 
+                    and ' ' not in w
+                ]
+                prioritized_words.extend(remaining_words[:remaining_slots])
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                completion_words = []
+                for item in prioritized_words:
+                    if item not in seen:
+                        seen.add(item)
+                        completion_words.append(item)
+                
+                # Ensure we don't exceed the maximum
+                completion_words = completion_words[:MAX_COMPLETION_ITEMS]
             
             # Use a single model for all tabs to save memory and improve performance
             model = QStringListModel(completion_words)
@@ -859,7 +924,7 @@ class SQLShell(QMainWindow):
         except Exception as e:
             # Catch any errors to prevent hanging
             self.statusBar().showMessage(f"Auto-completion update error: {str(e)}", 2000)
-
+            
     def _update_tab_completer(self, tab, model):
         """Helper method to update a tab's completer with the given model"""
         if tab and not tab.isHidden():  # Only update visible tabs
@@ -891,6 +956,9 @@ class SQLShell(QMainWindow):
                 self.populate_table(result)
                 self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
                 
+                # Record query in history and update completion usage
+                self._update_query_history(query)
+                
             except SyntaxError as e:
                 QMessageBox.critical(self, "SQL Syntax Error", str(e))
                 self.statusBar().showMessage("Query execution failed: syntax error")
@@ -906,6 +974,69 @@ class SQLShell(QMainWindow):
                 f"An unexpected error occurred:\n\n{str(e)}")
             self.statusBar().showMessage("Query execution failed")
 
+    def _update_query_history(self, query):
+        """Update query history and track term usage for improved autocompletion"""
+        import re
+        
+        # Initialize history if it doesn't exist
+        if not hasattr(self, 'query_history'):
+            self.query_history = []
+            self.completion_usage = {}
+        
+        # Add query to history (limit to 100 queries)
+        self.query_history.append(query)
+        if len(self.query_history) > 100:
+            self.query_history.pop(0)
+        
+        # Extract terms and patterns from the query to update usage frequency
+        
+        # Extract table and column names
+        table_pattern = r'\b([a-zA-Z0-9_]+)\b\.([a-zA-Z0-9_]+)\b'
+        qualified_columns = re.findall(table_pattern, query)
+        for table, column in qualified_columns:
+            qualified_name = f"{table}.{column}"
+            self.completion_usage[qualified_name] = self.completion_usage.get(qualified_name, 0) + 1
+            
+            # Also count the table and column separately
+            self.completion_usage[table] = self.completion_usage.get(table, 0) + 1
+            self.completion_usage[column] = self.completion_usage.get(column, 0) + 1
+        
+        # Extract SQL keywords
+        keyword_pattern = r'\b([A-Z_]{2,})\b'
+        keywords = re.findall(keyword_pattern, query.upper())
+        for keyword in keywords:
+            self.completion_usage[keyword] = self.completion_usage.get(keyword, 0) + 1
+        
+        # Extract common SQL patterns
+        patterns = [
+            r'(SELECT\s+.*?\s+FROM)',
+            r'(GROUP\s+BY\s+.*?(?:HAVING|ORDER|LIMIT|$))',
+            r'(ORDER\s+BY\s+.*?(?:LIMIT|$))',
+            r'(INNER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|FULL\s+JOIN).*?ON\s+.*?=\s+.*?(?:WHERE|JOIN|GROUP|ORDER|LIMIT|$)',
+            r'(INSERT\s+INTO\s+.*?\s+VALUES)',
+            r'(UPDATE\s+.*?\s+SET\s+.*?\s+WHERE)',
+            r'(DELETE\s+FROM\s+.*?\s+WHERE)'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, query, re.IGNORECASE | re.DOTALL)
+            for match in matches:
+                # Normalize pattern by removing extra whitespace and converting to uppercase
+                normalized = re.sub(r'\s+', ' ', match).strip().upper()
+                if len(normalized) < 50:  # Only track reasonably sized patterns
+                    self.completion_usage[normalized] = self.completion_usage.get(normalized, 0) + 1
+        
+        # Schedule an update of the completion model (but not too often to avoid performance issues)
+        if not hasattr(self, '_last_completer_update') or \
+           (datetime.now() - self._last_completer_update).total_seconds() > 30:
+            self._last_completer_update = datetime.now()
+            
+            # Use a timer to delay the update to avoid blocking the UI
+            update_timer = QTimer()
+            update_timer.setSingleShot(True)
+            update_timer.timeout.connect(self.update_completer)
+            update_timer.start(1000)  # Update after 1 second
+            
     def clear_query(self):
         """Clear the query editor with animation"""
         # Get the current tab
