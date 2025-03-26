@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter)
+                             QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter, QApplication)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 
@@ -49,81 +49,84 @@ class QueryTab(QWidget):
         self.execute_btn.setObjectName("primary_button")
         self.execute_btn.setIcon(QIcon.fromTheme("media-playback-start"))
         self.execute_btn.clicked.connect(self.execute_query)
-        self.execute_btn.setToolTip("Execute Query (Ctrl+Enter)")
         
         self.clear_btn = QPushButton('Clear')
-        self.clear_btn.setIcon(QIcon.fromTheme("edit-clear"))
         self.clear_btn.clicked.connect(self.clear_query)
         
         button_layout.addWidget(self.execute_btn)
         button_layout.addWidget(self.clear_btn)
         button_layout.addStretch()
         
-        query_layout.addLayout(button_layout)
-        
-        # Bottom part - Results section
-        results_widget = QFrame()
-        results_widget.setObjectName("content_panel")
-        results_layout = QVBoxLayout(results_widget)
-        results_layout.setContentsMargins(16, 16, 16, 16)
-        results_layout.setSpacing(12)
-        
-        # Results header with row count and export options
-        results_header_layout = QHBoxLayout()
-        
-        self.results_title = QLabel(self.results_title_text)
-        self.results_title.setObjectName("header_label")
-        
-        self.row_count_label = QLabel("")
-        self.row_count_label.setStyleSheet(f"color: {self.parent.colors['text_light']}; font-style: italic;")
-        
-        results_header_layout.addWidget(self.results_title)
-        results_header_layout.addWidget(self.row_count_label)
-        results_header_layout.addStretch()
-        
-        # Export buttons
-        export_layout = QHBoxLayout()
-        export_layout.setSpacing(8)
-        
         self.export_excel_btn = QPushButton('Export to Excel')
         self.export_excel_btn.setIcon(QIcon.fromTheme("x-office-spreadsheet"))
         self.export_excel_btn.clicked.connect(self.export_to_excel)
         
         self.export_parquet_btn = QPushButton('Export to Parquet')
-        self.export_parquet_btn.setIcon(QIcon.fromTheme("document-save"))
+        self.export_parquet_btn.setIcon(QIcon.fromTheme("application-octet-stream"))
         self.export_parquet_btn.clicked.connect(self.export_to_parquet)
         
-        export_layout.addWidget(self.export_excel_btn)
-        export_layout.addWidget(self.export_parquet_btn)
+        button_layout.addWidget(self.export_excel_btn)
+        button_layout.addWidget(self.export_parquet_btn)
         
-        results_header_layout.addLayout(export_layout)
-        results_layout.addLayout(results_header_layout)
+        query_layout.addLayout(button_layout)
         
-        # Table widget for results with modern styling
+        # Bottom part - Results section
+        results_widget = QWidget()
+        results_layout = QVBoxLayout(results_widget)
+        results_layout.setContentsMargins(16, 16, 16, 16)
+        results_layout.setSpacing(12)
+        
+        # Results header with row count
+        header_layout = QHBoxLayout()
+        self.results_title = QLabel(self.results_title_text)
+        self.results_title.setObjectName("header_label")
+        header_layout.addWidget(self.results_title)
+        
+        header_layout.addStretch()
+        
+        self.row_count_label = QLabel("")
+        self.row_count_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
+        header_layout.addWidget(self.row_count_label)
+        
+        results_layout.addLayout(header_layout)
+        
+        # Results table with customized header
         self.results_table = QTableWidget()
-        self.results_table.setSortingEnabled(True)
         self.results_table.setAlternatingRowColors(True)
         
-        # Set custom header for filtering
+        # Use custom FilterHeader for filtering
         header = FilterHeader(self.results_table)
         header.set_main_window(self.parent)  # Set reference to main window
         self.results_table.setHorizontalHeader(header)
-        header.setStretchLastSection(True)
-        header.setSectionsMovable(True)
         
-        self.results_table.verticalHeader().setVisible(False)
+        # Set table properties for better performance with large datasets
         self.results_table.setShowGrid(True)
-        self.results_table.setGridStyle(Qt.PenStyle.SolidLine)
+        self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.results_table.horizontalHeader().setStretchLastSection(True)
+        self.results_table.verticalHeader().setVisible(True)
         
         results_layout.addWidget(self.results_table)
-
+        
         # Add widgets to splitter
         self.splitter.addWidget(query_widget)
         self.splitter.addWidget(results_widget)
         
-        # Set initial sizes for splitter
-        self.splitter.setSizes([300, 500])
+        # Set initial sizes - default 40% query, 60% results
+        # This will be better for most uses of the app
+        screen = QApplication.primaryScreen()
+        if screen:
+            # Get available screen height
+            available_height = screen.availableGeometry().height()
+            # Calculate reasonable query pane size (25-35% depending on screen size)
+            if available_height >= 1080:  # Large screens
+                query_height = int(available_height * 0.3)  # 30% for query area
+                self.splitter.setSizes([query_height, available_height - query_height])
+            else:  # Smaller screens
+                self.splitter.setSizes([300, 500])  # Default values for smaller screens
+        else:
+            # Fallback to fixed values if screen detection fails
+            self.splitter.setSizes([300, 500])
         
         main_layout.addWidget(self.splitter)
         
@@ -137,16 +140,20 @@ class QueryTab(QWidget):
         
     def execute_query(self):
         """Execute the current query"""
-        self.parent.execute_query()
+        if hasattr(self.parent, 'execute_query'):
+            self.parent.execute_query()
         
     def clear_query(self):
         """Clear the query editor"""
-        self.parent.clear_query()
+        if hasattr(self.parent, 'clear_query'):
+            self.parent.clear_query()
         
     def export_to_excel(self):
         """Export results to Excel"""
-        self.parent.export_to_excel()
+        if hasattr(self.parent, 'export_to_excel'):
+            self.parent.export_to_excel()
         
     def export_to_parquet(self):
         """Export results to Parquet"""
-        self.parent.export_to_parquet() 
+        if hasattr(self.parent, 'export_to_parquet'):
+            self.parent.export_to_parquet() 

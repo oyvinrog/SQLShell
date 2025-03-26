@@ -365,7 +365,29 @@ class SQLShell(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle('SQL Shell')
-        self.setGeometry(100, 100, 1400, 800)
+        
+        # Get screen geometry for smart sizing
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
+        
+        # Calculate adaptive window size based on screen size
+        # Use 85% of screen size for larger screens, fixed size for smaller screens
+        if screen_width >= 1920 and screen_height >= 1080:  # Larger screens
+            window_width = int(screen_width * 0.85)
+            window_height = int(screen_height * 0.85)
+            self.setGeometry(
+                (screen_width - window_width) // 2,  # Center horizontally
+                (screen_height - window_height) // 2,  # Center vertically
+                window_width, 
+                window_height
+            )
+        else:  # Default for smaller screens
+            self.setGeometry(100, 100, 1400, 800)
+        
+        # Remember if the window was maximized
+        self.was_maximized = False
         
         # Set application icon
         icon_path = os.path.join(os.path.dirname(__file__), "resources", "icon.png")
@@ -407,6 +429,29 @@ class SQLShell(QMainWindow):
         exit_action = file_menu.addAction('Exit')
         exit_action.setShortcut('Ctrl+Q')
         exit_action.triggered.connect(self.close)
+        
+        # Add View menu for window management
+        view_menu = menubar.addMenu('&View')
+        
+        # Maximized window option
+        maximize_action = view_menu.addAction('Maximize Window')
+        maximize_action.setShortcut('F11')
+        maximize_action.triggered.connect(self.toggle_maximize_window)
+        
+        # Zoom submenu
+        zoom_menu = view_menu.addMenu('Zoom')
+        
+        zoom_in_action = zoom_menu.addAction('Zoom In')
+        zoom_in_action.setShortcut('Ctrl++')
+        zoom_in_action.triggered.connect(lambda: self.change_zoom(1.1))
+        
+        zoom_out_action = zoom_menu.addAction('Zoom Out')
+        zoom_out_action.setShortcut('Ctrl+-')
+        zoom_out_action.triggered.connect(lambda: self.change_zoom(0.9))
+        
+        reset_zoom_action = zoom_menu.addAction('Reset Zoom')
+        reset_zoom_action.setShortcut('Ctrl+0')
+        reset_zoom_action.triggered.connect(lambda: self.reset_zoom())
         
         # Add Tab menu
         tab_menu = menubar.addMenu('&Tab')
@@ -1331,6 +1376,9 @@ LIMIT 10
                     event.ignore()
                     return
             
+            # Save window state and settings
+            self.save_recent_projects()
+            
             # Close database connections
             self.db_manager.close_connection()
             event.accept()
@@ -1791,6 +1839,11 @@ LIMIT 10
                 with open(settings_file, 'r') as f:
                     settings = json.load(f)
                     self.recent_projects = settings.get('recent_projects', [])
+                    
+                    # Load window settings if available
+                    window_settings = settings.get('window', {})
+                    if window_settings:
+                        self.restore_window_state(window_settings)
         except Exception:
             self.recent_projects = []
 
@@ -1803,10 +1856,69 @@ LIMIT 10
                 with open(settings_file, 'r') as f:
                     settings = json.load(f)
             settings['recent_projects'] = self.recent_projects
+            
+            # Save window settings
+            window_settings = self.save_window_state()
+            settings['window'] = window_settings
+            
             with open(settings_file, 'w') as f:
                 json.dump(settings, f, indent=4)
         except Exception as e:
             print(f"Error saving recent projects: {e}")
+            
+    def save_window_state(self):
+        """Save current window state"""
+        window_settings = {
+            'maximized': self.isMaximized(),
+            'geometry': {
+                'x': self.geometry().x(),
+                'y': self.geometry().y(),
+                'width': self.geometry().width(),
+                'height': self.geometry().height()
+            }
+        }
+        return window_settings
+        
+    def restore_window_state(self, window_settings):
+        """Restore window state from settings"""
+        try:
+            # Check if we have valid geometry settings
+            geometry = window_settings.get('geometry', {})
+            if all(key in geometry for key in ['x', 'y', 'width', 'height']):
+                x, y = geometry['x'], geometry['y']
+                width, height = geometry['width'], geometry['height']
+                
+                # Ensure the window is visible on the current screen
+                screen = QApplication.primaryScreen()
+                screen_geometry = screen.availableGeometry()
+                
+                # Adjust if window would be off-screen
+                if x < 0 or x + 100 > screen_geometry.width():
+                    x = 100
+                if y < 0 or y + 100 > screen_geometry.height():
+                    y = 100
+                    
+                # Adjust if window is too large for the current screen
+                if width > screen_geometry.width():
+                    width = int(screen_geometry.width() * 0.85)
+                if height > screen_geometry.height():
+                    height = int(screen_geometry.height() * 0.85)
+                
+                self.setGeometry(x, y, width, height)
+            
+            # Set maximized state if needed
+            if window_settings.get('maximized', False):
+                self.showMaximized()
+                self.was_maximized = True
+                
+        except Exception as e:
+            print(f"Error restoring window state: {e}")
+            # Fall back to default geometry
+            screen = QApplication.primaryScreen()
+            screen_geometry = screen.availableGeometry()
+            self.setGeometry(100, 100, 
+                            min(1400, int(screen_geometry.width() * 0.85)), 
+                            min(800, int(screen_geometry.height() * 0.85)))
 
     def add_recent_project(self, project_path):
         """Add a project to recent projects list"""
@@ -2013,6 +2125,85 @@ LIMIT 10
         if index < 0 or index >= self.tab_widget.count():
             return None
         return self.tab_widget.widget(index)
+
+    def toggle_maximize_window(self):
+        """Toggle between maximized and normal window state"""
+        if self.isMaximized():
+            self.showNormal()
+            self.was_maximized = False
+        else:
+            self.showMaximized()
+            self.was_maximized = True
+            
+    def change_zoom(self, factor):
+        """Change the zoom level of the application by adjusting font sizes"""
+        try:
+            # Update font sizes for SQL editors
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                if hasattr(tab, 'query_edit'):
+                    # Get current font
+                    current_font = tab.query_edit.font()
+                    current_size = current_font.pointSizeF()
+                    
+                    # Calculate new size with limits to prevent too small/large fonts
+                    new_size = current_size * factor
+                    if 6 <= new_size <= 72:  # Reasonable limits
+                        current_font.setPointSizeF(new_size)
+                        tab.query_edit.setFont(current_font)
+                        
+                    # Also update the line number area
+                    tab.query_edit.update_line_number_area_width(0)
+                
+                # Update results table font if needed
+                if hasattr(tab, 'results_table'):
+                    table_font = tab.results_table.font()
+                    table_size = table_font.pointSizeF()
+                    new_table_size = table_size * factor
+                    
+                    if 6 <= new_table_size <= 72:
+                        table_font.setPointSizeF(new_table_size)
+                        tab.results_table.setFont(table_font)
+                        # Resize rows and columns to fit new font size
+                        tab.results_table.resizeColumnsToContents()
+                        tab.results_table.resizeRowsToContents()
+            
+            # Update status bar
+            self.statusBar().showMessage(f"Zoom level adjusted to {int(current_size * factor)}", 2000)
+            
+        except Exception as e:
+            self.statusBar().showMessage(f"Error adjusting zoom: {str(e)}", 2000)
+            
+    def reset_zoom(self):
+        """Reset zoom level to default"""
+        try:
+            # Default font sizes
+            sql_editor_size = 12
+            table_size = 10
+            
+            # Update all tabs
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                
+                # Reset editor font
+                if hasattr(tab, 'query_edit'):
+                    editor_font = tab.query_edit.font()
+                    editor_font.setPointSizeF(sql_editor_size)
+                    tab.query_edit.setFont(editor_font)
+                    tab.query_edit.update_line_number_area_width(0)
+                
+                # Reset table font
+                if hasattr(tab, 'results_table'):
+                    table_font = tab.results_table.font()
+                    table_font.setPointSizeF(table_size)
+                    tab.results_table.setFont(table_font)
+                    tab.results_table.resizeColumnsToContents()
+                    tab.results_table.resizeRowsToContents()
+            
+            self.statusBar().showMessage("Zoom level reset to default", 2000)
+            
+        except Exception as e:
+            self.statusBar().showMessage(f"Error resetting zoom: {str(e)}", 2000)
 
 def main():
     app = QApplication(sys.argv)
