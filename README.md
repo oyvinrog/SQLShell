@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![SQLShell Interface](sqlshell_logo.png)
+<img src="sqlshell_logo.png" alt="SQLShell Logo" width="256" height="256">
 
 **A modern SQL REPL interface for seamless querying of Excel, Parquet, and SQLite databases**
 
@@ -14,9 +14,10 @@
 
 - **Interactive SQL Interface** - Rich syntax highlighting for enhanced query writing
 - **DuckDB Integration** - Built-in support for local DuckDB database (pool.db)
-- **Multi-Format Support** - Import and query Excel (.xlsx, .xls) and CSV files effortlessly
+- **Multi-Format Support** - Import and query Excel (.xlsx, .xls), CSV, and Parquet files effortlessly
 - **Modern UI** - Clean, tabular results display with intuitive controls
 - **Productivity Tools** - Streamlined workflow with keyboard shortcuts (e.g., Ctrl+Enter for query execution)
+- **Professional Design** - Human-readable interface with optimized graphics
 
 ## 📦 Installation
 
@@ -51,9 +52,9 @@ pip install sqlshell
 2. **Database Connection**
    - SQLShell automatically connects to a local DuckDB database named 'pool.db'
 
-3. **Working with Excel Files**
-   - Click "Browse Excel" to select your file
-   - File contents are loaded as 'imported_data' table
+3. **Working with Data Files**
+   - Click "Load Files" to select your Excel, CSV, or Parquet files
+   - File contents are loaded as queryable SQL tables
    - Query using standard SQL syntax
 
 4. **Query Execution**
@@ -89,3 +90,4 @@ FROM test_v;
 - Use temporary views for complex query organization
 - Leverage keyboard shortcuts for efficient workflow
 - Explore the multi-format support for various data sources
+- Create multiple tabs for parallel query development

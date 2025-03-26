@@ -261,6 +261,16 @@ class SQLShell(QMainWindow):
         self.setWindowTitle('SQL Shell')
         self.setGeometry(100, 100, 1400, 800)
         
+        # Set application icon
+        icon_path = os.path.join(os.path.dirname(__file__), "resources", "icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        else:
+            # Fallback to the main logo if the icon isn't found
+            main_logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sqlshell_logo.png")
+            if os.path.exists(main_logo_path):
+                self.setWindowIcon(QIcon(main_logo_path))
+        
         # Create menu bar
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
@@ -1763,6 +1773,16 @@ LIMIT 10
 def main():
     app = QApplication(sys.argv)
     app.setStyle(QStyleFactory.create('Fusion'))
+    
+    # Set application icon
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "icon.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+    else:
+        # Fallback to the main logo if the icon isn't found
+        main_logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sqlshell_logo.png")
+        if os.path.exists(main_logo_path):
+            app.setWindowIcon(QIcon(main_logo_path))
     
     # Ensure we have a valid working directory with pool.db
     package_dir = os.path.dirname(os.path.abspath(__file__))

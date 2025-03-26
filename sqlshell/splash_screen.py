@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QRect, pyqtProperty
-from PyQt6.QtGui import QPainter, QColor, QFont, QMovie, QPainterPath, QLinearGradient
+from PyQt6.QtGui import QPainter, QColor, QFont, QMovie, QPainterPath, QLinearGradient, QPixmap
 import os
 
 class AnimatedSplashScreen(QWidget):
@@ -45,13 +45,27 @@ class AnimatedSplashScreen(QWidget):
         content_layout.setContentsMargins(20, 20, 20, 20)
         content_layout.setSpacing(10)
         
+        # Add logo above the title
+        self.logo_label = QLabel(self.content_container)
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Try to load logo from resources directory
+        logo_path = os.path.join(os.path.dirname(__file__), "resources", "logo_small.png")
+        if os.path.exists(logo_path):
+            logo_pixmap = QPixmap(logo_path)
+            # Scale logo to appropriate size for splash screen
+            scaled_logo = logo_pixmap.scaledToHeight(64, Qt.TransformationMode.SmoothTransformation)
+            self.logo_label.setPixmap(scaled_logo)
+        
+        content_layout.addWidget(self.logo_label)
+        
         # Create title label
         self.title_label = QLabel("SQLShell", self.content_container)
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet("""
             QLabel {
                 color: #3498DB;
-                font-size: 32px;
+                font-size: 28px;
                 font-weight: bold;
                 font-family: 'Segoe UI', Arial, sans-serif;
                 background: transparent;
