@@ -42,6 +42,9 @@ class SQLEditor(QPlainTextEdit):
         # Track last key press for better completion behavior
         self.last_key_was_tab = False
         
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        
         # SQL Keywords for autocomplete
         self.sql_keywords = [
             "SELECT", "FROM", "WHERE", "AND", "OR", "INNER", "OUTER", "LEFT", "RIGHT", "JOIN",
@@ -449,4 +452,40 @@ class SQLEditor(QPlainTextEdit):
             block = block.next()
             top = bottom
             bottom = top + round(self.blockBoundingRect(block).height())
-            block_number += 1 
+            block_number += 1
+
+    def dragEnterEvent(self, event):
+        """Handle drag enter events to allow dropping table names."""
+        # Accept text/plain mime data (used for table names)
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+            
+    def dragMoveEvent(self, event):
+        """Handle drag move events to show valid drop locations."""
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+            
+    def dropEvent(self, event):
+        """Handle drop event to insert table name at cursor position."""
+        if event.mimeData().hasText():
+            # Get table name from dropped text
+            text = event.mimeData().text()
+            
+            # Extract actual table name (if it includes parentheses)
+            if " (" in text:
+                table_name = text.split(" (")[0]
+            else:
+                table_name = text
+                
+            # Insert table name at current cursor position
+            cursor = self.textCursor()
+            cursor.insertText(table_name)
+            
+            # Accept the action
+            event.acceptProposedAction()
+        else:
+            event.ignore() 

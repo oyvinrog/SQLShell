@@ -14,9 +14,10 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QTableWidgetItem, QHeaderView, QMessageBox, QPlainTextEdit,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
-                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog, QProgressDialog)
-from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint
-from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath
+                           QCheckBox, QWidgetAction, QMenuBar, QInputDialog, QProgressDialog,
+                           QListWidgetItem)
+from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint, QMimeData
+from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath, QDrag
 import numpy as np
 from datetime import datetime
 
@@ -27,6 +28,71 @@ from sqlshell.editor import LineNumberArea, SQLEditor
 from sqlshell.ui import FilterHeader, BarChartDelegate
 from sqlshell.db import DatabaseManager
 from sqlshell.query_tab import QueryTab
+
+class DraggableTablesList(QListWidget):
+    """Custom QListWidget that provides better drag functionality for table names."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setDragEnabled(True)
+        self.setDragDropMode(QListWidget.DragDropMode.DragOnly)
+        
+        # Apply custom styling
+        self.setStyleSheet("""
+            QListWidget {
+                background-color: rgba(255, 255, 255, 0.1);
+                border: none;
+                border-radius: 4px;
+                color: white;
+            }
+            QListWidget::item:selected {
+                background-color: rgba(255, 255, 255, 0.2);
+            }
+            QListWidget::item:hover:!selected {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
+        
+    def startDrag(self, supportedActions):
+        """Override startDrag to customize the drag data."""
+        item = self.currentItem()
+        if not item:
+            return
+            
+        # Extract the table name without the file info in parentheses
+        table_name = item.text().split(' (')[0]
+        
+        # Create mime data with the table name
+        mime_data = QMimeData()
+        mime_data.setText(table_name)
+        
+        # Create drag object
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        
+        # Optional: Set a custom pixmap for the drag
+        font = self.font()
+        font.setBold(True)
+        metrics = self.fontMetrics()
+        text_width = metrics.horizontalAdvance(table_name)
+        text_height = metrics.height()
+        
+        pixmap = QPixmap(text_width + 10, text_height + 6)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setPen(Qt.GlobalColor.white)
+        painter.setFont(font)
+        painter.fillRect(0, 0, text_width + 10, text_height + 6, QColor(52, 152, 219, 180))  # Semi-transparent blue background
+        painter.drawText(5, text_height + 2, table_name)
+        painter.end()
+        
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(QPoint(5, pixmap.height() // 2))
+        
+        # Execute drag operation
+        drag.exec(supportedActions)
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -390,21 +456,7 @@ class SQLShell(QMainWindow):
         left_layout.addLayout(table_actions_layout)
         
         # Tables list with custom styling
-        self.tables_list = QListWidget()
-        self.tables_list.setStyleSheet("""
-            QListWidget {
-                background-color: rgba(255, 255, 255, 0.1);
-                border: none;
-                border-radius: 4px;
-                color: white;
-            }
-            QListWidget::item:selected {
-                background-color: rgba(255, 255, 255, 0.2);
-            }
-            QListWidget::item:hover:!selected {
-                background-color: rgba(255, 255, 255, 0.1);
-            }
-        """)
+        self.tables_list = DraggableTablesList()
         self.tables_list.itemClicked.connect(self.show_table_preview)
         self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tables_list.customContextMenuRequested.connect(self.show_tables_context_menu)
