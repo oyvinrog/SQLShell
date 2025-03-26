@@ -39,6 +39,9 @@ class SQLEditor(QPlainTextEdit):
         # Initialize completer
         self.completer = None
         
+        # Track last key press for better completion behavior
+        self.last_key_was_tab = False
+        
         # SQL Keywords for autocomplete
         self.sql_keywords = [
             "SELECT", "FROM", "WHERE", "AND", "OR", "INNER", "OUTER", "LEFT", "RIGHT", "JOIN",
@@ -114,20 +117,57 @@ class SQLEditor(QPlainTextEdit):
             return
             
         tc = self.textCursor()
-        extra = len(completion) - len(self.completer.completionPrefix())
-        tc.movePosition(QTextCursor.MoveOperation.Left)
-        tc.movePosition(QTextCursor.MoveOperation.EndOfWord)
-        tc.insertText(completion[-extra:] + " ")
-        self.setTextCursor(tc)
         
+        # Get the current prefix for proper replacement
+        current_prefix = self.completer.completionPrefix()
+        
+        # When completing, replace the entire prefix with the completion
+        # This ensures exact matches are handled correctly
+        if current_prefix:
+            # Get positions for text manipulation
+            cursor_pos = tc.position()
+            tc.setPosition(cursor_pos - len(current_prefix))
+            tc.setPosition(cursor_pos, QTextCursor.MoveMode.KeepAnchor)
+            tc.removeSelectedText()
+        
+        # Don't automatically add space when completing with Tab
+        # or when completion already ends with special characters
+        special_endings = ["(", ")", ",", ";", "."]
+        if any(completion.endswith(char) for char in special_endings):
+            tc.insertText(completion)
+        else:
+            # Add space for normal words, but only if activated with Enter/Return
+            # not when using Tab for completion
+            from_keyboard = self.sender() is None
+            add_space = from_keyboard or not self.last_key_was_tab
+            tc.insertText(completion + (" " if add_space else ""))
+        
+        self.setTextCursor(tc)
+
     def complete(self):
         """Show completion popup"""
         prefix = self.text_under_cursor()
         
-        if not prefix or len(prefix) < 2:  # Only show completions for words with at least 2 characters
-            if self.completer.popup().isVisible():
+        # Don't show popup for empty text or too short prefixes
+        if not prefix or len(prefix) < 2:  
+            if self.completer and self.completer.popup().isVisible():
                 self.completer.popup().hide()
             return
+        
+        # Track if we're in the middle of a word
+        cursor = self.textCursor()
+        position = cursor.position()
+        block = cursor.block()
+        text = block.text()
+        
+        # Don't show completions if cursor is in the middle of a longer word
+        if position < len(text):
+            if position < len(text) and position > 0:
+                next_char = text[position]
+                if next_char.isalnum() or next_char == '_':
+                    if self.completer and self.completer.popup().isVisible():
+                        self.completer.popup().hide()
+                    return
             
         self.completer.setCompletionPrefix(prefix)
         
@@ -151,9 +191,43 @@ class SQLEditor(QPlainTextEdit):
     def keyPressEvent(self, event):
         # Handle completer popup navigation
         if self.completer and self.completer.popup().isVisible():
-            # Handle navigation keys for the popup
-            if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab, 
-                              Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down]:
+            # Handle Tab key to complete the current selection
+            if event.key() == Qt.Key.Key_Tab:
+                # Get the SELECTED completion (not just the current one)
+                popup = self.completer.popup()
+                current_index = popup.currentIndex()
+                selected_completion = popup.model().data(current_index)
+                
+                # Accept the selected completion and close popup
+                if selected_completion:
+                    self.last_key_was_tab = True
+                    self.completer.popup().hide()
+                    self.insert_completion(selected_completion)
+                    self.last_key_was_tab = False
+                    return
+                event.ignore()
+                return
+                
+            # Let Enter key escape/close the popup without completing
+            if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return]:
+                self.completer.popup().hide()
+                super().keyPressEvent(event)
+                return
+            
+            # Let Space key escape/close the popup without completing
+            if event.key() == Qt.Key.Key_Space:
+                self.completer.popup().hide()
+                super().keyPressEvent(event)
+                return
+            
+            # Hide popup on Escape
+            if event.key() == Qt.Key.Key_Escape:
+                self.completer.popup().hide()
+                event.ignore()
+                return
+                
+            # Let Up/Down keys navigate the popup
+            if event.key() in [Qt.Key.Key_Up, Qt.Key.Key_Down]:
                 event.ignore()
                 return
         
@@ -204,7 +278,15 @@ class SQLEditor(QPlainTextEdit):
         
         # Check for autocomplete after typing
         if event.text() and not event.text().isspace():
+            # Only show completion if user is actively typing
             self.complete()
+        elif event.key() == Qt.Key.Key_Backspace:
+            # Re-evaluate completion when backspacing
+            self.complete()
+        else:
+            # Hide completion popup when inserting space or non-text characters
+            if self.completer and self.completer.popup().isVisible():
+                self.completer.popup().hide()
 
     def paintEvent(self, event):
         # Call the parent's paintEvent first
