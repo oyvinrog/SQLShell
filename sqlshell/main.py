@@ -2346,22 +2346,65 @@ def main():
             if os.path.exists(package_db):
                 shutil.copy2(package_db, working_dir)
     
-    # Show splash screen
-    splash = AnimatedSplashScreen()
-    splash.show()
-    
-    # Create and show main window after delay
-    timer = QTimer()
-    window = SQLShell()
-    timer.timeout.connect(lambda: show_main_window())
-    timer.start(2000)  # 2 second delay
-    
-    def show_main_window():
+    try:
+        # Show splash screen
+        splash = AnimatedSplashScreen()
+        splash.show()
+        
+        # Process events immediately to ensure the splash screen appears
+        app.processEvents()
+        
+        # Create main window but don't show it yet
+        print("Initializing main application...")
+        window = SQLShell()
+        
+        # Define the function to show main window and hide splash
+        def show_main_window():
+            # Properly finish the splash screen
+            if splash:
+                splash.finish(window)
+            
+            # Show the main window
+            window.show()
+            timer.stop()
+            
+            # Also stop the failsafe timer if it's still running
+            if failsafe_timer.isActive():
+                failsafe_timer.stop()
+                
+            print("Main application started")
+        
+        # Create a failsafe timer in case the splash screen fails to show
+        def failsafe_show_window():
+            if not window.isVisible():
+                print("Failsafe timer activated - showing main window")
+                if splash:
+                    try:
+                        splash.close()
+                    except:
+                        pass
+                window.show()
+        
+        # Create and show main window after delay
+        timer = QTimer()
+        timer.setSingleShot(True)  # Ensure it only fires once
+        timer.timeout.connect(show_main_window)
+        timer.start(2000)  # 2 second delay
+        
+        # Failsafe timer - show the main window after 5 seconds even if splash screen fails
+        failsafe_timer = QTimer()
+        failsafe_timer.setSingleShot(True)
+        failsafe_timer.timeout.connect(failsafe_show_window)
+        failsafe_timer.start(5000)  # 5 second delay
+        
+        sys.exit(app.exec())
+        
+    except Exception as e:
+        print(f"Error during startup: {e}")
+        # If there's any error with the splash screen, just show the main window directly
+        window = SQLShell()
         window.show()
-        splash.finish(window)
-        timer.stop()
-    
-    sys.exit(app.exec())
+        sys.exit(app.exec())
 
 if __name__ == '__main__':
     main() 
