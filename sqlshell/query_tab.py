@@ -39,6 +39,19 @@ class QueryTab(QWidget):
         self.query_edit = SQLEditor()
         # Apply syntax highlighting to the query editor
         self.sql_highlighter = SQLSyntaxHighlighter(self.query_edit.document())
+        
+        # Ensure a default completer is available
+        if not self.query_edit.completer:
+            from PyQt6.QtCore import QStringListModel
+            from PyQt6.QtWidgets import QCompleter
+            
+            # Create a basic completer with SQL keywords if one doesn't exist
+            if hasattr(self.query_edit, 'all_sql_keywords'):
+                model = QStringListModel(self.query_edit.all_sql_keywords)
+                completer = QCompleter()
+                completer.setModel(model)
+                self.query_edit.set_completer(completer)
+        
         query_layout.addWidget(self.query_edit)
         
         # Button row

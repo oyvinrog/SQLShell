@@ -823,13 +823,19 @@ class SQLShell(QMainWindow):
             
             if filename:
                 try:
+                    # Clear existing database tables from the list widget
+                    for i in range(self.tables_list.count() - 1, -1, -1):
+                        item = self.tables_list.item(i)
+                        if item and item.text().endswith('(database)'):
+                            self.tables_list.takeItem(i)
+                    
                     # Use the database manager to open the database
                     self.db_manager.open_database(filename)
                     
                     # Update UI with tables from the database
-                    self.tables_list.clear()
-                    for table_name in self.db_manager.loaded_tables:
-                        self.tables_list.addItem(f"{table_name} (database)")
+                    for table_name, source in self.db_manager.loaded_tables.items():
+                        if source == 'database':
+                            self.tables_list.addItem(f"{table_name} (database)")
                     
                     # Update the completer with table and column names
                     self.update_completer()
@@ -864,7 +870,11 @@ class SQLShell(QMainWindow):
                 self.completion_usage = {}  # Track usage frequency
             
             # Get completion words from the database manager
-            completion_words = self.db_manager.get_all_table_columns()
+            try:
+                completion_words = self.db_manager.get_all_table_columns()
+            except Exception as e:
+                self.statusBar().showMessage(f"Error getting completions: {str(e)}", 2000)
+                completion_words = []
             
             # Add frequently used terms from query history with higher priority
             if hasattr(self, 'completion_usage') and self.completion_usage:
@@ -938,46 +948,79 @@ class SQLShell(QMainWindow):
             # Use a single model for all tabs to save memory and improve performance
             model = QStringListModel(completion_words)
             
+            # Keep a reference to the model to prevent garbage collection
+            self._current_completer_model = model
+            
             # Only update the current tab immediately
             current_index = self.tab_widget.currentIndex()
             if current_index >= 0:
                 current_tab = self.tab_widget.widget(current_index)
-                if current_tab:
-                    current_tab.query_edit.update_completer_model(model)
+                if current_tab and hasattr(current_tab, 'query_edit'):
+                    try:
+                        current_tab.query_edit.update_completer_model(model)
+                    except Exception as e:
+                        self.statusBar().showMessage(f"Error updating current tab completer: {str(e)}", 2000)
             
-            # Schedule other tab updates with progressive delays
+            # Only schedule updates for additional tabs if we have more than 3 tabs
+            # This reduces overhead for common usage patterns
             if self.tab_widget.count() > 1:
                 # Calculate a reasonable maximum delay (ms)
                 max_delay = min(500, 50 * self.tab_widget.count())
+                
+                # Store timers to prevent garbage collection
+                if not hasattr(self, '_completer_timers'):
+                    self._completer_timers = []
+                
+                # Clear old timers
+                for timer in self._completer_timers:
+                    if timer.isActive():
+                        timer.stop()
+                self._completer_timers = []
                 
                 # Schedule updates for other tabs with increasing delays
                 for i in range(self.tab_widget.count()):
                     if i != current_index:
                         tab = self.tab_widget.widget(i)
-                        delay = int((i + 1) / self.tab_widget.count() * max_delay)
-                        
-                        timer = QTimer()
-                        timer.setSingleShot(True)
-                        # Use a lambda with default arguments to avoid closure issues
-                        timer.timeout.connect(
-                            lambda tab=tab, model=model: self._update_tab_completer(tab, model))
-                        timer.start(delay)
+                        if tab and not tab.isHidden() and hasattr(tab, 'query_edit'):
+                            delay = int((i + 1) / self.tab_widget.count() * max_delay)
+                            
+                            timer = QTimer()
+                            timer.setSingleShot(True)
+                            # Store tab and model as local variables for the lambda
+                            # to avoid closure issues
+                            tab_ref = tab
+                            model_ref = model
+                            timer.timeout.connect(
+                                lambda t=tab_ref, m=model_ref: self._update_tab_completer(t, m))
+                            self._completer_timers.append(timer)
+                            timer.start(delay)
             
             # Process events to keep UI responsive
             QApplication.processEvents()
             
+            # Return True to indicate success
+            return True
+            
         except Exception as e:
             # Catch any errors to prevent hanging
             self.statusBar().showMessage(f"Auto-completion update error: {str(e)}", 2000)
+            return False
             
     def _update_tab_completer(self, tab, model):
         """Helper method to update a tab's completer with the given model"""
-        if tab and not tab.isHidden():  # Only update visible tabs
+        if tab and not tab.isHidden() and hasattr(tab, 'query_edit'):  # Only update visible tabs with query editors
             try:
                 tab.query_edit.update_completer_model(model)
                 QApplication.processEvents()  # Keep UI responsive
-            except Exception:
-                pass  # Ignore errors in background updates
+            except Exception as e:
+                print(f"Error updating tab completer: {e}")
+                # Try a simpler approach as fallback
+                try:
+                    if hasattr(tab.query_edit, 'all_sql_keywords'):
+                        fallback_model = QStringListModel(tab.query_edit.all_sql_keywords)
+                        tab.query_edit.completer.setModel(fallback_model)
+                except Exception:
+                    pass  # Last resort: ignore errors to prevent crashes
 
     def execute_query(self):
         try:
@@ -1592,8 +1635,13 @@ LIMIT 10
             project_data = {
                 'tables': {},
                 'tabs': tabs_data,
-                'connection_type': self.db_manager.connection_type
+                'connection_type': self.db_manager.connection_type,
+                'database_path': None  # Initialize to None
             }
+            
+            # If we have a database connection, save the path
+            if self.db_manager.is_connected() and hasattr(self.db_manager, 'database_path'):
+                project_data['database_path'] = self.db_manager.database_path
             
             # Save table information
             for table_name, file_path in self.db_manager.loaded_tables.items():
@@ -1650,13 +1698,56 @@ LIMIT 10
                 
                 # Start fresh
                 self.new_project()
-                progress.setValue(20)
+                progress.setValue(15)
                 QApplication.processEvents()
                 
-                # Create connection if needed
-                if not self.db_manager.is_connected():
-                    connection_info = self.db_manager.create_memory_connection()
-                    self.db_info_label.setText(connection_info)
+                # Check if there's a database path in the project
+                has_database_path = 'database_path' in project_data and project_data['database_path']
+                has_database_tables = any(table_info.get('file_path') == 'database' 
+                                       for table_info in project_data.get('tables', {}).values())
+                
+                # Set a flag to track if database tables are loaded
+                database_tables_loaded = False
+                
+                # If the project contains database tables and a database path, try to connect to it
+                progress.setLabelText("Connecting to database...")
+                if has_database_path and has_database_tables:
+                    database_path = project_data['database_path']
+                    try:
+                        if os.path.exists(database_path):
+                            # Connect to the database
+                            self.db_manager.open_database(database_path)
+                            self.db_info_label.setText(self.db_manager.get_connection_info())
+                            self.statusBar().showMessage(f"Connected to database: {database_path}")
+                            
+                            # Add all database tables to the tables list
+                            for table_name, source in self.db_manager.loaded_tables.items():
+                                if source == 'database':
+                                    self.tables_list.addItem(f"{table_name} (database)")
+                            
+                            # Mark database tables as loaded
+                            database_tables_loaded = True
+                        else:
+                            database_tables_loaded = False
+                            QMessageBox.warning(self, "Database Not Found",
+                                f"The project's database file was not found at:\n{database_path}\n\n"
+                                "Database tables will be shown but not accessible until you reconnect to the database.")
+                    except Exception as e:
+                        database_tables_loaded = False
+                        QMessageBox.warning(self, "Database Connection Error",
+                            f"Failed to connect to the project's database:\n{str(e)}\n\n"
+                            "Database tables will be shown but not accessible until you reconnect to the database.")
+                else:
+                    # Create connection if needed (we don't have a specific database to connect to)
+                    database_tables_loaded = False
+                    if not self.db_manager.is_connected():
+                        connection_info = self.db_manager.create_memory_connection()
+                        self.db_info_label.setText(connection_info)
+                    elif 'connection_type' in project_data and project_data['connection_type'] != self.db_manager.connection_type:
+                        # If connected but with a different database type than what was saved in the project
+                        QMessageBox.warning(self, "Database Type Mismatch",
+                            f"The project was saved with a {project_data['connection_type']} database, but you're currently using {self.db_manager.connection_type}.\n\n"
+                            "Some database-specific features may not work correctly. Consider reconnecting to the correct database type.")
                 
                 progress.setValue(30)
                 QApplication.processEvents()
@@ -1677,11 +1768,20 @@ LIMIT 10
                     file_path = table_info['file_path']
                     try:
                         if file_path == 'database':
-                            # For tables from database, we need to recreate them from their data
-                            # Execute a SELECT to get the data and recreate the table
-                            query = f"SELECT * FROM {table_name}"
-                            df = self.db_manager.execute_query(query)
-                            self.db_manager.register_dataframe(df, table_name, 'database')
+                            # Skip if we already loaded database tables by connecting to the database
+                            if database_tables_loaded:
+                                continue
+                                
+                            # For database tables, we need to check if the original database is connected
+                            # Don't try to SELECT from non-existent tables
+                            # Instead just register the table name for UI display
+                            self.db_manager.loaded_tables[table_name] = 'database'
+                            
+                            # If we have column information, use it
+                            if 'columns' in table_info:
+                                self.db_manager.table_columns[table_name] = table_info['columns']
+                            
+                            # Add to the UI list
                             self.tables_list.addItem(f"{table_name} (database)")
                         elif file_path == 'query_result':
                             # For tables from query results, we'll need to re-run the query
@@ -1710,6 +1810,12 @@ LIMIT 10
                     current_progress += table_progress_step
                     progress.setValue(int(current_progress))
                     QApplication.processEvents()  # Keep UI responsive
+                
+                # If the project had database tables but we couldn't connect automatically, notify the user
+                if has_database_tables and not database_tables_loaded:
+                    QMessageBox.information(self, "Database Connection Required",
+                        "This project contains database tables. You need to reconnect to the database to use them.\n\n"
+                        "Use the 'Open Database' button to connect to your database file.")
                 
                 # Check if the operation was canceled
                 if progress.wasCanceled():
@@ -1803,6 +1909,12 @@ LIMIT 10
                 complete_timer.setSingleShot(True)
                 complete_timer.timeout.connect(self.update_completer)
                 complete_timer.start(100)  # Short delay before updating completer
+                
+                # Queue another update for reliability - sometimes the first update might not fully complete
+                failsafe_timer = QTimer()
+                failsafe_timer.setSingleShot(True)
+                failsafe_timer.timeout.connect(self.update_completer)
+                failsafe_timer.start(2000)  # Try again after 2 seconds to ensure completion is loaded
                 
                 progress.setValue(100)
                 QApplication.processEvents()

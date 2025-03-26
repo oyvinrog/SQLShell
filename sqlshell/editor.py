@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QCompleter
-from PyQt6.QtCore import Qt, QSize, QRect, QStringListModel
+from PyQt6.QtCore import Qt, QSize, QRect, QStringListModel, QTimer
 from PyQt6.QtGui import QFont, QColor, QTextCursor, QPainter, QBrush
 import re
 
@@ -37,51 +37,41 @@ class SQLEditor(QPlainTextEdit):
         # Set placeholder text
         self.setPlaceholderText("Enter your SQL query here...")
         
-        # Initialize completer
-        self.completer = None
+        # Set modern selection color
+        self.selection_color = QColor("#3498DB")
+        self.selection_color.setAlpha(50)  # Make it semi-transparent
         
-        # Track last key press for better completion behavior
-        self.last_key_was_tab = False
-        
-        # Enable drag and drop
-        self.setAcceptDrops(True)
-        
-        # SQL Keywords for autocomplete, organized by category for context-aware completion
+        # SQL keywords for syntax highlighting and autocompletion
         self.sql_keywords = {
             'basic': [
-                "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "EXISTS", 
-                "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL", "AS"
-            ],
-            'join': [
-                "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", 
-                "LEFT OUTER JOIN", "RIGHT OUTER JOIN", "FULL OUTER JOIN", 
-                "CROSS JOIN", "NATURAL JOIN", "ON", "USING"
+                "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", 
+                "ALTER", "TABLE", "VIEW", "INDEX", "TRIGGER", "PROCEDURE", "FUNCTION", 
+                "AS", "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL",
+                "ORDER BY", "GROUP BY", "HAVING", "LIMIT", "OFFSET", "TOP", "DISTINCT",
+                "ON", "SET", "VALUES", "INTO", "DEFAULT", "PRIMARY KEY", "FOREIGN KEY",
+                "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN",
+                "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "BEGIN", "END", "COMMIT",
+                "ROLLBACK"
             ],
             'aggregation': [
-                "GROUP BY", "HAVING", "SUM", "COUNT", "AVG", "MIN", "MAX", 
-                "COUNT(*)", "COUNT(DISTINCT"
+                "SUM", "AVG", "COUNT", "MIN", "MAX", "STDDEV", "VARIANCE", "FIRST",
+                "LAST", "GROUP_CONCAT"
             ],
-            'ordering': [
-                "ORDER BY", "ASC", "DESC", "NULLS FIRST", "NULLS LAST", 
-                "LIMIT", "OFFSET"
-            ],
-            'table_ops': [
-                "CREATE TABLE", "DROP TABLE", "ALTER TABLE", "ADD COLUMN", 
-                "DROP COLUMN", "TRUNCATE TABLE", "RENAME TO"
-            ],
-            'data_ops': [
-                "INSERT INTO", "VALUES", "UPDATE", "SET", "DELETE FROM", 
-                "MERGE INTO", "UPSERT"
-            ],
-            'conditionals': [
-                "CASE", "WHEN", "THEN", "ELSE", "END", "COALESCE", "NULLIF", 
-                "GREATEST", "LEAST"
+            'join': [
+                "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN",
+                "JOIN ... ON", "JOIN ... USING", "NATURAL JOIN"
             ],
             'functions': [
-                "CAST(", "CONVERT(", "TO_CHAR(", "TO_DATE(", "TO_NUMBER(", 
-                "EXTRACT(", "SUBSTR(", "LOWER(", "UPPER(", "TRIM(", "ROUND(",
-                "DATE_TRUNC(", "CONCAT(", "REPLACE(", "REGEXP_REPLACE(",
-                "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "NOW()"
+                "SUBSTR", "SUBSTRING", "UPPER", "LOWER", "TRIM", "LTRIM", "RTRIM",
+                "LENGTH", "CONCAT", "REPLACE", "INSTR", "CAST", "CONVERT", "COALESCE",
+                "NULLIF", "NVL", "IFNULL", "DECODE", "ROUND", "TRUNC", "FLOOR", "CEILING",
+                "ABS", "MOD", "DATE", "TIME", "DATETIME", "TIMESTAMP", "EXTRACT", "DATEADD",
+                "DATEDIFF", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"
+            ],
+            'table_ops': [
+                "INSERT INTO", "UPDATE", "DELETE FROM", "CREATE TABLE", "DROP TABLE", 
+                "ALTER TABLE", "ADD COLUMN", "DROP COLUMN", "MODIFY COLUMN", "RENAME TO",
+                "TRUNCATE TABLE", "VACUUM"
             ],
             'types': [
                 "INTEGER", "INT", "BIGINT", "SMALLINT", "TINYINT", "NUMERIC", 
@@ -117,21 +107,27 @@ class SQLEditor(QPlainTextEdit):
             "WITH $cte AS (SELECT * FROM $table) SELECT * FROM $cte WHERE $condition"
         ]
         
-        # Initialize with SQL keywords
+        # Initialize completer with SQL keywords
+        self.completer = None
         self.set_completer(QCompleter(self.all_sql_keywords))
         
-        # Set modern selection color
-        self.selection_color = QColor("#3498DB")
-        self.selection_color.setAlpha(50)  # Make it semi-transparent
+        # Track last key press for better completion behavior
+        self.last_key_was_tab = False
         
         # Tables and columns cache for context-aware completion
-        self.tables_cache = {}  # {table_name: [columns]}
+        self.tables_cache = {}
         self.last_update_time = 0
+        
+        # Enable drag and drop
+        self.setAcceptDrops(True)
 
     def set_completer(self, completer):
         """Set the completer for the editor"""
         if self.completer:
-            self.completer.disconnect(self)
+            try:
+                self.completer.disconnect(self)
+            except Exception:
+                pass  # Ignore errors when disconnecting
             
         self.completer = completer
         
@@ -150,39 +146,52 @@ class SQLEditor(QPlainTextEdit):
             words_or_model: Either a list of words or a QStringListModel
         """
         if not self.completer:
-            return
+            # Create a completer if none exists
+            self.set_completer(QCompleter(self.all_sql_keywords))
+            if not self.completer:
+                return
         
         # If a model is passed directly, use it
         if isinstance(words_or_model, QStringListModel):
-            self.completer.setModel(words_or_model)
-            
-            # Update our tables and columns cache for context-aware completion
             try:
+                # Update our tables and columns cache for context-aware completion
                 words = words_or_model.stringList()
                 self._update_tables_cache(words)
-            except Exception:
-                pass
+                self.completer.setModel(words_or_model)
+            except Exception as e:
+                # If there's an error, fall back to just SQL keywords
+                model = QStringListModel()
+                model.setStringList(self.all_sql_keywords)
+                self.completer.setModel(model)
+                print(f"Error updating completer model: {e}")
                 
             return
         
-        # Update tables cache
-        self._update_tables_cache(words_or_model)
-        
-        # Otherwise, combine SQL keywords with table/column names and create a new model
-        # Use set operations for efficiency
-        words_set = set(words_or_model)  # Remove duplicates
-        sql_keywords_set = set(self.all_sql_keywords)
-        all_words = list(sql_keywords_set.union(words_set))
-        
-        # Sort the combined words for better autocomplete experience
-        all_words.sort(key=lambda x: (not x.isupper(), x))  # Prioritize SQL keywords (all uppercase)
-        
-        # Create an optimized model with all words
-        model = QStringListModel()
-        model.setStringList(all_words)
-        
-        # Set the model to the completer
-        self.completer.setModel(model)
+        try:
+            # Update tables cache
+            self._update_tables_cache(words_or_model)
+            
+            # Otherwise, combine SQL keywords with table/column names and create a new model
+            # Use set operations for efficiency
+            words_set = set(words_or_model)  # Remove duplicates
+            sql_keywords_set = set(self.all_sql_keywords)
+            all_words = list(sql_keywords_set.union(words_set))
+            
+            # Sort the combined words for better autocomplete experience
+            all_words.sort(key=lambda x: (not x.isupper(), x))  # Prioritize SQL keywords (all uppercase)
+            
+            # Create an optimized model with all words
+            model = QStringListModel()
+            model.setStringList(all_words)
+            
+            # Set the model to the completer
+            self.completer.setModel(model)
+        except Exception as e:
+            # If there's an error, fall back to just SQL keywords
+            model = QStringListModel()
+            model.setStringList(self.all_sql_keywords)
+            self.completer.setModel(model)
+            print(f"Error updating completer with words: {e}")
         
     def _update_tables_cache(self, words):
         """Update internal tables and columns cache from word list"""
@@ -590,10 +599,34 @@ class SQLEditor(QPlainTextEdit):
         # Check for autocomplete after typing
         if event.text() and not event.text().isspace():
             # Only show completion if user is actively typing
-            self.complete()
+            # Add slight delay to avoid excessive completions
+            if hasattr(self, '_completion_timer'):
+                try:
+                    if self._completion_timer.isActive():
+                        self._completion_timer.stop()
+                except:
+                    pass
+            
+            # Create a timer to trigger completion after a short delay
+            self._completion_timer = QTimer()
+            self._completion_timer.setSingleShot(True)
+            self._completion_timer.timeout.connect(self.complete)
+            self._completion_timer.start(250)  # 250 ms delay for better user experience
+            
         elif event.key() == Qt.Key.Key_Backspace:
-            # Re-evaluate completion when backspacing
-            self.complete()
+            # Re-evaluate completion when backspacing, with a shorter delay
+            if hasattr(self, '_completion_timer'):
+                try:
+                    if self._completion_timer.isActive():
+                        self._completion_timer.stop()
+                except:
+                    pass
+                    
+            self._completion_timer = QTimer()
+            self._completion_timer.setSingleShot(True)
+            self._completion_timer.timeout.connect(self.complete)
+            self._completion_timer.start(100)  # 100 ms delay for backspace
+            
         else:
             # Hide completion popup when inserting space or non-text characters
             if self.completer and self.completer.popup().isVisible():

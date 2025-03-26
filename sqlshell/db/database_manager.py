@@ -15,6 +15,7 @@ class DatabaseManager:
         self.connection_type = None
         self.loaded_tables = {}  # Maps table_name to file_path or 'database'/'query_result'
         self.table_columns = {}  # Maps table_name to list of column names
+        self.database_path = None  # Track the path to the current database file
     
     def is_connected(self):
         """Check if there is an active database connection."""
@@ -44,6 +45,7 @@ class DatabaseManager:
             finally:
                 self.conn = None
                 self.connection_type = None
+                self.database_path = None  # Clear the database path
     
     def open_database(self, filename):
         """
@@ -70,12 +72,16 @@ class DatabaseManager:
                 self.conn = duckdb.connect(filename)
                 self.connection_type = "duckdb"
             
+            # Store the database path
+            self.database_path = os.path.abspath(filename)
+            
             # Load tables from the database
             self.load_database_tables()
             return True
         except (sqlite3.Error, duckdb.Error) as e:
             self.conn = None
             self.connection_type = None
+            self.database_path = None
             raise Exception(f"Failed to open database: {str(e)}")
     
     def create_memory_connection(self):
@@ -83,6 +89,7 @@ class DatabaseManager:
         self.close_connection()
         self.conn = duckdb.connect(':memory:')
         self.connection_type = 'duckdb'
+        self.database_path = None  # No file path for in-memory database
         return "Connected to: in-memory DuckDB"
     
     def is_sqlite_db(self, filename):
@@ -184,7 +191,17 @@ class DatabaseManager:
             if "syntax error" in error_msg:
                 raise SyntaxError(f"SQL syntax error: {str(e)}")
             elif "no such table" in error_msg:
-                raise ValueError(f"Table not found: {str(e)}")
+                # Extract the table name from the error message when possible
+                import re
+                table_match = re.search(r"'([^']+)'", str(e))
+                table_name = table_match.group(1) if table_match else "unknown"
+                
+                # Check if this table is in our loaded_tables dict but came from a database
+                if table_name in self.loaded_tables and self.loaded_tables[table_name] == 'database':
+                    raise ValueError(f"Table '{table_name}' was part of a database but is not accessible. "
+                                   f"Please reconnect to the original database using the 'Open Database' button.")
+                else:
+                    raise ValueError(f"Table not found: {str(e)}")
             elif "no such column" in error_msg:
                 raise ValueError(f"Column not found: {str(e)}")
             else:
