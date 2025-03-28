@@ -32,6 +32,7 @@ from sqlshell.styles import (get_application_stylesheet, get_tab_corner_styleshe
                            get_draggable_tables_list_stylesheet, get_context_menu_stylesheet,
                            get_header_label_stylesheet, get_db_info_label_stylesheet, 
                            get_tables_header_stylesheet, get_row_count_label_stylesheet)
+from sqlshell.menus import setup_menubar
 
 class DraggableTablesList(QListWidget):
     """Custom QListWidget that provides better drag functionality for table names."""
@@ -201,78 +202,8 @@ class SQLShell(QMainWindow):
             if os.path.exists(main_logo_path):
                 self.setWindowIcon(QIcon(main_logo_path))
         
-        # Create menu bar
-        menubar = self.menuBar()
-        file_menu = menubar.addMenu('&File')
-        
-        # Project management actions
-        new_project_action = file_menu.addAction('New Project')
-        new_project_action.setShortcut('Ctrl+N')
-        new_project_action.triggered.connect(self.new_project)
-        
-        open_project_action = file_menu.addAction('Open Project...')
-        open_project_action.setShortcut('Ctrl+O')
-        open_project_action.triggered.connect(self.open_project)
-        
-        # Add Recent Projects submenu
-        self.recent_projects_menu = file_menu.addMenu('Recent Projects')
-        self.update_recent_projects_menu()
-        
-        save_project_action = file_menu.addAction('Save Project')
-        save_project_action.setShortcut('Ctrl+S')
-        save_project_action.triggered.connect(self.save_project)
-        
-        save_project_as_action = file_menu.addAction('Save Project As...')
-        save_project_as_action.setShortcut('Ctrl+Shift+S')
-        save_project_as_action.triggered.connect(self.save_project_as)
-        
-        file_menu.addSeparator()
-        
-        exit_action = file_menu.addAction('Exit')
-        exit_action.setShortcut('Ctrl+Q')
-        exit_action.triggered.connect(self.close)
-        
-        # Add View menu for window management
-        view_menu = menubar.addMenu('&View')
-        
-        # Maximized window option
-        maximize_action = view_menu.addAction('Maximize Window')
-        maximize_action.setShortcut('F11')
-        maximize_action.triggered.connect(self.toggle_maximize_window)
-        
-        # Zoom submenu
-        zoom_menu = view_menu.addMenu('Zoom')
-        
-        zoom_in_action = zoom_menu.addAction('Zoom In')
-        zoom_in_action.setShortcut('Ctrl++')
-        zoom_in_action.triggered.connect(lambda: self.change_zoom(1.1))
-        
-        zoom_out_action = zoom_menu.addAction('Zoom Out')
-        zoom_out_action.setShortcut('Ctrl+-')
-        zoom_out_action.triggered.connect(lambda: self.change_zoom(0.9))
-        
-        reset_zoom_action = zoom_menu.addAction('Reset Zoom')
-        reset_zoom_action.setShortcut('Ctrl+0')
-        reset_zoom_action.triggered.connect(lambda: self.reset_zoom())
-        
-        # Add Tab menu
-        tab_menu = menubar.addMenu('&Tab')
-        
-        new_tab_action = tab_menu.addAction('New Tab')
-        new_tab_action.setShortcut('Ctrl+T')
-        new_tab_action.triggered.connect(self.add_tab)
-        
-        duplicate_tab_action = tab_menu.addAction('Duplicate Current Tab')
-        duplicate_tab_action.setShortcut('Ctrl+D')
-        duplicate_tab_action.triggered.connect(self.duplicate_current_tab)
-        
-        rename_tab_action = tab_menu.addAction('Rename Current Tab')
-        rename_tab_action.setShortcut('Ctrl+R')
-        rename_tab_action.triggered.connect(self.rename_current_tab)
-        
-        close_tab_action = tab_menu.addAction('Close Current Tab')
-        close_tab_action.setShortcut('Ctrl+W')
-        close_tab_action.triggered.connect(self.close_current_tab)
+        # Setup menus
+        setup_menubar(self)
         
         # Create custom status bar
         status_bar = QStatusBar()
