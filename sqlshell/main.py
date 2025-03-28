@@ -460,11 +460,16 @@ class SQLShell(QMainWindow):
         elif isinstance(value, (float, np.floating)):
             if value.is_integer():
                 return str(int(value))
-            return f"{value:.6g}"  # Use general format with up to 6 significant digits
+            # Display full number without scientific notation by using 'f' format
+            # Format large numbers with commas for better readability
+            if abs(value) >= 1000000:
+                return f"{value:,.2f}"  # Format with commas and 2 decimal places
+            return f"{value:.6f}"  # Use fixed-point notation with 6 decimal places
         elif isinstance(value, (pd.Timestamp, datetime)):
             return value.strftime("%Y-%m-%d %H:%M:%S")
         elif isinstance(value, (np.integer, int)):
-            return str(value)
+            # Format large integers with commas for better readability
+            return f"{value:,}"
         elif isinstance(value, bool):
             return str(value)
         elif isinstance(value, (bytes, bytearray)):
