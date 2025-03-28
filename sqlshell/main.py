@@ -1097,7 +1097,7 @@ LIMIT 10
             self.statusBar().showMessage('Error exporting data')
 
     def get_table_data_as_dataframe(self):
-        """Helper function to convert table widget data to a DataFrame"""
+        """Helper function to convert table widget data to a DataFrame with proper data types"""
         # Get the current tab
         current_tab = self.get_current_tab()
         if not current_tab:
@@ -1111,7 +1111,81 @@ LIMIT 10
                 item = current_tab.results_table.item(row, column)
                 row_data.append(item.text() if item else '')
             data.append(row_data)
-        return pd.DataFrame(data, columns=headers)
+        
+        # Create DataFrame from raw string data
+        df_raw = pd.DataFrame(data, columns=headers)
+        
+        # Try to use the original dataframe's dtypes if available
+        if hasattr(current_tab, 'current_df') and current_tab.current_df is not None:
+            original_df = current_tab.current_df
+            # Since we might have filtered rows, we can't just return the original DataFrame
+            # But we can use its column types to convert our string data appropriately
+            
+            # Create a new DataFrame with appropriate types
+            df_typed = pd.DataFrame()
+            
+            for col in df_raw.columns:
+                if col in original_df.columns:
+                    # Get the original column type
+                    orig_type = original_df[col].dtype
+                    
+                    # Special handling for different data types
+                    if pd.api.types.is_numeric_dtype(orig_type):
+                        # Handle numeric columns (int or float)
+                        try:
+                            # First try to convert to numeric type
+                            # Remove commas used for thousands separators
+                            numeric_col = pd.to_numeric(df_raw[col].str.replace(',', '').replace('NULL', np.nan))
+                            df_typed[col] = numeric_col
+                        except:
+                            # If that fails, keep the original string
+                            df_typed[col] = df_raw[col]
+                    elif pd.api.types.is_datetime64_dtype(orig_type):
+                        # Handle datetime columns
+                        try:
+                            df_typed[col] = pd.to_datetime(df_raw[col].replace('NULL', np.nan))
+                        except:
+                            df_typed[col] = df_raw[col]
+                    elif pd.api.types.is_bool_dtype(orig_type):
+                        # Handle boolean columns
+                        try:
+                            df_typed[col] = df_raw[col].map({'True': True, 'False': False}).replace('NULL', np.nan)
+                        except:
+                            df_typed[col] = df_raw[col]
+                    else:
+                        # For other types, keep as is
+                        df_typed[col] = df_raw[col]
+                else:
+                    # For columns not in the original dataframe, infer type
+                    df_typed[col] = df_raw[col]
+                    
+            return df_typed
+            
+        else:
+            # If we don't have the original dataframe, try to infer types
+            # First replace 'NULL' with actual NaN
+            df_raw.replace('NULL', np.nan, inplace=True)
+            
+            # Try to convert each column to numeric if possible
+            for col in df_raw.columns:
+                try:
+                    # First try to convert to numeric by removing commas
+                    df_raw[col] = pd.to_numeric(df_raw[col].str.replace(',', ''))
+                except:
+                    # If that fails, try to convert to datetime
+                    try:
+                        df_raw[col] = pd.to_datetime(df_raw[col])
+                    except:
+                        # If both numeric and datetime conversions fail,
+                        # try boolean conversion for True/False strings
+                        try:
+                            if df_raw[col].dropna().isin(['True', 'False']).all():
+                                df_raw[col] = df_raw[col].map({'True': True, 'False': False})
+                        except:
+                            # Otherwise, keep as is
+                            pass
+            
+            return df_raw
 
     def keyPressEvent(self, event):
         """Handle global keyboard shortcuts"""
