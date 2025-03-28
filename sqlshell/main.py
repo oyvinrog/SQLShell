@@ -28,6 +28,10 @@ from sqlshell.editor import LineNumberArea, SQLEditor
 from sqlshell.ui import FilterHeader, BarChartDelegate
 from sqlshell.db import DatabaseManager
 from sqlshell.query_tab import QueryTab
+from sqlshell.styles import (get_application_stylesheet, get_tab_corner_stylesheet, 
+                           get_draggable_tables_list_stylesheet, get_context_menu_stylesheet,
+                           get_header_label_stylesheet, get_db_info_label_stylesheet, 
+                           get_tables_header_stylesheet, get_row_count_label_stylesheet)
 
 class DraggableTablesList(QListWidget):
     """Custom QListWidget that provides better drag functionality for table names."""
@@ -39,20 +43,7 @@ class DraggableTablesList(QListWidget):
         self.setDragDropMode(QListWidget.DragDropMode.DragOnly)
         
         # Apply custom styling
-        self.setStyleSheet("""
-            QListWidget {
-                background-color: rgba(255, 255, 255, 0.1);
-                border: none;
-                border-radius: 4px;
-                color: white;
-            }
-            QListWidget::item:selected {
-                background-color: rgba(255, 255, 255, 0.2);
-            }
-            QListWidget::item:hover:!selected {
-                background-color: rgba(255, 255, 255, 0.1);
-            }
-        """)
+        self.setStyleSheet(get_draggable_tables_list_stylesheet())
         
     def startDrag(self, supportedActions):
         """Override startDrag to customize the drag data."""
@@ -172,196 +163,7 @@ class SQLShell(QMainWindow):
 
     def apply_stylesheet(self):
         """Apply custom stylesheet to the application"""
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {self.colors['background']};
-            }}
-            
-            QWidget {{
-                color: {self.colors['text']};
-                font-family: 'Segoe UI', 'Arial', sans-serif;
-            }}
-            
-            QLabel {{
-                font-size: 13px;
-                padding: 2px;
-            }}
-            
-            QLabel#header_label {{
-                font-size: 16px;
-                font-weight: bold;
-                color: {self.colors['primary']};
-                padding: 8px 0;
-            }}
-            
-            QPushButton {{
-                background-color: {self.colors['secondary']};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 13px;
-                min-height: 30px;
-            }}
-            
-            QPushButton:hover {{
-                background-color: #2980B9;
-            }}
-            
-            QPushButton:pressed {{
-                background-color: #1F618D;
-            }}
-            
-            QPushButton#primary_button {{
-                background-color: {self.colors['accent']};
-            }}
-            
-            QPushButton#primary_button:hover {{
-                background-color: #16A085;
-            }}
-            
-            QPushButton#primary_button:pressed {{
-                background-color: #0E6655;
-            }}
-            
-            QPushButton#danger_button {{
-                background-color: {self.colors['error']};
-            }}
-            
-            QPushButton#danger_button:hover {{
-                background-color: #CB4335;
-            }}
-            
-            QToolButton {{
-                background-color: transparent;
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
-            }}
-            
-            QToolButton:hover {{
-                background-color: rgba(52, 152, 219, 0.2);
-            }}
-            
-            QFrame#sidebar {{
-                background-color: {self.colors['primary']};
-                border-radius: 0px;
-            }}
-            
-            QFrame#content_panel {{
-                background-color: white;
-                border-radius: 8px;
-                border: 1px solid {self.colors['border']};
-            }}
-            
-            QListWidget {{
-                background-color: white;
-                border-radius: 4px;
-                border: 1px solid {self.colors['border']};
-                padding: 4px;
-                outline: none;
-            }}
-            
-            QListWidget::item {{
-                padding: 8px;
-                border-radius: 4px;
-            }}
-            
-            QListWidget::item:selected {{
-                background-color: {self.colors['secondary']};
-                color: white;
-            }}
-            
-            QListWidget::item:hover:!selected {{
-                background-color: #E3F2FD;
-            }}
-            
-            QTableWidget {{
-                background-color: white;
-                alternate-background-color: #F8F9FA;
-                border-radius: 4px;
-                border: 1px solid {self.colors['border']};
-                gridline-color: #E0E0E0;
-                outline: none;
-            }}
-            
-            QTableWidget::item {{
-                padding: 4px;
-            }}
-            
-            QTableWidget::item:selected {{
-                background-color: rgba(52, 152, 219, 0.2);
-                color: {self.colors['text']};
-            }}
-            
-            QHeaderView::section {{
-                background-color: {self.colors['primary']};
-                color: white;
-                padding: 8px;
-                border: none;
-                font-weight: bold;
-            }}
-            
-            QSplitter::handle {{
-                background-color: {self.colors['border']};
-            }}
-            
-            QStatusBar {{
-                background-color: {self.colors['primary']};
-                color: white;
-                padding: 8px;
-            }}
-            
-            QTabWidget::pane {{
-                border: 1px solid {self.colors['border']};
-                border-radius: 4px;
-                top: -1px;
-                background-color: white;
-            }}
-            
-            QTabBar::tab {{
-                background-color: {self.colors['light_bg']};
-                color: {self.colors['text']};
-                border: 1px solid {self.colors['border']};
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 8px 12px;
-                margin-right: 2px;
-                min-width: 80px;
-            }}
-            
-            QTabBar::tab:selected {{
-                background-color: white;
-                border-bottom: 1px solid white;
-            }}
-            
-            QTabBar::tab:hover:!selected {{
-                background-color: #E3F2FD;
-            }}
-            
-            QTabBar::close-button {{
-                image: url(close.png);
-                subcontrol-position: right;
-            }}
-            
-            QTabBar::close-button:hover {{
-                background-color: rgba(255, 0, 0, 0.2);
-                border-radius: 2px;
-            }}
-            
-            QPlainTextEdit, QTextEdit {{
-                background-color: white;
-                border-radius: 4px;
-                border: 1px solid {self.colors['border']};
-                padding: 8px;
-                selection-background-color: #BBDEFB;
-                selection-color: {self.colors['text']};
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 14px;
-            }}
-        """)
+        self.setStyleSheet(get_application_stylesheet(self.colors))
 
     def init_ui(self):
         self.setWindowTitle('SQL Shell')
@@ -495,11 +297,11 @@ class SQLShell(QMainWindow):
         # Database info section
         db_header = QLabel("DATABASE")
         db_header.setObjectName("header_label")
-        db_header.setStyleSheet("color: white;")
+        db_header.setStyleSheet(get_header_label_stylesheet())
         left_layout.addWidget(db_header)
         
         self.db_info_label = QLabel("No database connected")
-        self.db_info_label.setStyleSheet("color: white; background-color: rgba(255, 255, 255, 0.1); padding: 8px; border-radius: 4px;")
+        self.db_info_label.setStyleSheet(get_db_info_label_stylesheet())
         left_layout.addWidget(self.db_info_label)
         
         # Database action buttons
@@ -520,7 +322,7 @@ class SQLShell(QMainWindow):
         # Tables section
         tables_header = QLabel("TABLES")
         tables_header.setObjectName("header_label")
-        tables_header.setStyleSheet("color: white; margin-top: 16px;")
+        tables_header.setStyleSheet(get_tables_header_stylesheet())
         left_layout.addWidget(tables_header)
         
         # Table actions
@@ -593,23 +395,7 @@ class SQLShell(QMainWindow):
         add_tab_btn = QToolButton()
         add_tab_btn.setText("+")
         add_tab_btn.setToolTip("Add new tab (Ctrl+T)")
-        add_tab_btn.setStyleSheet("""
-            QToolButton {
-                background-color: transparent;
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
-                font-weight: bold;
-                font-size: 16px;
-                color: #3498DB;
-            }
-            QToolButton:hover {
-                background-color: rgba(52, 152, 219, 0.2);
-            }
-            QToolButton:pressed {
-                background-color: rgba(52, 152, 219, 0.4);
-            }
-        """)
+        add_tab_btn.setStyleSheet(get_tab_corner_stylesheet())
         add_tab_btn.clicked.connect(self.add_tab)
         
         layout.addWidget(add_tab_btn)
@@ -1502,20 +1288,7 @@ LIMIT 10
 
         # Create context menu
         context_menu = QMenu(self)
-        context_menu.setStyleSheet("""
-            QMenu {
-                background-color: white;
-                border: 1px solid #BDC3C7;
-                padding: 5px;
-            }
-            QMenu::item {
-                padding: 5px 20px;
-            }
-            QMenu::item:selected {
-                background-color: #3498DB;
-                color: white;
-            }
-        """)
+        context_menu.setStyleSheet(get_context_menu_stylesheet())
 
         # Add menu actions
         select_from_action = context_menu.addAction("Select from")

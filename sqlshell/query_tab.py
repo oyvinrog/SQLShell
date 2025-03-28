@@ -1,11 +1,14 @@
+import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter, QApplication)
+                             QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter, QApplication, 
+                             QToolButton, QMenu)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 
 from sqlshell.editor import SQLEditor
 from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
 from sqlshell.ui import FilterHeader
+from sqlshell.styles import get_row_count_label_stylesheet
 
 class QueryTab(QWidget):
     def __init__(self, parent, results_title="RESULTS"):
@@ -98,7 +101,7 @@ class QueryTab(QWidget):
         header_layout.addStretch()
         
         self.row_count_label = QLabel("")
-        self.row_count_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
+        self.row_count_label.setStyleSheet(get_row_count_label_stylesheet())
         header_layout.addWidget(self.row_count_label)
         
         results_layout.addLayout(header_layout)
