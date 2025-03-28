@@ -913,16 +913,19 @@ class SQLShell(QMainWindow):
             sales_df = create_test_data.create_sales_data()
             customer_df = create_test_data.create_customer_data()
             product_df = create_test_data.create_product_data()
+            large_numbers_df = create_test_data.create_large_numbers_data()
             
             # Save test data
             sales_df.to_excel('test_data/sample_sales_data.xlsx', index=False)
             customer_df.to_parquet('test_data/customer_data.parquet', index=False)
             product_df.to_excel('test_data/product_catalog.xlsx', index=False)
+            large_numbers_df.to_excel('test_data/large_numbers.xlsx', index=False)
             
             # Register the tables in the database manager
             self.db_manager.register_dataframe(sales_df, 'sample_sales_data', 'test_data/sample_sales_data.xlsx')
             self.db_manager.register_dataframe(product_df, 'product_catalog', 'test_data/product_catalog.xlsx')
             self.db_manager.register_dataframe(customer_df, 'customer_data', 'test_data/customer_data.parquet')
+            self.db_manager.register_dataframe(large_numbers_df, 'large_numbers', 'test_data/large_numbers.xlsx')
             
             # Update UI
             self.tables_list.clear()
@@ -933,13 +936,23 @@ class SQLShell(QMainWindow):
             current_tab = self.get_current_tab()
             if current_tab:
                 sample_query = """
+-- Example query with tables containing large numbers
 SELECT 
-    DISTINCT
-    c.customername     
+    ln.ID,
+    ln.Category,
+    ln.MediumValue,
+    ln.LargeValue,
+    ln.VeryLargeValue,
+    ln.MassiveValue,
+    ln.ExponentialValue,
+    ln.Revenue,
+    ln.Budget
 FROM 
-    sample_sales_data s
-    INNER JOIN customer_data c ON c.customerid = s.customerid
-    INNER JOIN product_catalog p ON p.productid = s.productid
+    large_numbers ln
+WHERE 
+    ln.LargeValue > 5000000000000
+ORDER BY 
+    ln.MassiveValue DESC
 LIMIT 10
 """
                 current_tab.set_query_text(sample_query.strip())
@@ -950,8 +963,13 @@ LIMIT 10
             # Show success message
             self.statusBar().showMessage('Test data loaded successfully')
             
-            # Show a preview of the sales data
-            self.show_table_preview(self.tables_list.item(0))
+            # Show a preview of the large numbers data
+            # Find the large_numbers item in the tables list
+            for i in range(self.tables_list.count()):
+                item = self.tables_list.item(i)
+                if item and 'large_numbers' in item.text():
+                    self.show_table_preview(item)
+                    break
             
         except Exception as e:
             self.statusBar().showMessage(f'Error loading test data: {str(e)}')
