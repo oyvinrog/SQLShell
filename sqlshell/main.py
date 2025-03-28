@@ -1321,6 +1321,8 @@ LIMIT 10
         # Add menu actions
         select_from_action = context_menu.addAction("Select from")
         add_to_editor_action = context_menu.addAction("Just add to editor")
+        reload_action = context_menu.addAction("Reload")
+        reload_action.setIcon(QIcon.fromTheme("view-refresh"))
         context_menu.addSeparator()
         rename_action = context_menu.addAction("Rename table...")
         delete_action = context_menu.addAction("Delete table")
@@ -1339,6 +1341,8 @@ LIMIT 10
             cursor = current_tab.query_edit.textCursor()
             cursor.insertText(table_name)
             current_tab.query_edit.setFocus()
+        elif action == reload_action:
+            self.reload_selected_table(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -1364,6 +1368,38 @@ LIMIT 10
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self.remove_selected_table()
+                
+    def reload_selected_table(self, table_name):
+        """Reload the data for a table from its source file"""
+        try:
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Reloading table "{table_name}"...')
+            
+            # Use the database manager to reload the table
+            success, message = self.db_manager.reload_table(table_name)
+            
+            if success:
+                # Show success message
+                self.statusBar().showMessage(message)
+                
+                # Update completer with any new column names
+                self.update_completer()
+                
+                # Show a preview of the reloaded table
+                for i in range(self.tables_list.count()):
+                    item = self.tables_list.item(i)
+                    if item and table_name in item.text().split(' (')[0]:
+                        self.show_table_preview(item)
+                        break
+            else:
+                # Show error message
+                QMessageBox.warning(self, "Reload Failed", message)
+                self.statusBar().showMessage(f'Failed to reload table: {message}')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                f"Error reloading table:\n\n{str(e)}")
+            self.statusBar().showMessage('Error reloading table')
 
     def new_project(self):
         """Create a new project by clearing current state"""

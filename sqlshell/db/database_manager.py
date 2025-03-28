@@ -374,6 +374,58 @@ class DatabaseManager:
         except Exception as e:
             raise Exception(f"Error previewing table: {str(e)}")
     
+    def reload_table(self, table_name):
+        """
+        Reload a table's data from its source file.
+        
+        Args:
+            table_name: Name of the table to reload
+            
+        Returns:
+            Tuple of (bool, message) indicating success/failure and a message
+            
+        Raises:
+            ValueError: If the table cannot be reloaded
+        """
+        if not table_name in self.loaded_tables:
+            return False, f"Table '{table_name}' not found"
+        
+        file_path = self.loaded_tables[table_name]
+        
+        # Check if this is a file-based table
+        if file_path in ['database', 'query_result']:
+            return False, f"Cannot reload '{table_name}' because it's not a file-based table"
+        
+        try:
+            # Check if the file still exists
+            if not os.path.exists(file_path):
+                return False, f"Source file '{file_path}' no longer exists"
+            
+            # Store the original table name
+            original_name = table_name
+            
+            # Remove the existing table
+            self.remove_table(table_name)
+            
+            # Load the file with the original table name
+            df = None
+            if file_path.endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(file_path)
+            elif file_path.endswith('.csv'):
+                df = pd.read_csv(file_path)
+            elif file_path.endswith('.parquet'):
+                df = pd.read_parquet(file_path)
+            else:
+                return False, "Unsupported file format"
+            
+            # Register the dataframe with the original name
+            self.register_dataframe(df, original_name, file_path)
+            
+            return True, f"Table '{table_name}' reloaded successfully"
+            
+        except Exception as e:
+            return False, f"Error reloading table: {str(e)}"
+    
     def rename_table(self, old_name, new_name):
         """
         Rename a table in the database.
