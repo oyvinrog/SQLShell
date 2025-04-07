@@ -1401,12 +1401,12 @@ LIMIT 10
                 f"Error reloading table:\n\n{str(e)}")
             self.statusBar().showMessage('Error reloading table')
 
-    def new_project(self):
+    def new_project(self, skip_confirmation=False):
         """Create a new project by clearing current state"""
-        if self.db_manager.is_connected():
+        if self.db_manager.is_connected() and not skip_confirmation:
             reply = QMessageBox.question(self, 'New Project',
-                                       'Are you sure you want to start a new project? All unsaved changes will be lost.',
-                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                                      'Are you sure you want to start a new project? All unsaved changes will be lost.',
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 # Close existing connection
                 self.db_manager.close_connection()
@@ -1431,6 +1431,30 @@ LIMIT 10
                 self.setWindowTitle('SQL Shell')
                 self.db_info_label.setText("No database connected")
                 self.statusBar().showMessage('New project created')
+        elif skip_confirmation:
+            # Skip confirmation and just clear everything
+            if self.db_manager.is_connected():
+                self.db_manager.close_connection()
+            
+            # Reset state
+            self.tables_list.clear()
+            
+            # Clear all tabs except one
+            while self.tab_widget.count() > 1:
+                self.close_tab(1)  # Always close tab at index 1 to keep at least one tab
+            
+            # Clear the remaining tab
+            first_tab = self.get_tab_at_index(0)
+            if first_tab:
+                first_tab.set_query_text("")
+                first_tab.results_table.setRowCount(0)
+                first_tab.results_table.setColumnCount(0)
+                first_tab.row_count_label.setText("")
+                first_tab.results_title.setText("RESULTS")
+            
+            self.current_project_file = None
+            self.setWindowTitle('SQL Shell')
+            self.db_info_label.setText("No database connected")
 
     def save_project(self):
         """Save the current project"""
@@ -1509,6 +1533,20 @@ LIMIT 10
     def open_project(self, file_name=None):
         """Open a project file"""
         if not file_name:
+            # Check for unsaved changes before showing file dialog
+            if self.has_unsaved_changes():
+                reply = QMessageBox.question(self, 'Save Changes',
+                    'Do you want to save your changes before opening another project?',
+                    QMessageBox.StandardButton.Save | 
+                    QMessageBox.StandardButton.Discard | 
+                    QMessageBox.StandardButton.Cancel)
+                
+                if reply == QMessageBox.StandardButton.Save:
+                    self.save_project()
+                elif reply == QMessageBox.StandardButton.Cancel:
+                    return
+            
+            # Show file dialog after handling save prompt
             file_name, _ = QFileDialog.getOpenFileName(
                 self,
                 "Open Project",
@@ -1534,7 +1572,7 @@ LIMIT 10
                 QApplication.processEvents()
                 
                 # Start fresh
-                self.new_project()
+                self.new_project(skip_confirmation=True)
                 progress.setValue(15)
                 QApplication.processEvents()
                 
@@ -1901,6 +1939,20 @@ LIMIT 10
     def open_recent_project(self, project_path):
         """Open a project from the recent projects list"""
         if os.path.exists(project_path):
+            # Check if current project has unsaved changes before loading the new one
+            if self.has_unsaved_changes():
+                reply = QMessageBox.question(self, 'Save Changes',
+                    'Do you want to save your changes before loading another project?',
+                    QMessageBox.StandardButton.Save | 
+                    QMessageBox.StandardButton.Discard | 
+                    QMessageBox.StandardButton.Cancel)
+                
+                if reply == QMessageBox.StandardButton.Save:
+                    self.save_project()
+                elif reply == QMessageBox.StandardButton.Cancel:
+                    return
+            
+            # Now proceed with loading the project
             self.current_project_file = project_path
             self.open_project(project_path)
         else:
