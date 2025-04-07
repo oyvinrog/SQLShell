@@ -1613,6 +1613,7 @@ LIMIT 10
                 
                 # Set a flag to track if database tables are loaded
                 database_tables_loaded = False
+                database_connection_message = None
                 
                 # If the project contains database tables and a database path, try to connect to it
                 progress.setLabelText("Connecting to database...")
@@ -1634,14 +1635,22 @@ LIMIT 10
                             database_tables_loaded = True
                         else:
                             database_tables_loaded = False
-                            QMessageBox.warning(self, "Database Not Found",
+                            # Store the message instead of showing immediately
+                            database_connection_message = (
+                                "Database Not Found", 
                                 f"The project's database file was not found at:\n{database_path}\n\n"
-                                "Database tables will be shown but not accessible until you reconnect to the database.")
+                                "Database tables will be shown but not accessible until you reconnect to the database.\n\n"
+                                "Use the 'Open Database' button to connect to your database file."
+                            )
                     except Exception as e:
                         database_tables_loaded = False
-                        QMessageBox.warning(self, "Database Connection Error",
+                        # Store the message instead of showing immediately
+                        database_connection_message = (
+                            "Database Connection Error",
                             f"Failed to connect to the project's database:\n{str(e)}\n\n"
-                            "Database tables will be shown but not accessible until you reconnect to the database.")
+                            "Database tables will be shown but not accessible until you reconnect to the database.\n\n"
+                            "Use the 'Open Database' button to connect to your database file."
+                        )
                 else:
                     # Create connection if needed (we don't have a specific database to connect to)
                     database_tables_loaded = False
@@ -1650,9 +1659,12 @@ LIMIT 10
                         self.db_info_label.setText(connection_info)
                     elif 'connection_type' in project_data and project_data['connection_type'] != self.db_manager.connection_type:
                         # If connected but with a different database type than what was saved in the project
-                        QMessageBox.warning(self, "Database Type Mismatch",
+                        # Store the message instead of showing immediately
+                        database_connection_message = (
+                            "Database Type Mismatch",
                             f"The project was saved with a {project_data['connection_type']} database, but you're currently using {self.db_manager.connection_type}.\n\n"
-                            "Some database-specific features may not work correctly. Consider reconnecting to the correct database type.")
+                            "Some database-specific features may not work correctly. Consider reconnecting to the correct database type."
+                        )
                 
                 progress.setValue(30)
                 QApplication.processEvents()
@@ -1716,11 +1728,11 @@ LIMIT 10
                     progress.setValue(int(current_progress))
                     QApplication.processEvents()  # Keep UI responsive
                 
-                # If the project had database tables but we couldn't connect automatically, notify the user
-                if has_database_tables and not database_tables_loaded:
-                    QMessageBox.information(self, "Database Connection Required",
-                        "This project contains database tables. You need to reconnect to the database to use them.\n\n"
-                        "Use the 'Open Database' button to connect to your database file.")
+                # Remove the redundant notification - we'll show it after the progress dialog closes
+                # if has_database_tables and not database_tables_loaded:
+                #     QMessageBox.information(self, "Database Connection Required",
+                #         "This project contains database tables. You need to reconnect to the database to use them.\n\n"
+                #         "Use the 'Open Database' button to connect to your database file.")
                 
                 # Check if the operation was canceled
                 if progress.wasCanceled():
@@ -1825,7 +1837,14 @@ LIMIT 10
                 QApplication.processEvents()
                 
                 self.statusBar().showMessage(f'Project loaded from {file_name}')
+                
+                # Close progress dialog before showing message boxes
                 progress.close()
+                
+                # Now show any database connection message we stored earlier
+                if database_connection_message and not database_tables_loaded and has_database_tables:
+                    title, message = database_connection_message
+                    QMessageBox.warning(self, title, message)
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error",
