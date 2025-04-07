@@ -137,8 +137,16 @@ class SQLShell(QMainWindow):
         self.max_recent_projects = 10  # Maximum number of recent projects to track
         self.tabs = []  # Store list of all tabs
         
+        # File tracking for quick access
+        self.recent_files = []  # Store list of recently opened files
+        self.frequent_files = {}  # Store file paths with usage counts
+        self.max_recent_files = 15  # Maximum number of recent files to track
+        
         # Load recent projects from settings
         self.load_recent_projects()
+        
+        # Load recent and frequent files from settings
+        self.load_recent_files()
         
         # Define color scheme
         self.colors = {
@@ -205,6 +213,10 @@ class SQLShell(QMainWindow):
         # Setup menus
         setup_menubar(self)
         
+        # Update quick access menu
+        if hasattr(self, 'quick_access_menu'):
+            self.update_quick_access_menu()
+        
         # Create custom status bar
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
@@ -246,8 +258,13 @@ class SQLShell(QMainWindow):
         self.test_btn = QPushButton('Load Test Data')
         self.test_btn.clicked.connect(self.load_test_data)
         
+        self.quick_access_btn = QPushButton('Quick Access')
+        self.quick_access_btn.setIcon(QIcon.fromTheme("document-open-recent"))
+        self.quick_access_btn.clicked.connect(self.show_quick_access_menu)
+        
         db_buttons_layout.addWidget(self.open_db_btn)
         db_buttons_layout.addWidget(self.test_btn)
+        db_buttons_layout.addWidget(self.quick_access_btn)
         left_layout.addLayout(db_buttons_layout)
         
         # Tables section
@@ -314,7 +331,7 @@ class SQLShell(QMainWindow):
         main_layout.addWidget(right_panel, 4)
 
         # Status bar
-        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
+        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab | Ctrl+Shift+O: Quick Access Files')
         
     def create_tab_corner_widget(self):
         """Create a corner widget with a + button to add new tabs"""
@@ -491,6 +508,9 @@ class SQLShell(QMainWindow):
         
         for file_name in file_names:
             try:
+                # Add to recent files
+                self.add_recent_file(file_name)
+                
                 # Use the database manager to load the file
                 table_name, df = self.db_manager.load_file(file_name)
                 
@@ -545,6 +565,9 @@ class SQLShell(QMainWindow):
             
             if filename:
                 try:
+                    # Add to recent files
+                    self.add_recent_file(filename)
+                    
                     # Clear existing database tables from the list widget
                     for i in range(self.tables_list.count() - 1, -1, -1):
                         item = self.tables_list.item(i)
@@ -1214,6 +1237,13 @@ LIMIT 10
             self.rename_current_tab()
             return
         
+        # Show quick access menu with Ctrl+Shift+O
+        if (event.key() == Qt.Key.Key_O and 
+            (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and 
+            (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)):
+            self.show_quick_access_menu()
+            return
+        
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
@@ -1848,6 +1878,10 @@ LIMIT 10
             window_settings = self.save_window_state()
             settings['window'] = window_settings
             
+            # Also save recent and frequent files data
+            settings['recent_files'] = self.recent_files
+            settings['frequent_files'] = self.frequent_files
+            
             with open(settings_file, 'w') as f:
                 json.dump(settings, f, indent=4)
         except Exception as e:
@@ -1967,6 +2001,215 @@ LIMIT 10
         self.recent_projects.clear()
         self.save_recent_projects()
         self.update_recent_projects_menu()
+
+    def load_recent_files(self):
+        """Load recent and frequent files from settings file"""
+        try:
+            settings_file = os.path.join(os.path.expanduser('~'), '.sqlshell_settings.json')
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                    self.recent_files = settings.get('recent_files', [])
+                    self.frequent_files = settings.get('frequent_files', {})
+        except Exception:
+            self.recent_files = []
+            self.frequent_files = {}
+
+    def save_recent_files(self):
+        """Save recent and frequent files to settings file"""
+        try:
+            settings_file = os.path.join(os.path.expanduser('~'), '.sqlshell_settings.json')
+            settings = {}
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+            settings['recent_files'] = self.recent_files
+            settings['frequent_files'] = self.frequent_files
+            
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            print(f"Error saving recent files: {e}")
+
+    def add_recent_file(self, file_path):
+        """Add a file to recent files list and update frequent files count"""
+        file_path = os.path.abspath(file_path)
+        
+        # Update recent files
+        if file_path in self.recent_files:
+            self.recent_files.remove(file_path)
+        self.recent_files.insert(0, file_path)
+        self.recent_files = self.recent_files[:self.max_recent_files]
+        
+        # Update frequency count
+        if file_path in self.frequent_files:
+            self.frequent_files[file_path] += 1
+        else:
+            self.frequent_files[file_path] = 1
+        
+        # Save to settings
+        self.save_recent_files()
+        
+        # Update the quick access menu if it exists
+        if hasattr(self, 'quick_access_menu'):
+            self.update_quick_access_menu()
+
+    def get_frequent_files(self, limit=10):
+        """Get the most frequently used files"""
+        sorted_files = sorted(
+            self.frequent_files.items(), 
+            key=lambda item: item[1], 
+            reverse=True
+        )
+        return [path for path, count in sorted_files[:limit] if os.path.exists(path)]
+
+    def clear_recent_files(self):
+        """Clear the list of recent files"""
+        self.recent_files.clear()
+        self.save_recent_files()
+        if hasattr(self, 'quick_access_menu'):
+            self.update_quick_access_menu()
+
+    def clear_frequent_files(self):
+        """Clear the list of frequent files"""
+        self.frequent_files.clear()
+        self.save_recent_files()
+        if hasattr(self, 'quick_access_menu'):
+            self.update_quick_access_menu()
+
+    def update_quick_access_menu(self):
+        """Update the quick access menu with recent and frequent files"""
+        if not hasattr(self, 'quick_access_menu'):
+            return
+            
+        self.quick_access_menu.clear()
+        
+        # Add "Recent Files" section
+        if self.recent_files:
+            recent_section = self.quick_access_menu.addSection("Recent Files")
+            
+            for file_path in self.recent_files[:10]:  # Show top 10 recent files
+                if os.path.exists(file_path):
+                    file_name = os.path.basename(file_path)
+                    action = self.quick_access_menu.addAction(file_name)
+                    action.setData(file_path)
+                    action.setToolTip(file_path)
+                    action.triggered.connect(lambda checked, path=file_path: self.quick_open_file(path))
+        
+        # Add "Frequently Used Files" section
+        frequent_files = self.get_frequent_files(10)  # Get top 10 frequent files
+        if frequent_files:
+            self.quick_access_menu.addSeparator()
+            freq_section = self.quick_access_menu.addSection("Frequently Used Files")
+            
+            for file_path in frequent_files:
+                file_name = os.path.basename(file_path)
+                count = self.frequent_files.get(file_path, 0)
+                action = self.quick_access_menu.addAction(f"{file_name} ({count} uses)")
+                action.setData(file_path)
+                action.setToolTip(file_path)
+                action.triggered.connect(lambda checked, path=file_path: self.quick_open_file(path))
+        
+        # Add management options if we have any files
+        if self.recent_files or self.frequent_files:
+            self.quick_access_menu.addSeparator()
+            clear_recent = self.quick_access_menu.addAction("Clear Recent Files")
+            clear_recent.triggered.connect(self.clear_recent_files)
+            
+            clear_frequent = self.quick_access_menu.addAction("Clear Frequent Files")
+            clear_frequent.triggered.connect(self.clear_frequent_files)
+        else:
+            # No files placeholder
+            no_files = self.quick_access_menu.addAction("No Recent Files")
+            no_files.setEnabled(False)
+
+    def quick_open_file(self, file_path):
+        """Open a file from the quick access menu"""
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "File Not Found", 
+                f"The file no longer exists:\n{file_path}")
+            
+            # Remove from tracking
+            if file_path in self.recent_files:
+                self.recent_files.remove(file_path)
+            if file_path in self.frequent_files:
+                del self.frequent_files[file_path]
+            self.save_recent_files()
+            self.update_quick_access_menu()
+            return
+        
+        try:
+            # Determine file type
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext in ['.db', '.sqlite', '.sqlite3']:
+                # Database file
+                # Clear existing database tables from the list widget
+                for i in range(self.tables_list.count() - 1, -1, -1):
+                    item = self.tables_list.item(i)
+                    if item and item.text().endswith('(database)'):
+                        self.tables_list.takeItem(i)
+                
+                # Use the database manager to open the database
+                self.db_manager.open_database(file_path)
+                
+                # Update UI with tables from the database
+                for table_name, source in self.db_manager.loaded_tables.items():
+                    if source == 'database':
+                        self.tables_list.addItem(f"{table_name} (database)")
+                
+                # Update the completer with table and column names
+                self.update_completer()
+                
+                # Update status bar
+                self.statusBar().showMessage(f"Connected to database: {file_path}")
+                self.db_info_label.setText(self.db_manager.get_connection_info())
+                
+            elif file_ext in ['.xlsx', '.xls', '.csv', '.parquet']:
+                # Data file
+                if not self.db_manager.is_connected():
+                    # Create a default in-memory DuckDB connection if none exists
+                    connection_info = self.db_manager.create_memory_connection()
+                    self.db_info_label.setText(connection_info)
+                
+                # Use the database manager to load the file
+                table_name, df = self.db_manager.load_file(file_path)
+                
+                # Update UI
+                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                self.statusBar().showMessage(f'Loaded {file_path} as table "{table_name}"')
+                
+                # Show preview of loaded data
+                preview_df = df.head()
+                current_tab = self.get_current_tab()
+                if current_tab:
+                    self.populate_table(preview_df)
+                    current_tab.results_title.setText(f"PREVIEW: {table_name}")
+                
+                # Update completer with new table and column names
+                self.update_completer()
+            else:
+                QMessageBox.warning(self, "Unsupported File Type", 
+                    f"The file type {file_ext} is not supported.")
+                return
+            
+            # Update tracking - increment usage count
+            self.add_recent_file(file_path)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                f"Failed to open file:\n\n{str(e)}")
+            self.statusBar().showMessage(f"Error opening file: {os.path.basename(file_path)}")
+
+    def show_quick_access_menu(self):
+        """Display the quick access menu when the button is clicked"""
+        # First, make sure the menu is up to date
+        self.update_quick_access_menu()
+        
+        # Show the menu below the quick access button
+        if hasattr(self, 'quick_access_menu') and hasattr(self, 'quick_access_btn'):
+            self.quick_access_menu.popup(self.quick_access_btn.mapToGlobal(
+                QPoint(0, self.quick_access_btn.height())))
 
     def add_tab(self, title="Query 1"):
         """Add a new query tab"""

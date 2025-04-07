@@ -28,6 +28,10 @@ def create_file_menu(main_window):
     main_window.recent_projects_menu = file_menu.addMenu('Recent Projects')
     main_window.update_recent_projects_menu()
     
+    # Add Quick Access submenu for files
+    main_window.quick_access_menu = file_menu.addMenu('Quick Access Files')
+    main_window.update_quick_access_menu()
+    
     save_project_action = file_menu.addAction('Save Project')
     save_project_action.setShortcut('Ctrl+S')
     save_project_action.triggered.connect(main_window.save_project)
