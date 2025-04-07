@@ -546,9 +546,13 @@ class SQLShell(QMainWindow):
                 # Remove from list widget
                 self.tables_list.takeItem(self.tables_list.row(current_item))
                 self.statusBar().showMessage(f'Removed table "{table_name}"')
-                self.results_table.setRowCount(0)
-                self.results_table.setColumnCount(0)
-                self.row_count_label.setText("")
+                
+                # Get the current tab and clear its results table
+                current_tab = self.get_current_tab()
+                if current_tab:
+                    current_tab.results_table.setRowCount(0)
+                    current_tab.results_table.setColumnCount(0)
+                    current_tab.row_count_label.setText("")
                 
                 # Update completer
                 self.update_completer()
