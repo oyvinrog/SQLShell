@@ -47,13 +47,14 @@ class DatabaseManager:
                 self.connection_type = None
                 self.database_path = None  # Clear the database path
     
-    def open_database(self, filename):
+    def open_database(self, filename, load_all_tables=True):
         """
         Open a database connection to the specified file.
         Detects whether it's a SQLite or DuckDB database.
         
         Args:
             filename: Path to the database file
+            load_all_tables: Whether to automatically load all tables from the database
             
         Returns:
             True if successful, False otherwise
@@ -63,6 +64,10 @@ class DatabaseManager:
         """
         # Close any existing connection
         self.close_connection()
+        
+        # Clear any existing loaded tables
+        self.loaded_tables = {}
+        self.table_columns = {}
         
         try:
             if self.is_sqlite_db(filename):
@@ -75,8 +80,9 @@ class DatabaseManager:
             # Store the database path
             self.database_path = os.path.abspath(filename)
             
-            # Load tables from the database
-            self.load_database_tables()
+            # Load tables from the database if requested
+            if load_all_tables:
+                self.load_database_tables()
             return True
         except (sqlite3.Error, duckdb.Error) as e:
             self.conn = None
@@ -741,3 +747,60 @@ class DatabaseManager:
         except Exception:
             # Ignore errors in type detection - this is just for enhancement
             pass 
+    
+    def load_specific_table(self, table_name):
+        """
+        Load metadata for a specific table from the database.
+        This is used when we know which tables we want to load rather than loading all tables.
+        
+        Args:
+            table_name: Name of the table to load
+            
+        Returns:
+            Boolean indicating if the table was found and loaded
+        """
+        if not self.is_connected():
+            return False
+            
+        try:
+            if self.connection_type == 'sqlite':
+                # Check if the table exists in SQLite
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+                result = cursor.fetchone()
+                
+                if result:
+                    # Get column names for the table
+                    try:
+                        column_query = f"PRAGMA table_info({table_name})"
+                        columns = cursor.execute(column_query).fetchall()
+                        self.table_columns[table_name] = [col[1] for col in columns]  # Column name is at index 1
+                    except Exception:
+                        self.table_columns[table_name] = []
+                    
+                    # Register the table
+                    self.loaded_tables[table_name] = 'database'
+                    return True
+                    
+            else:  # duckdb
+                # Check if the table exists in DuckDB
+                query = f"SELECT table_name FROM information_schema.tables WHERE table_name='{table_name}' AND table_schema='main'"
+                result = self.conn.execute(query).fetchdf()
+                
+                if not result.empty:
+                    # Get column names for the table
+                    try:
+                        column_query = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND table_schema='main'"
+                        columns = self.conn.execute(column_query).fetchdf()
+                        self.table_columns[table_name] = columns['column_name'].tolist()
+                    except Exception:
+                        self.table_columns[table_name] = []
+                    
+                    # Register the table
+                    self.loaded_tables[table_name] = 'database'
+                    return True
+            
+            return False
+            
+        except Exception:
+            return False 

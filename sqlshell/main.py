@@ -587,7 +587,7 @@ class SQLShell(QMainWindow):
                             self.tables_list.takeItem(i)
                     
                     # Use the database manager to open the database
-                    self.db_manager.open_database(filename)
+                    self.db_manager.open_database(filename, load_all_tables=True)
                     
                     # Update UI with tables from the database
                     for table_name, source in self.db_manager.loaded_tables.items():
@@ -1453,6 +1453,10 @@ LIMIT 10
                 # Close existing connection
                 self.db_manager.close_connection()
                 
+                # Clear all database tracking
+                self.db_manager.loaded_tables = {}
+                self.db_manager.table_columns = {}
+                
                 # Reset state
                 self.tables_list.clear()
                 
@@ -1477,6 +1481,10 @@ LIMIT 10
             # Skip confirmation and just clear everything
             if self.db_manager.is_connected():
                 self.db_manager.close_connection()
+            
+            # Clear all database tracking
+            self.db_manager.loaded_tables = {}
+            self.db_manager.table_columns = {}
             
             # Reset state
             self.tables_list.clear()
@@ -1618,6 +1626,11 @@ LIMIT 10
                 progress.setValue(15)
                 QApplication.processEvents()
                 
+                # Make sure all database tables are cleared from tracking
+                self.db_manager.loaded_tables = {}
+                self.db_manager.table_columns = {}
+                
+                # Check if there's a database path in the project
                 # Check if there's a database path in the project
                 has_database_path = 'database_path' in project_data and project_data['database_path']
                 has_database_tables = any(table_info.get('file_path') == 'database' 
@@ -1634,14 +1647,9 @@ LIMIT 10
                     try:
                         if os.path.exists(database_path):
                             # Connect to the database
-                            self.db_manager.open_database(database_path)
+                            self.db_manager.open_database(database_path, load_all_tables=False)
                             self.db_info_label.setText(self.db_manager.get_connection_info())
                             self.statusBar().showMessage(f"Connected to database: {database_path}")
-                            
-                            # Add all database tables to the tables list
-                            for table_name, source in self.db_manager.loaded_tables.items():
-                                if source == 'database':
-                                    self.tables_list.addItem(f"{table_name} (database)")
                             
                             # Mark database tables as loaded
                             database_tables_loaded = True
@@ -1695,20 +1703,24 @@ LIMIT 10
                         
                     progress.setLabelText(f"Loading table: {table_name}")
                     file_path = table_info['file_path']
+                    self.statusBar().showMessage(f"Loading table: {table_name} from {file_path}")
                     try:
                         if file_path == 'database':
-                            # Skip if we already loaded database tables by connecting to the database
+                            # Different handling based on whether database connection is active
                             if database_tables_loaded:
-                                continue
+                                # Try to load the specific table from the database
+                                table_exists = self.db_manager.load_specific_table(table_name)
                                 
-                            # For database tables, we need to check if the original database is connected
-                            # Don't try to SELECT from non-existent tables
-                            # Instead just register the table name for UI display
-                            self.db_manager.loaded_tables[table_name] = 'database'
-                            
-                            # If we have column information, use it
-                            if 'columns' in table_info:
-                                self.db_manager.table_columns[table_name] = table_info['columns']
+                                # If the table doesn't exist in the database, fall back to using the saved column info
+                                if not table_exists:
+                                    self.db_manager.loaded_tables[table_name] = 'database'
+                                    if 'columns' in table_info:
+                                        self.db_manager.table_columns[table_name] = table_info['columns']
+                            else:
+                                # No active database connection, just register the table name
+                                self.db_manager.loaded_tables[table_name] = 'database'
+                                if 'columns' in table_info:
+                                    self.db_manager.table_columns[table_name] = table_info['columns']
                             
                             # Add to the UI list
                             self.tables_list.addItem(f"{table_name} (database)")
@@ -1848,7 +1860,7 @@ LIMIT 10
                 progress.setValue(100)
                 QApplication.processEvents()
                 
-                self.statusBar().showMessage(f'Project loaded from {file_name}')
+                self.statusBar().showMessage(f'Project loaded from {file_name} with {len(self.db_manager.loaded_tables)} tables')
                 
                 # Close progress dialog before showing message boxes
                 progress.close()
