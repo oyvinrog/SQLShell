@@ -115,6 +115,42 @@ def create_tab_menu(main_window):
     return tab_menu
 
 
+def create_preferences_menu(main_window):
+    """Create the Preferences menu with user settings.
+    
+    Args:
+        main_window: The SQLShell main window instance
+        
+    Returns:
+        The created Preferences menu
+    """
+    # Create Preferences menu
+    preferences_menu = main_window.menuBar().addMenu('&Preferences')
+    
+    # Auto-load recent project option
+    auto_load_action = preferences_menu.addAction('Auto-load Most Recent Project')
+    auto_load_action.setCheckable(True)
+    auto_load_action.setChecked(main_window.auto_load_recent_project)
+    auto_load_action.triggered.connect(lambda checked: toggle_auto_load(main_window, checked))
+    
+    return preferences_menu
+
+
+def toggle_auto_load(main_window, checked):
+    """Toggle the auto-load recent project setting.
+    
+    Args:
+        main_window: The SQLShell main window instance
+        checked: Boolean indicating whether the option is checked
+    """
+    main_window.auto_load_recent_project = checked
+    main_window.save_recent_projects()  # Save the preference
+    main_window.statusBar().showMessage(
+        f"Auto-load most recent project {'enabled' if checked else 'disabled'}", 
+        2000
+    )
+
+
 def setup_menubar(main_window):
     """Set up the complete menu bar for the application.
     
@@ -128,6 +164,7 @@ def setup_menubar(main_window):
     file_menu = create_file_menu(main_window)
     view_menu = create_view_menu(main_window)
     tab_menu = create_tab_menu(main_window)
+    preferences_menu = create_preferences_menu(main_window)
     
     # You can add more menus here in the future
     

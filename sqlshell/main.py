@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import argparse
 
 # Ensure proper path setup for resources when running directly
 if __name__ == "__main__":
@@ -137,6 +138,9 @@ class SQLShell(QMainWindow):
         self.max_recent_projects = 10  # Maximum number of recent projects to track
         self.tabs = []  # Store list of all tabs
         
+        # User preferences
+        self.auto_load_recent_project = True  # Default to auto-loading most recent project
+        
         # File tracking for quick access
         self.recent_files = []  # Store list of recently opened files
         self.frequent_files = {}  # Store file paths with usage counts
@@ -169,6 +173,10 @@ class SQLShell(QMainWindow):
         
         # Create initial tab
         self.add_tab()
+        
+        # Load most recent project if enabled and available
+        if self.auto_load_recent_project:
+            self.load_most_recent_project()
 
     def apply_stylesheet(self):
         """Apply custom stylesheet to the application"""
@@ -1880,6 +1888,10 @@ LIMIT 10
                     settings = json.load(f)
                     self.recent_projects = settings.get('recent_projects', [])
                     
+                    # Load user preferences
+                    preferences = settings.get('preferences', {})
+                    self.auto_load_recent_project = preferences.get('auto_load_recent_project', True)
+                    
                     # Load window settings if available
                     window_settings = settings.get('window', {})
                     if window_settings:
@@ -1896,6 +1908,11 @@ LIMIT 10
                 with open(settings_file, 'r') as f:
                     settings = json.load(f)
             settings['recent_projects'] = self.recent_projects
+            
+            # Save user preferences
+            if 'preferences' not in settings:
+                settings['preferences'] = {}
+            settings['preferences']['auto_load_recent_project'] = self.auto_load_recent_project
             
             # Save window settings
             window_settings = self.save_window_state()
@@ -2472,7 +2489,28 @@ LIMIT 10
         except Exception as e:
             self.statusBar().showMessage(f"Error resetting zoom: {str(e)}", 2000)
 
+    def load_most_recent_project(self):
+        """Load the most recent project if available"""
+        if self.recent_projects:
+            most_recent_project = self.recent_projects[0]
+            if os.path.exists(most_recent_project):
+                self.open_project(most_recent_project)
+                self.statusBar().showMessage(f"Auto-loaded most recent project: {os.path.basename(most_recent_project)}")
+            else:
+                # Remove the non-existent project from the list
+                self.recent_projects.remove(most_recent_project)
+                self.save_recent_projects()
+                # Try the next project if available
+                if self.recent_projects:
+                    self.load_most_recent_project()
+
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='SQL Shell - SQL Query Tool')
+    parser.add_argument('--no-auto-load', action='store_true', 
+                        help='Disable auto-loading the most recent project at startup')
+    args = parser.parse_args()
+    
     app = QApplication(sys.argv)
     app.setStyle(QStyleFactory.create('Fusion'))
     
@@ -2513,6 +2551,10 @@ def main():
         print("Initializing main application...")
         window = SQLShell()
         
+        # Override auto-load setting if command-line argument is provided
+        if args.no_auto_load:
+            window.auto_load_recent_project = False
+            
         # Define the function to show main window and hide splash
         def show_main_window():
             # Properly finish the splash screen
