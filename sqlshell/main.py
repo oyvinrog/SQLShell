@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import argparse
+from pathlib import Path
 
 # Ensure proper path setup for resources when running directly
 if __name__ == "__main__":
@@ -2199,7 +2200,38 @@ LIMIT 10
             # Determine file type
             file_ext = os.path.splitext(file_path)[1].lower()
             
-            if file_ext in ['.db', '.sqlite', '.sqlite3']:
+            # Check if this is a Delta table directory
+            is_delta_table = False
+            if os.path.isdir(file_path):
+                delta_path = Path(file_path)
+                delta_log_path = delta_path / '_delta_log'
+                if delta_log_path.exists():
+                    is_delta_table = True
+            
+            if is_delta_table:
+                # Delta table directory
+                if not self.db_manager.is_connected():
+                    # Create a default in-memory DuckDB connection if none exists
+                    connection_info = self.db_manager.create_memory_connection()
+                    self.db_info_label.setText(connection_info)
+                
+                # Use the database manager to load the Delta table
+                table_name, df = self.db_manager.load_file(file_path)
+                
+                # Update UI
+                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                self.statusBar().showMessage(f'Loaded Delta table from {file_path} as "{table_name}"')
+                
+                # Show preview of loaded data
+                preview_df = df.head()
+                current_tab = self.get_current_tab()
+                if current_tab:
+                    self.populate_table(preview_df)
+                    current_tab.results_title.setText(f"PREVIEW: {table_name}")
+                
+                # Update completer with new table and column names
+                self.update_completer()
+            elif file_ext in ['.db', '.sqlite', '.sqlite3']:
                 # Database file
                 # Clear existing database tables from the list widget
                 for i in range(self.tables_list.count() - 1, -1, -1):
@@ -2540,7 +2572,6 @@ LIMIT 10
             return
             
         # Check if this is a valid Delta table directory
-        from pathlib import Path
         delta_path = Path(delta_dir)
         delta_log_path = delta_path / '_delta_log'
         
