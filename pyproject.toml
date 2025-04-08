@@ -30,11 +30,23 @@ dependencies = [
     "openpyxl>=3.1.0",
     "pyarrow>=14.0.1",
     "fastparquet>=2023.10.1",
-    "xlrd>=2.0.1"
+    "xlrd>=2.0.1",
+    "deltalake",
+    "Pillow>=10.0.0"
 ]
 
 [project.urls]
 Homepage = "https://github.com/oyvinrog/SQLShell"
 
 [project.scripts]
-sqls = "sqlshell.main:main" 
+sqls = "sqlshell.main:main"
+
+[tool.setuptools.package-data]
+sqlshell = [
+    "*.db",
+    "resources/*",
+    "data/*",
+    "test_data/*",
+    "*.png",
+    "*.ico"
+] 
