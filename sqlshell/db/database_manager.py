@@ -2,6 +2,7 @@ import os
 import sqlite3
 import pandas as pd
 import duckdb
+from pathlib import Path
 
 class DatabaseManager:
     """
@@ -218,7 +219,7 @@ class DatabaseManager:
         Load data from a file into the database.
         
         Args:
-            file_path: Path to the data file (Excel, CSV, Parquet)
+            file_path: Path to the data file (Excel, CSV, Parquet, Delta)
             
         Returns:
             Tuple of (table_name, DataFrame) for the loaded data
@@ -227,8 +228,23 @@ class DatabaseManager:
             ValueError: If the file format is unsupported or there's an error
         """
         try:
+            # Check if this is a Delta table (folder with _delta_log)
+            delta_path = Path(file_path)
+            is_delta_table = (delta_path.is_dir() and 
+                             (delta_path / '_delta_log').exists()) or file_path.endswith('.delta')
+            
             # Read the file into a DataFrame, using optimized loading strategies
-            if file_path.endswith(('.xlsx', '.xls')):
+            if is_delta_table:
+                # Read as Delta table using deltalake library
+                try:
+                    # Load the Delta table
+                    import deltalake
+                    delta_table = deltalake.DeltaTable(file_path)
+                    # Convert to pandas DataFrame
+                    df = delta_table.to_pandas()
+                except Exception as e:
+                    raise ValueError(f"Error loading Delta table: {str(e)}")
+            elif file_path.endswith(('.xlsx', '.xls')):
                 # Try to use a streaming approach for Excel files
                 try:
                     # For Excel files, we first check if it's a large file
@@ -285,6 +301,11 @@ class DatabaseManager:
             
             # Generate table name from file name
             base_name = os.path.splitext(os.path.basename(file_path))[0]
+            
+            # For directories like Delta tables, use the directory name
+            if os.path.isdir(file_path):
+                base_name = os.path.basename(file_path)
+                
             table_name = self.sanitize_table_name(base_name)
             
             # Ensure unique table name
@@ -413,9 +434,19 @@ class DatabaseManager:
             # Remove the existing table
             self.remove_table(table_name)
             
+            # Check if this is a Delta table
+            delta_path = Path(file_path)
+            is_delta_table = (delta_path.is_dir() and 
+                             (delta_path / '_delta_log').exists()) or file_path.endswith('.delta')
+            
             # Load the file with the original table name
             df = None
-            if file_path.endswith(('.xlsx', '.xls')):
+            if is_delta_table:
+                # Read as Delta table
+                import deltalake
+                delta_table = deltalake.DeltaTable(file_path)
+                df = delta_table.to_pandas()
+            elif file_path.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file_path)
             elif file_path.endswith('.csv'):
                 df = pd.read_csv(file_path)

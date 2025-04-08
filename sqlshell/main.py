@@ -289,12 +289,17 @@ class SQLShell(QMainWindow):
         self.browse_btn.setIcon(QIcon.fromTheme("document-new"))
         self.browse_btn.clicked.connect(self.browse_files)
         
+        self.load_delta_btn = QPushButton('Load Delta Table')
+        self.load_delta_btn.setIcon(QIcon.fromTheme("folder-open"))
+        self.load_delta_btn.clicked.connect(self.load_delta_table)
+        
         self.remove_table_btn = QPushButton('Remove')
         self.remove_table_btn.setObjectName("danger_button")
         self.remove_table_btn.setIcon(QIcon.fromTheme("edit-delete"))
         self.remove_table_btn.clicked.connect(self.remove_selected_table)
         
         table_actions_layout.addWidget(self.browse_btn)
+        table_actions_layout.addWidget(self.load_delta_btn)
         table_actions_layout.addWidget(self.remove_table_btn)
         left_layout.addLayout(table_actions_layout)
         
@@ -2515,6 +2520,106 @@ LIMIT 10
                 # Try the next project if available
                 if self.recent_projects:
                     self.load_most_recent_project()
+
+    def load_delta_table(self):
+        """Load a Delta table from a directory"""
+        if not self.db_manager.is_connected():
+            # Create a default in-memory DuckDB connection if none exists
+            connection_info = self.db_manager.create_memory_connection()
+            self.db_info_label.setText(connection_info)
+            
+        # Get directory containing the Delta table
+        delta_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Delta Table Directory",
+            "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks
+        )
+        
+        if not delta_dir:
+            return
+            
+        # Check if this is a valid Delta table directory
+        from pathlib import Path
+        delta_path = Path(delta_dir)
+        delta_log_path = delta_path / '_delta_log'
+        
+        if not delta_log_path.exists():
+            # Ask if they want to select a subdirectory
+            subdirs = [d for d in delta_path.iterdir() if d.is_dir() and (d / '_delta_log').exists()]
+            
+            if subdirs:
+                # There are subdirectories with Delta tables
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setWindowTitle("Select Subdirectory")
+                msg.setText(f"The selected directory does not contain a Delta table, but it contains {len(subdirs)} subdirectories with Delta tables.")
+                msg.setInformativeText("Would you like to select one of these subdirectories?")
+                msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+                
+                if msg.exec() == QMessageBox.StandardButton.Yes:
+                    # Create a dialog to select a subdirectory
+                    subdir_names = [d.name for d in subdirs]
+                    subdir, ok = QInputDialog.getItem(
+                        self,
+                        "Select Delta Subdirectory",
+                        "Choose a subdirectory containing a Delta table:",
+                        subdir_names,
+                        0,
+                        False
+                    )
+                    
+                    if not ok or not subdir:
+                        return
+                        
+                    delta_dir = str(delta_path / subdir)
+                    delta_path = Path(delta_dir)
+                else:
+                    # Show error and return
+                    QMessageBox.critical(self, "Invalid Delta Table", 
+                        "The selected directory does not contain a Delta table (_delta_log directory not found).")
+                    return
+            else:
+                # No Delta tables found
+                QMessageBox.critical(self, "Invalid Delta Table", 
+                    "The selected directory does not contain a Delta table (_delta_log directory not found).")
+                return
+        
+        try:
+            # Add to recent files
+            self.add_recent_file(delta_dir)
+            
+            # Use the database manager to load the Delta table
+            import os
+            table_name, df = self.db_manager.load_file(delta_dir)
+            
+            # Update UI
+            self.tables_list.addItem(f"{table_name} ({os.path.basename(delta_dir)})")
+            self.statusBar().showMessage(f'Loaded Delta table from {delta_dir} as "{table_name}"')
+            
+            # Show preview of loaded data
+            preview_df = df.head()
+            self.populate_table(preview_df)
+            
+            # Update results title to show preview
+            current_tab = self.get_current_tab()
+            if current_tab:
+                current_tab.results_title.setText(f"PREVIEW: {table_name}")
+            
+            # Update completer with new table and column names
+            self.update_completer()
+            
+        except Exception as e:
+            error_msg = f'Error loading Delta table from {os.path.basename(delta_dir)}: {str(e)}'
+            self.statusBar().showMessage(error_msg)
+            QMessageBox.critical(self, "Error", error_msg)
+            
+            current_tab = self.get_current_tab()
+            if current_tab:
+                current_tab.results_table.setRowCount(0)
+                current_tab.results_table.setColumnCount(0)
+                current_tab.row_count_label.setText("")
 
 def main():
     # Parse command line arguments
