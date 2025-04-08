@@ -6,3 +6,5 @@ openpyxl>=3.1.0  # For Excel support
 pyarrow>=14.0.1  # For parquet support
 fastparquet>=2023.10.1  # Alternative parquet engine
 xlrd>=2.0.1  # For old .xls files 
+deltalake>=0.10.0  # For Delta Lake table support
+Pillow>=10.0.0  # For image processing (used in splash screen and icon creation) 
