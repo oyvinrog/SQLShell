@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0", "wheel>=0.37.0", "setuptools_scm>=6.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -12,7 +12,7 @@ authors = [
 ]
 requires-python = ">=3.8"
 keywords = ["sql", "data analysis", "gui", "duckdb"]
-license = {text = "MIT"}
+license = "MIT"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -40,6 +40,16 @@ Homepage = "https://github.com/oyvinrog/SQLShell"
 
 [project.scripts]
 sqls = "sqlshell.main:main"
+
+[tool.setuptools]
+packages = [
+    "sqlshell",
+    "sqlshell.data",
+    "sqlshell.db",
+    "sqlshell.resources",
+    "sqlshell.sqlshell",
+    "sqlshell.ui"
+]
 
 [tool.setuptools.package-data]
 sqlshell = [
