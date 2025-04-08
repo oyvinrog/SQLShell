@@ -20,7 +20,9 @@ setup(
         'openpyxl>=3.1.0',
         'pyarrow>=14.0.1',
         'fastparquet>=2023.10.1',
-        'xlrd>=2.0.1'
+        'xlrd>=2.0.1',
+        'deltalake',
+        'Pillow>=10.0.0'
     ],
     entry_points={
         'console_scripts': [
