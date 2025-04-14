@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
                            QCheckBox, QWidgetAction, QMenuBar, QInputDialog, QProgressDialog,
-                           QListWidgetItem)
+                           QListWidgetItem, QDialog, QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint, QMimeData
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath, QDrag
 import numpy as np
@@ -331,19 +331,15 @@ class SQLShell(QMainWindow):
         db_buttons_layout = QHBoxLayout()
         db_buttons_layout.setSpacing(8)
         
-        self.open_db_btn = QPushButton('Open Database')
-        self.open_db_btn.setIcon(QIcon.fromTheme("document-open"))
-        self.open_db_btn.clicked.connect(self.open_database)
-        
-        self.test_btn = QPushButton('Load Test Data')
-        self.test_btn.clicked.connect(self.load_test_data)
+        self.load_btn = QPushButton('Load')
+        self.load_btn.setIcon(QIcon.fromTheme("document-open"))
+        self.load_btn.clicked.connect(self.show_load_dialog)
         
         self.quick_access_btn = QPushButton('Quick Access')
         self.quick_access_btn.setIcon(QIcon.fromTheme("document-open-recent"))
         self.quick_access_btn.clicked.connect(self.show_quick_access_menu)
         
-        db_buttons_layout.addWidget(self.open_db_btn)
-        db_buttons_layout.addWidget(self.test_btn)
+        db_buttons_layout.addWidget(self.load_btn)
         db_buttons_layout.addWidget(self.quick_access_btn)
         left_layout.addLayout(db_buttons_layout)
         
@@ -352,28 +348,6 @@ class SQLShell(QMainWindow):
         tables_header.setObjectName("header_label")
         tables_header.setStyleSheet(get_tables_header_stylesheet())
         left_layout.addWidget(tables_header)
-        
-        # Table actions
-        table_actions_layout = QHBoxLayout()
-        table_actions_layout.setSpacing(8)
-        
-        self.browse_btn = QPushButton('Load Files')
-        self.browse_btn.setIcon(QIcon.fromTheme("document-new"))
-        self.browse_btn.clicked.connect(self.browse_files)
-        
-        self.load_delta_btn = QPushButton('Load Delta Table')
-        self.load_delta_btn.setIcon(QIcon.fromTheme("folder-open"))
-        self.load_delta_btn.clicked.connect(self.load_delta_table)
-        
-        self.remove_table_btn = QPushButton('Remove')
-        self.remove_table_btn.setObjectName("danger_button")
-        self.remove_table_btn.setIcon(QIcon.fromTheme("edit-delete"))
-        self.remove_table_btn.clicked.connect(self.remove_selected_table)
-        
-        table_actions_layout.addWidget(self.browse_btn)
-        table_actions_layout.addWidget(self.load_delta_btn)
-        table_actions_layout.addWidget(self.remove_table_btn)
-        left_layout.addLayout(table_actions_layout)
         
         # Tables list with custom styling
         self.tables_list = DraggableTablesList()
@@ -2774,6 +2748,343 @@ LIMIT 10
                 current_tab.results_table.setRowCount(0)
                 current_tab.results_table.setColumnCount(0)
                 current_tab.row_count_label.setText("")
+
+    def show_load_dialog(self):
+        """Show a modern dialog with options to load different types of data"""
+        # Create the dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Load Data")
+        dialog.setMinimumWidth(450)
+        dialog.setMinimumHeight(520)
+        
+        # Create a layout for the dialog
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(24)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Header section with title and logo
+        header_layout = QHBoxLayout()
+        
+        # Title label with gradient effect
+        title_label = QLabel("Load Data")
+        title_font = QFont()
+        title_font.setPointSize(20)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet("""
+            font-weight: bold;
+            background: -webkit-linear-gradient(#2C3E50, #3498DB);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        """)
+        header_layout.addWidget(title_label, 1)
+        
+        # Try to add a small logo image
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "resources", "icon.png")
+            if os.path.exists(icon_path):
+                logo_label = QLabel()
+                logo_pixmap = QPixmap(icon_path).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                logo_label.setPixmap(logo_pixmap)
+                header_layout.addWidget(logo_label)
+        except Exception:
+            pass  # Skip logo if any issues
+            
+        layout.addLayout(header_layout)
+        
+        # Description with clearer styling
+        desc_label = QLabel("Choose a data source to load into SQLShell")
+        desc_label.setStyleSheet("color: #7F8C8D; font-size: 14px; margin: 4px 0 12px 0;")
+        layout.addWidget(desc_label)
+        
+        # Add separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("background-color: #E0E0E0; min-height: 1px; max-height: 1px;")
+        layout.addWidget(separator)
+        
+        # Create option cards with icons, titles and descriptions
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(16)
+        options_layout.setContentsMargins(0, 10, 0, 10)
+        
+        # Store animation references to prevent garbage collection
+        animations = []
+        
+        # Function to create hover animations for cards
+        def create_hover_animations(card):
+            # Store original stylesheet
+            original_style = card.styleSheet()
+            hover_style = """
+                background-color: #F8F9FA;
+                border: 1px solid #3498DB;
+                border-radius: 8px;
+            """
+            
+            # Function to handle enter event with animation
+            def enterEvent(event):
+                # Create and configure animation
+                anim = QPropertyAnimation(card, b"geometry")
+                anim.setDuration(150)
+                current_geo = card.geometry()
+                target_geo = QRect(
+                    current_geo.x() - 3,  # Slight shift to left for effect
+                    current_geo.y(),
+                    current_geo.width() + 6,  # Slight growth in width
+                    current_geo.height()
+                )
+                anim.setStartValue(current_geo)
+                anim.setEndValue(target_geo)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                
+                # Set hover style
+                card.setStyleSheet(hover_style)
+                # Start animation
+                anim.start()
+                # Keep reference to prevent garbage collection
+                animations.append(anim)
+                
+                # Call original enter event if it exists
+                original_enter = getattr(card, "_original_enterEvent", None)
+                if original_enter:
+                    original_enter(event)
+            
+            # Function to handle leave event with animation
+            def leaveEvent(event):
+                # Create and configure animation to return to original state
+                anim = QPropertyAnimation(card, b"geometry")
+                anim.setDuration(200)
+                current_geo = card.geometry()
+                original_geo = QRect(
+                    current_geo.x() + 3,  # Shift back to original position
+                    current_geo.y(),
+                    current_geo.width() - 6,  # Shrink back to original width
+                    current_geo.height()
+                )
+                anim.setStartValue(current_geo)
+                anim.setEndValue(original_geo)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                
+                # Restore original style
+                card.setStyleSheet(original_style)
+                # Start animation
+                anim.start()
+                # Keep reference to prevent garbage collection
+                animations.append(anim)
+                
+                # Call original leave event if it exists
+                original_leave = getattr(card, "_original_leaveEvent", None)
+                if original_leave:
+                    original_leave(event)
+            
+            # Store original event handlers and set new ones
+            card._original_enterEvent = card.enterEvent
+            card._original_leaveEvent = card.leaveEvent
+            card.enterEvent = enterEvent
+            card.leaveEvent = leaveEvent
+            
+            return card
+        
+        # Function to create styled option buttons with descriptions
+        def create_option_button(title, description, icon_name, option_type, accent_color="#3498DB"):
+            # Create container frame
+            container = QFrame()
+            container.setObjectName("optionCard")
+            container.setCursor(Qt.CursorShape.PointingHandCursor)
+            container.setProperty("optionType", option_type)
+            
+            # Set frame style
+            container.setFrameShape(QFrame.Shape.StyledPanel)
+            container.setLineWidth(1)
+            container.setMinimumHeight(90)
+            container.setStyleSheet(f"""
+                background-color: #FFFFFF;
+                border-radius: 10px;
+                border: 1px solid #E0E0E0;
+            """)
+            
+            # Create layout for the container
+            card_layout = QHBoxLayout(container)
+            card_layout.setContentsMargins(20, 16, 20, 16)
+            
+            # Add icon with colored circle background
+            icon_container = QFrame()
+            icon_container.setFixedSize(QSize(50, 50))
+            icon_container.setStyleSheet(f"""
+                background-color: {accent_color}20;  /* 20% opacity */
+                border-radius: 25px;
+                border: none;
+            """)
+            
+            icon_layout = QHBoxLayout(icon_container)
+            icon_layout.setContentsMargins(0, 0, 0, 0)
+            
+            icon_label = QLabel()
+            icon = QIcon.fromTheme(icon_name)
+            icon_pixmap = icon.pixmap(QSize(24, 24))
+            icon_label.setPixmap(icon_pixmap)
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_layout.addWidget(icon_label)
+            
+            card_layout.addWidget(icon_container)
+            
+            # Add text section
+            text_layout = QVBoxLayout()
+            text_layout.setSpacing(4)
+            text_layout.setContentsMargins(12, 0, 0, 0)
+            
+            # Add title
+            title_label = QLabel(title)
+            title_font = QFont()
+            title_font.setBold(True)
+            title_font.setPointSize(12)
+            title_label.setFont(title_font)
+            text_layout.addWidget(title_label)
+            
+            # Add description
+            desc_label = QLabel(description)
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet("color: #7F8C8D; font-size: 11px;")
+            text_layout.addWidget(desc_label)
+            
+            card_layout.addLayout(text_layout, 1)
+            
+            # Add arrow icon to suggest clickable
+            arrow_label = QLabel("→")
+            arrow_label.setStyleSheet(f"color: {accent_color}; font-size: 16px; font-weight: bold;")
+            card_layout.addWidget(arrow_label)
+            
+            # Connect click event
+            container.mousePressEvent = lambda e: self.handle_load_option(dialog, option_type)
+            
+            # Apply hover animations
+            container = create_hover_animations(container)
+            
+            return container
+        
+        # Database option
+        db_option = create_option_button(
+            "Database",
+            "Load SQL database files (SQLite, etc.) to query and analyze.",
+            "database",
+            "database",
+            "#2980B9"  # Blue accent
+        )
+        options_layout.addWidget(db_option)
+        
+        # Files option
+        files_option = create_option_button(
+            "Data Files", 
+            "Load Excel, CSV, Parquet and other data file formats.",
+            "document-new",
+            "files",
+            "#27AE60"  # Green accent
+        )
+        options_layout.addWidget(files_option)
+        
+        # Delta Table option
+        delta_option = create_option_button(
+            "Delta Table",
+            "Load data from Delta Lake format directories.",
+            "folder-open",
+            "delta",
+            "#8E44AD"  # Purple accent
+        )
+        options_layout.addWidget(delta_option)
+        
+        # Test Data option
+        test_option = create_option_button(
+            "Test Data",
+            "Generate and load sample data for testing and exploration.",
+            "system-run",
+            "test",
+            "#E67E22"  # Orange accent
+        )
+        options_layout.addWidget(test_option)
+        
+        layout.addLayout(options_layout)
+        
+        # Add spacer
+        layout.addStretch()
+        
+        # Add separator line before buttons
+        bottom_separator = QFrame()
+        bottom_separator.setFrameShape(QFrame.Shape.HLine)
+        bottom_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        bottom_separator.setStyleSheet("background-color: #E0E0E0; min-height: 1px; max-height: 1px;")
+        layout.addWidget(bottom_separator)
+        
+        # Add cancel button
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
+        button_layout.setContentsMargins(0, 16, 0, 0)
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(100)
+        cancel_btn.setStyleSheet("""
+            background-color: #F5F5F5;
+            border: 1px solid #E0E0E0;
+            border-radius: 6px;
+            padding: 8px 16px;
+            color: #7F8C8D;
+            font-weight: bold;
+        """)
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Apply modern drop shadow effect to the dialog
+        try:
+            dialog.setGraphicsEffect(None)  # Clear any existing effects
+            shadow = QGraphicsDropShadowEffect(dialog)
+            shadow.setBlurRadius(20)
+            shadow.setColor(QColor(0, 0, 0, 50))  # Semi-transparent black
+            shadow.setOffset(0, 0)
+            dialog.setGraphicsEffect(shadow)
+        except Exception:
+            pass  # Skip shadow if there are any issues
+        
+        # Add custom styling to make the dialog look modern
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #2C3E50;
+            }
+        """)
+        
+        # Store dialog animation references in the instance to prevent garbage collection
+        dialog._animations = animations
+        
+        # Center the dialog on the parent window
+        if self.geometry().isValid():
+            dialog.move(
+                self.geometry().center().x() - dialog.width() // 2,
+                self.geometry().center().y() - dialog.height() // 2
+            )
+        
+        # Show the dialog
+        dialog.exec()
+    
+    def handle_load_option(self, dialog, option):
+        """Handle the selected load option"""
+        # Close the dialog
+        dialog.accept()
+        
+        # Call the appropriate function based on the selected option
+        if option == "database":
+            self.open_database()
+        elif option == "files":
+            self.browse_files()
+        elif option == "delta":
+            self.load_delta_table()
+        elif option == "test":
+            self.load_test_data()
 
 def main():
     # Parse command line arguments
