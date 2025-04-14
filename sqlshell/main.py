@@ -48,6 +48,34 @@ class DraggableTablesList(QListWidget):
         # Apply custom styling
         self.setStyleSheet(get_draggable_tables_list_stylesheet())
         
+        # Store tables that need reloading
+        self.tables_needing_reload = set()
+        
+        # Connect double-click signal to handle reloading
+        self.itemDoubleClicked.connect(self.handle_item_double_click)
+        
+    def handle_item_double_click(self, item):
+        """Handle double-clicking on a table item"""
+        if not item:
+            return
+            
+        table_name = item.text().split(' (')[0]
+        
+        # Check if this table needs reloading
+        if table_name in self.tables_needing_reload:
+            # Prompt user to reload the table
+            reply = QMessageBox.question(
+                self,
+                "Reload Table",
+                f"The table '{table_name}' needs to be loaded. Load it now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes and self.parent:
+                # Call the parent's reload_selected_table method
+                self.parent.reload_selected_table(table_name)
+                return
+                
     def startDrag(self, supportedActions):
         """Override startDrag to customize the drag data."""
         item = self.currentItem()
@@ -127,6 +155,49 @@ class DraggableTablesList(QListWidget):
             
             # Reset after a short delay
             QTimer.singleShot(300, lambda: item.setBackground(orig_bg))
+            
+    def add_table_item(self, table_name, source, needs_reload=False):
+        """Add a table item with optional reload icon"""
+        item_text = f"{table_name} ({source})"
+        item = QListWidgetItem(item_text)
+        
+        if needs_reload:
+            # Add to set of tables needing reload
+            self.tables_needing_reload.add(table_name)
+            # Set an icon for tables that need reloading
+            item.setIcon(QIcon.fromTheme("view-refresh"))
+            # Add tooltip to indicate the table needs to be reloaded
+            item.setToolTip(f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+        
+        self.addItem(item)
+        return item
+        
+    def mark_table_reloaded(self, table_name):
+        """Mark a table as reloaded by removing its icon"""
+        if table_name in self.tables_needing_reload:
+            self.tables_needing_reload.remove(table_name)
+            
+        # Find and update the item
+        for i in range(self.count()):
+            item = self.item(i)
+            item_table_name = item.text().split(' (')[0]
+            if item_table_name == table_name:
+                item.setIcon(QIcon())  # Remove icon
+                item.setToolTip("")  # Clear tooltip
+                break
+                
+    def mark_table_needs_reload(self, table_name):
+        """Mark a table as needing reload by adding an icon"""
+        self.tables_needing_reload.add(table_name)
+        
+        # Find and update the item
+        for i in range(self.count()):
+            item = self.item(i)
+            item_table_name = item.text().split(' (')[0]
+            if item_table_name == table_name:
+                item.setIcon(QIcon.fromTheme("view-refresh"))
+                item.setToolTip(f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+                break
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -528,8 +599,8 @@ class SQLShell(QMainWindow):
                 # Use the database manager to load the file
                 table_name, df = self.db_manager.load_file(file_name)
                 
-                # Update UI
-                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
+                # Update UI using new method
+                self.tables_list.add_table_item(table_name, os.path.basename(file_name))
                 self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
                 
                 # Show preview of loaded data
@@ -598,7 +669,7 @@ class SQLShell(QMainWindow):
                     # Update UI with tables from the database
                     for table_name, source in self.db_manager.loaded_tables.items():
                         if source == 'database':
-                            self.tables_list.addItem(f"{table_name} (database)")
+                            self.tables_list.add_table_item(table_name, "database")
                     
                     # Update the completer with table and column names
                     self.update_completer()
@@ -917,6 +988,22 @@ class SQLShell(QMainWindow):
             return
             
         table_name = item.text().split(' (')[0]
+        
+        # Check if this table needs to be reloaded first
+        if table_name in self.tables_list.tables_needing_reload:
+            reply = QMessageBox.question(
+                self,
+                "Table Not Loaded",
+                f"The table '{table_name}' needs to be loaded before viewing. Load it now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Reload the table
+                self.reload_selected_table(table_name)
+            else:
+                return
+                
         try:
             # Use the database manager to get a preview of the table
             preview_df = self.db_manager.get_table_preview(table_name)
@@ -976,7 +1063,8 @@ class SQLShell(QMainWindow):
             # Update UI
             self.tables_list.clear()
             for table_name, file_path in self.db_manager.loaded_tables.items():
-                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                # Use the new add_table_item method
+                self.tables_list.add_table_item(table_name, os.path.basename(file_path))
             
             # Set the sample query in the current tab
             current_tab = self.get_current_tab()
@@ -1061,8 +1149,8 @@ LIMIT 10
             self.db_manager.loaded_tables[table_name] = file_name
             self.db_manager.table_columns[table_name] = df.columns.tolist()
             
-            # Update UI
-            self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
+            # Update UI using new method
+            self.tables_list.add_table_item(table_name, os.path.basename(file_name))
             self.statusBar().showMessage(f'Data exported to {file_name} and loaded as table "{table_name}"')
             
             # Update completer with new table and column names
@@ -1119,8 +1207,8 @@ LIMIT 10
             self.db_manager.loaded_tables[table_name] = file_name
             self.db_manager.table_columns[table_name] = df.columns.tolist()
             
-            # Update UI
-            self.tables_list.addItem(f"{table_name} ({os.path.basename(file_name)})")
+            # Update UI using new method
+            self.tables_list.add_table_item(table_name, os.path.basename(file_name))
             self.statusBar().showMessage(f'Data exported to {file_name} and loaded as table "{table_name}"')
             
             # Update completer with new table and column names
@@ -1369,8 +1457,15 @@ LIMIT 10
         # Add menu actions
         select_from_action = context_menu.addAction("Select from")
         add_to_editor_action = context_menu.addAction("Just add to editor")
-        reload_action = context_menu.addAction("Reload")
-        reload_action.setIcon(QIcon.fromTheme("view-refresh"))
+        
+        # Check if table needs reloading and add appropriate action
+        if table_name in self.tables_list.tables_needing_reload:
+            reload_action = context_menu.addAction("Reload Table")
+            reload_action.setIcon(QIcon.fromTheme("view-refresh"))
+        else:
+            reload_action = context_menu.addAction("Refresh")
+            reload_action.setIcon(QIcon.fromTheme("view-refresh"))
+            
         context_menu.addSeparator()
         rename_action = context_menu.addAction("Rename table...")
         delete_action = context_menu.addAction("Delete table")
@@ -1380,6 +1475,19 @@ LIMIT 10
         action = context_menu.exec(self.tables_list.mapToGlobal(position))
 
         if action == select_from_action:
+            # Check if table needs reloading first
+            if table_name in self.tables_list.tables_needing_reload:
+                reply = QMessageBox.question(
+                    self,
+                    "Table Not Loaded",
+                    f"The table '{table_name}' needs to be loaded before using. Load it now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Reload the table
+                    self.reload_selected_table(table_name)
+                    
             # Insert "SELECT * FROM table_name" at cursor position
             cursor = current_tab.query_edit.textCursor()
             cursor.insertText(f"SELECT * FROM {table_name}")
@@ -1417,9 +1525,16 @@ LIMIT 10
             if reply == QMessageBox.StandardButton.Yes:
                 self.remove_selected_table()
                 
-    def reload_selected_table(self, table_name):
+    def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
         try:
+            # If table_name is not provided, get it from the selected item
+            if not table_name:
+                current_item = self.tables_list.currentItem()
+                if not current_item:
+                    return
+                table_name = current_item.text().split(' (')[0]
+            
             # Show a loading indicator
             self.statusBar().showMessage(f'Reloading table "{table_name}"...')
             
@@ -1432,6 +1547,9 @@ LIMIT 10
                 
                 # Update completer with any new column names
                 self.update_completer()
+                
+                # Mark the table as reloaded (remove the reload icon)
+                self.tables_list.mark_table_reloaded(table_name)
                 
                 # Show a preview of the reloaded table
                 for i in range(self.tables_list.count()):
@@ -1637,17 +1755,15 @@ LIMIT 10
                 self.db_manager.table_columns = {}
                 
                 # Check if there's a database path in the project
-                # Check if there's a database path in the project
                 has_database_path = 'database_path' in project_data and project_data['database_path']
                 has_database_tables = any(table_info.get('file_path') == 'database' 
                                        for table_info in project_data.get('tables', {}).values())
                 
-                # Set a flag to track if database tables are loaded
+                # Connect to database if needed
+                progress.setLabelText("Connecting to database...")
                 database_tables_loaded = False
                 database_connection_message = None
                 
-                # If the project contains database tables and a database path, try to connect to it
-                progress.setLabelText("Connecting to database...")
                 if has_database_path and has_database_tables:
                     database_path = project_data['database_path']
                     try:
@@ -1707,62 +1823,60 @@ LIMIT 10
                     if progress.wasCanceled():
                         break
                         
-                    progress.setLabelText(f"Loading table: {table_name}")
+                    progress.setLabelText(f"Processing table: {table_name}")
                     file_path = table_info['file_path']
-                    self.statusBar().showMessage(f"Loading table: {table_name} from {file_path}")
+                    self.statusBar().showMessage(f"Processing table: {table_name} from {file_path}")
+                    
                     try:
                         if file_path == 'database':
                             # Different handling based on whether database connection is active
                             if database_tables_loaded:
-                                # Try to load the specific table from the database
-                                table_exists = self.db_manager.load_specific_table(table_name)
-                                
-                                # If the table doesn't exist in the database, fall back to using the saved column info
-                                if not table_exists:
-                                    self.db_manager.loaded_tables[table_name] = 'database'
-                                    if 'columns' in table_info:
-                                        self.db_manager.table_columns[table_name] = table_info['columns']
+                                # Store table info without loading data
+                                self.db_manager.loaded_tables[table_name] = 'database'
+                                if 'columns' in table_info:
+                                    self.db_manager.table_columns[table_name] = table_info['columns']
+                                    
+                                # Add to the UI list without reload icon since database is connected
+                                self.tables_list.add_table_item(table_name, "database", needs_reload=False)
                             else:
                                 # No active database connection, just register the table name
                                 self.db_manager.loaded_tables[table_name] = 'database'
                                 if 'columns' in table_info:
                                     self.db_manager.table_columns[table_name] = table_info['columns']
-                            
-                            # Add to the UI list
-                            self.tables_list.addItem(f"{table_name} (database)")
+                                
+                                # Add to the UI list with a reload icon
+                                self.tables_list.add_table_item(table_name, "database", needs_reload=True)
                         elif file_path == 'query_result':
-                            # For tables from query results, we'll need to re-run the query
-                            # For now, just note it as a query result table
+                            # For tables from query results, just note it as a query result table
                             self.db_manager.loaded_tables[table_name] = 'query_result'
-                            self.tables_list.addItem(f"{table_name} (query result)")
+                            
+                            # Add to the UI list with a reload icon
+                            self.tables_list.add_table_item(table_name, "query result", needs_reload=True)
                         elif os.path.exists(file_path):
-                            # Use the database manager to load the file
-                            try:
-                                loaded_table_name, df = self.db_manager.load_file(file_path)
-                                self.tables_list.addItem(f"{loaded_table_name} ({os.path.basename(file_path)})")
-                            except Exception as e:
-                                QMessageBox.warning(self, "Warning",
-                                    f"Failed to load file for table {table_name}:\n{str(e)}")
-                                continue
+                            # Register the file as a table source but don't load data yet
+                            self.db_manager.loaded_tables[table_name] = file_path
+                            if 'columns' in table_info:
+                                self.db_manager.table_columns[table_name] = table_info['columns']
+                                
+                            # Add to the UI list with a reload icon
+                            self.tables_list.add_table_item(table_name, os.path.basename(file_path), needs_reload=True)
                         else:
-                            QMessageBox.warning(self, "Warning",
-                                f"Could not find file for table {table_name}: {file_path}")
-                            continue
+                            # File doesn't exist, but add to list with warning
+                            self.db_manager.loaded_tables[table_name] = file_path
+                            if 'columns' in table_info:
+                                self.db_manager.table_columns[table_name] = table_info['columns']
+                                
+                            # Add to the UI list with a reload icon
+                            self.tables_list.add_table_item(table_name, f"{os.path.basename(file_path)} (missing)", needs_reload=True)
                             
                     except Exception as e:
                         QMessageBox.warning(self, "Warning",
-                            f"Failed to load table {table_name}:\n{str(e)}")
+                            f"Failed to process table {table_name}:\n{str(e)}")
                 
                     # Update progress for this table
                     current_progress += table_progress_step
                     progress.setValue(int(current_progress))
                     QApplication.processEvents()  # Keep UI responsive
-                
-                # Remove the redundant notification - we'll show it after the progress dialog closes
-                # if has_database_tables and not database_tables_loaded:
-                #     QMessageBox.information(self, "Database Connection Required",
-                #         "This project contains database tables. You need to reconnect to the database to use them.\n\n"
-                #         "Use the 'Open Database' button to connect to your database file.")
                 
                 # Check if the operation was canceled
                 if progress.wasCanceled():
@@ -1866,7 +1980,16 @@ LIMIT 10
                 progress.setValue(100)
                 QApplication.processEvents()
                 
-                self.statusBar().showMessage(f'Project loaded from {file_name} with {len(self.db_manager.loaded_tables)} tables')
+                # Show message about tables needing reload
+                reload_count = len(self.tables_list.tables_needing_reload)
+                if reload_count > 0:
+                    self.statusBar().showMessage(
+                        f'Project loaded from {file_name} with {table_count} tables. {reload_count} tables need to be reloaded (click reload icon).'
+                    )
+                else:
+                    self.statusBar().showMessage(
+                        f'Project loaded from {file_name} with {table_count} tables.'
+                    )
                 
                 # Close progress dialog before showing message boxes
                 progress.close()
@@ -2218,8 +2341,8 @@ LIMIT 10
                 # Use the database manager to load the Delta table
                 table_name, df = self.db_manager.load_file(file_path)
                 
-                # Update UI
-                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                # Update UI using new method
+                self.tables_list.add_table_item(table_name, os.path.basename(file_path))
                 self.statusBar().showMessage(f'Loaded Delta table from {file_path} as "{table_name}"')
                 
                 # Show preview of loaded data
@@ -2242,10 +2365,10 @@ LIMIT 10
                 # Use the database manager to open the database
                 self.db_manager.open_database(file_path)
                 
-                # Update UI with tables from the database
+                # Update UI with tables from the database using new method
                 for table_name, source in self.db_manager.loaded_tables.items():
                     if source == 'database':
-                        self.tables_list.addItem(f"{table_name} (database)")
+                        self.tables_list.add_table_item(table_name, "database")
                 
                 # Update the completer with table and column names
                 self.update_completer()
@@ -2264,8 +2387,8 @@ LIMIT 10
                 # Use the database manager to load the file
                 table_name, df = self.db_manager.load_file(file_path)
                 
-                # Update UI
-                self.tables_list.addItem(f"{table_name} ({os.path.basename(file_path)})")
+                # Update UI using new method
+                self.tables_list.add_table_item(table_name, os.path.basename(file_path))
                 self.statusBar().showMessage(f'Loaded {file_path} as table "{table_name}"')
                 
                 # Show preview of loaded data
@@ -2625,8 +2748,8 @@ LIMIT 10
             import os
             table_name, df = self.db_manager.load_file(delta_dir)
             
-            # Update UI
-            self.tables_list.addItem(f"{table_name} ({os.path.basename(delta_dir)})")
+            # Update UI using new method
+            self.tables_list.add_table_item(table_name, os.path.basename(delta_dir))
             self.statusBar().showMessage(f'Loaded Delta table from {delta_dir} as "{table_name}"')
             
             # Show preview of loaded data
