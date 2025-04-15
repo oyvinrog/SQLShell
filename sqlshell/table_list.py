@@ -51,20 +51,10 @@ class DraggableTablesList(QListWidget):
         
         # Check if this table needs reloading
         if table_name in self.tables_needing_reload:
-            # Prompt user to reload the table
-            reply = QMessageBox.question(
-                self,
-                "Reload Table",
-                f"The table '{table_name}' needs to be loaded. Load it now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes and self.parent:
-                # Call the parent's reload_selected_table method
-                if hasattr(self.parent, 'reload_selected_table'):
-                    self.parent.reload_selected_table(table_name)
-                return
-                
+            # Reload the table immediately without prompting
+            if self.parent and hasattr(self.parent, 'reload_selected_table'):
+                self.parent.reload_selected_table(table_name)
+        
     def startDrag(self, supportedActions):
         """Override startDrag to customize the drag data."""
         item = self.currentItem()

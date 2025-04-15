@@ -803,18 +803,8 @@ class SQLShell(QMainWindow):
         
         # Check if this table needs to be reloaded first
         if table_name in self.tables_list.tables_needing_reload:
-            reply = QMessageBox.question(
-                self,
-                "Table Not Loaded",
-                f"The table '{table_name}' needs to be loaded before viewing. Load it now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                # Reload the table
-                self.reload_selected_table(table_name)
-            else:
-                return
+            # Reload the table immediately without asking
+            self.reload_selected_table(table_name)
                 
         try:
             # Use the database manager to get a preview of the table
@@ -1289,16 +1279,8 @@ LIMIT 10
         if action == select_from_action:
             # Check if table needs reloading first
             if table_name in self.tables_list.tables_needing_reload:
-                reply = QMessageBox.question(
-                    self,
-                    "Table Not Loaded",
-                    f"The table '{table_name}' needs to be loaded before using. Load it now?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                
-                if reply == QMessageBox.StandardButton.Yes:
-                    # Reload the table
-                    self.reload_selected_table(table_name)
+                # Reload the table immediately without asking
+                self.reload_selected_table(table_name)
                     
             # Insert "SELECT * FROM table_name" at cursor position
             cursor = current_tab.query_edit.textCursor()
