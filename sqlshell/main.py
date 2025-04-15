@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
                            QCheckBox, QWidgetAction, QMenuBar, QInputDialog, QProgressDialog,
-                           QListWidgetItem, QDialog, QGraphicsDropShadowEffect)
+                           QListWidgetItem, QDialog, QGraphicsDropShadowEffect, QTreeWidgetItem)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint, QMimeData
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath, QDrag
 import numpy as np
@@ -437,22 +437,34 @@ class SQLShell(QMainWindow):
 
     def remove_selected_table(self):
         current_item = self.tables_list.currentItem()
-        if current_item:
-            table_name = current_item.text().split(' (')[0]
-            if self.db_manager.remove_table(table_name):
-                # Remove from list widget
-                self.tables_list.takeItem(self.tables_list.row(current_item))
-                self.statusBar().showMessage(f'Removed table "{table_name}"')
-                
-                # Get the current tab and clear its results table
-                current_tab = self.get_current_tab()
-                if current_tab:
-                    current_tab.results_table.setRowCount(0)
-                    current_tab.results_table.setColumnCount(0)
-                    current_tab.row_count_label.setText("")
-                
-                # Update completer
-                self.update_completer()
+        if not current_item or self.tables_list.is_folder_item(current_item):
+            return
+            
+        table_name = self.tables_list.get_table_name_from_item(current_item)
+        if not table_name:
+            return
+            
+        if self.db_manager.remove_table(table_name):
+            # Remove from tree widget
+            parent = current_item.parent()
+            if parent:
+                parent.removeChild(current_item)
+            else:
+                index = self.tables_list.indexOfTopLevelItem(current_item)
+                if index >= 0:
+                    self.tables_list.takeTopLevelItem(index)
+                    
+            self.statusBar().showMessage(f'Removed table "{table_name}"')
+            
+            # Get the current tab and clear its results table
+            current_tab = self.get_current_tab()
+            if current_tab:
+                current_tab.results_table.setRowCount(0)
+                current_tab.results_table.setColumnCount(0)
+                current_tab.row_count_label.setText("")
+            
+            # Update completer
+            self.update_completer()
 
     def open_database(self):
         """Open a database connection with proper error handling and resource management"""
@@ -470,10 +482,10 @@ class SQLShell(QMainWindow):
                     self.add_recent_file(filename)
                     
                     # Clear existing database tables from the list widget
-                    for i in range(self.tables_list.count() - 1, -1, -1):
-                        item = self.tables_list.item(i)
-                        if item and item.text().endswith('(database)'):
-                            self.tables_list.takeItem(i)
+                    for i in range(self.tables_list.topLevelItemCount() - 1, -1, -1):
+                        item = self.tables_list.topLevelItem(i)
+                        if item and item.text(0).endswith('(database)'):
+                            self.tables_list.takeTopLevelItem(i)
                     
                     # Use the database manager to open the database
                     self.db_manager.open_database(filename, load_all_tables=True)
@@ -791,7 +803,7 @@ class SQLShell(QMainWindow):
 
     def show_table_preview(self, item):
         """Show a preview of the selected table"""
-        if not item:
+        if not item or self.tables_list.is_folder_item(item):
             return
             
         # Get the current tab
@@ -799,7 +811,9 @@ class SQLShell(QMainWindow):
         if not current_tab:
             return
             
-        table_name = item.text().split(' (')[0]
+        table_name = self.tables_list.get_table_name_from_item(item)
+        if not table_name:
+            return
         
         # Check if this table needs to be reloaded first
         if table_name in self.tables_list.tables_needing_reload:
@@ -900,12 +914,9 @@ LIMIT 10
             self.statusBar().showMessage('Test data loaded successfully')
             
             # Show a preview of the large numbers data
-            # Find the large_numbers item in the tables list
-            for i in range(self.tables_list.count()):
-                item = self.tables_list.item(i)
-                if item and 'large_numbers' in item.text():
-                    self.show_table_preview(item)
-                    break
+            large_numbers_item = self.tables_list.find_table_item("large_numbers")
+            if large_numbers_item:
+                self.show_table_preview(large_numbers_item)
             
         except Exception as e:
             self.statusBar().showMessage(f'Error loading test data: {str(e)}')
@@ -1241,7 +1252,9 @@ LIMIT 10
     def show_tables_context_menu(self, position):
         """Show context menu for tables list"""
         item = self.tables_list.itemAt(position)
-        if not item:
+        
+        # If no item or it's a folder, let the tree widget handle it
+        if not item or self.tables_list.is_folder_item(item):
             return
 
         # Get current tab
@@ -1250,7 +1263,9 @@ LIMIT 10
             return
 
         # Get table name without the file info in parentheses
-        table_name = item.text().split(' (')[0]
+        table_name = self.tables_list.get_table_name_from_item(item)
+        if not table_name:
+            return
 
         # Create context menu
         context_menu = QMenu(self)
@@ -1267,7 +1282,26 @@ LIMIT 10
         else:
             reload_action = context_menu.addAction("Refresh")
             reload_action.setIcon(QIcon.fromTheme("view-refresh"))
-            
+        
+        # Add move to folder submenu
+        move_menu = context_menu.addMenu("Move to Folder")
+        move_menu.setIcon(QIcon.fromTheme("folder"))
+        
+        # Add "New Folder" option to move menu
+        new_folder_action = move_menu.addAction("New Folder...")
+        move_menu.addSeparator()
+        
+        # Add folders to the move menu
+        for i in range(self.tables_list.topLevelItemCount()):
+            top_item = self.tables_list.topLevelItem(i)
+            if self.tables_list.is_folder_item(top_item):
+                folder_action = move_menu.addAction(top_item.text(0))
+                folder_action.setData(top_item)
+        
+        # Add root option
+        move_menu.addSeparator()
+        root_action = move_menu.addAction("Root (No Folder)")
+        
         context_menu.addSeparator()
         rename_action = context_menu.addAction("Rename table...")
         delete_action = context_menu.addAction("Delete table")
@@ -1305,8 +1339,8 @@ LIMIT 10
             if ok and new_name:
                 if self.rename_table(table_name, new_name):
                     # Update the item text
-                    source = item.text().split(' (')[1][:-1]  # Get the source part
-                    item.setText(f"{new_name} ({source})")
+                    source = item.text(0).split(' (')[1][:-1]  # Get the source part
+                    item.setText(0, f"{new_name} ({source})")
                     self.statusBar().showMessage(f'Table renamed to "{new_name}"')
         elif action == delete_action:
             # Show confirmation dialog
@@ -1318,7 +1352,37 @@ LIMIT 10
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self.remove_selected_table()
-                
+        elif action == new_folder_action:
+            # Create a new folder and move the table there
+            folder_name, ok = QInputDialog.getText(
+                self,
+                "New Folder",
+                "Enter folder name:",
+                QLineEdit.EchoMode.Normal
+            )
+            if ok and folder_name:
+                folder = self.tables_list.create_folder(folder_name)
+                self.tables_list.move_item_to_folder(item, folder)
+                self.statusBar().showMessage(f'Moved table "{table_name}" to folder "{folder_name}"')
+        elif action == root_action:
+            # Move table to root (remove from any folder)
+            parent = item.parent()
+            if parent and self.tables_list.is_folder_item(parent):
+                # Create a clone at root level
+                source = item.text(0).split(' (')[1][:-1]  # Get the source part
+                needs_reload = table_name in self.tables_list.tables_needing_reload
+                # Remove from current parent
+                parent.removeChild(item)
+                # Add to root
+                self.tables_list.add_table_item(table_name, source, needs_reload)
+                self.statusBar().showMessage(f'Moved table "{table_name}" to root')
+        elif action and action.parent() == move_menu:
+            # Move to selected folder
+            target_folder = action.data()
+            if target_folder:
+                self.tables_list.move_item_to_folder(item, target_folder)
+                self.statusBar().showMessage(f'Moved table "{table_name}" to folder "{target_folder.text(0)}"')
+
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
         try:
@@ -1327,7 +1391,7 @@ LIMIT 10
                 current_item = self.tables_list.currentItem()
                 if not current_item:
                     return
-                table_name = current_item.text().split(' (')[0]
+                table_name = self.tables_list.get_table_name_from_item(current_item)
             
             # Show a loading indicator
             self.statusBar().showMessage(f'Reloading table "{table_name}"...')
@@ -1346,11 +1410,9 @@ LIMIT 10
                 self.tables_list.mark_table_reloaded(table_name)
                 
                 # Show a preview of the reloaded table
-                for i in range(self.tables_list.count()):
-                    item = self.tables_list.item(i)
-                    if item and table_name in item.text().split(' (')[0]:
-                        self.show_table_preview(item)
-                        break
+                table_item = self.tables_list.find_table_item(table_name)
+                if table_item:
+                    self.show_table_preview(table_item)
             else:
                 # Show error message
                 QMessageBox.warning(self, "Reload Failed", message)
@@ -1463,6 +1525,7 @@ LIMIT 10
             
             project_data = {
                 'tables': {},
+                'folders': {},
                 'tabs': tabs_data,
                 'connection_type': self.db_manager.connection_type,
                 'database_path': None  # Initialize to None
@@ -1472,8 +1535,51 @@ LIMIT 10
             if self.db_manager.is_connected() and hasattr(self.db_manager, 'database_path'):
                 project_data['database_path'] = self.db_manager.database_path
             
-            # Save table information
-            for table_name, file_path in self.db_manager.loaded_tables.items():
+            # Helper function to recursively save folder structure
+            def save_folder_structure(parent_item, parent_path=""):
+                if parent_item is None:
+                    # Handle top-level items
+                    for i in range(self.tables_list.topLevelItemCount()):
+                        item = self.tables_list.topLevelItem(i)
+                        if self.tables_list.is_folder_item(item):
+                            # It's a folder - add to folders and process its children
+                            folder_name = item.text(0)
+                            folder_id = f"folder_{i}"
+                            project_data['folders'][folder_id] = {
+                                'name': folder_name,
+                                'parent': None,
+                                'expanded': item.isExpanded()
+                            }
+                            save_folder_structure(item, folder_id)
+                        else:
+                            # It's a table - add to tables at root level
+                            save_table_item(item)
+                else:
+                    # Process children of this folder
+                    for i in range(parent_item.childCount()):
+                        child = parent_item.child(i)
+                        if self.tables_list.is_folder_item(child):
+                            # It's a subfolder
+                            folder_name = child.text(0)
+                            folder_id = f"{parent_path}_sub_{i}"
+                            project_data['folders'][folder_id] = {
+                                'name': folder_name,
+                                'parent': parent_path,
+                                'expanded': child.isExpanded()
+                            }
+                            save_folder_structure(child, folder_id)
+                        else:
+                            # It's a table in this folder
+                            save_table_item(child, parent_path)
+            
+            # Helper function to save table item
+            def save_table_item(item, folder_id=None):
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if not table_name or table_name not in self.db_manager.loaded_tables:
+                    return
+                    
+                file_path = self.db_manager.loaded_tables[table_name]
+                
                 # For database tables and query results, store the special identifier
                 if file_path in ['database', 'query_result']:
                     source_path = file_path
@@ -1483,8 +1589,12 @@ LIMIT 10
                 
                 project_data['tables'][table_name] = {
                     'file_path': source_path,
-                    'columns': self.db_manager.table_columns.get(table_name, [])
+                    'columns': self.db_manager.table_columns.get(table_name, []),
+                    'folder': folder_id
                 }
+            
+            # Save the folder structure
+            save_folder_structure(None)
             
             with open(file_name, 'w') as f:
                 json.dump(project_data, f, indent=4)
@@ -1602,7 +1712,45 @@ LIMIT 10
                             "Some database-specific features may not work correctly. Consider reconnecting to the correct database type."
                         )
                 
-                progress.setValue(30)
+                progress.setValue(20)
+                QApplication.processEvents()
+                
+                # First, recreate the folder structure
+                folder_items = {}  # Store folder items by ID
+                
+                # Create folders first
+                if 'folders' in project_data:
+                    progress.setLabelText("Creating folders...")
+                    # First pass: create top-level folders
+                    for folder_id, folder_info in project_data['folders'].items():
+                        if folder_info.get('parent') is None:
+                            # Create top-level folder
+                            folder = self.tables_list.create_folder(folder_info['name'])
+                            folder_items[folder_id] = folder
+                            # Set expanded state
+                            folder.setExpanded(folder_info.get('expanded', True))
+                    
+                    # Second pass: create subfolders
+                    for folder_id, folder_info in project_data['folders'].items():
+                        parent_id = folder_info.get('parent')
+                        if parent_id is not None and parent_id in folder_items:
+                            # Create subfolder under parent
+                            parent_folder = folder_items[parent_id]
+                            subfolder = QTreeWidgetItem(parent_folder)
+                            subfolder.setText(0, folder_info['name'])
+                            subfolder.setIcon(0, QIcon.fromTheme("folder"))
+                            subfolder.setData(0, Qt.ItemDataRole.UserRole, "folder")
+                            # Make folder text bold
+                            font = subfolder.font(0)
+                            font.setBold(True)
+                            subfolder.setFont(0, font)
+                            # Set folder flags
+                            subfolder.setFlags(subfolder.flags() | Qt.ItemFlag.ItemIsDropEnabled)
+                            # Set expanded state
+                            subfolder.setExpanded(folder_info.get('expanded', True))
+                            folder_items[folder_id] = subfolder
+                            
+                progress.setValue(25)
                 QApplication.processEvents()
                 
                 # Calculate progress steps for loading tables
@@ -1622,6 +1770,10 @@ LIMIT 10
                     self.statusBar().showMessage(f"Processing table: {table_name} from {file_path}")
                     
                     try:
+                        # Determine folder placement
+                        folder_id = table_info.get('folder')
+                        parent_folder = folder_items.get(folder_id) if folder_id else None
+                        
                         if file_path == 'database':
                             # Different handling based on whether database connection is active
                             if database_tables_loaded:
@@ -1630,38 +1782,86 @@ LIMIT 10
                                 if 'columns' in table_info:
                                     self.db_manager.table_columns[table_name] = table_info['columns']
                                     
-                                # Add to the UI list without reload icon since database is connected
-                                self.tables_list.add_table_item(table_name, "database", needs_reload=False)
+                                # Create item without reload icon
+                                if parent_folder:
+                                    # Add to folder
+                                    item = QTreeWidgetItem(parent_folder)
+                                    item.setText(0, f"{table_name} (database)")
+                                    item.setIcon(0, QIcon.fromTheme("x-office-spreadsheet"))
+                                    item.setData(0, Qt.ItemDataRole.UserRole, "table")
+                                else:
+                                    # Add to root
+                                    self.tables_list.add_table_item(table_name, "database", needs_reload=False)
                             else:
                                 # No active database connection, just register the table name
                                 self.db_manager.loaded_tables[table_name] = 'database'
                                 if 'columns' in table_info:
                                     self.db_manager.table_columns[table_name] = table_info['columns']
                                 
-                                # Add to the UI list with a reload icon
-                                self.tables_list.add_table_item(table_name, "database", needs_reload=True)
+                                # Create item with reload icon
+                                if parent_folder:
+                                    # Add to folder
+                                    item = QTreeWidgetItem(parent_folder)
+                                    item.setText(0, f"{table_name} (database)")
+                                    item.setIcon(0, QIcon.fromTheme("view-refresh"))
+                                    item.setData(0, Qt.ItemDataRole.UserRole, "table")
+                                    item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+                                    self.tables_list.tables_needing_reload.add(table_name)
+                                else:
+                                    # Add to root
+                                    self.tables_list.add_table_item(table_name, "database", needs_reload=True)
                         elif file_path == 'query_result':
                             # For tables from query results, just note it as a query result table
                             self.db_manager.loaded_tables[table_name] = 'query_result'
                             
-                            # Add to the UI list with a reload icon
-                            self.tables_list.add_table_item(table_name, "query result", needs_reload=True)
+                            # Create item with reload icon
+                            if parent_folder:
+                                # Add to folder
+                                item = QTreeWidgetItem(parent_folder)
+                                item.setText(0, f"{table_name} (query result)")
+                                item.setIcon(0, QIcon.fromTheme("view-refresh"))
+                                item.setData(0, Qt.ItemDataRole.UserRole, "table")
+                                item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+                                self.tables_list.tables_needing_reload.add(table_name)
+                            else:
+                                # Add to root
+                                self.tables_list.add_table_item(table_name, "query result", needs_reload=True)
                         elif os.path.exists(file_path):
                             # Register the file as a table source but don't load data yet
                             self.db_manager.loaded_tables[table_name] = file_path
                             if 'columns' in table_info:
                                 self.db_manager.table_columns[table_name] = table_info['columns']
                                 
-                            # Add to the UI list with a reload icon
-                            self.tables_list.add_table_item(table_name, os.path.basename(file_path), needs_reload=True)
+                            # Create item with reload icon
+                            if parent_folder:
+                                # Add to folder
+                                item = QTreeWidgetItem(parent_folder)
+                                item.setText(0, f"{table_name} ({os.path.basename(file_path)})")
+                                item.setIcon(0, QIcon.fromTheme("view-refresh"))
+                                item.setData(0, Qt.ItemDataRole.UserRole, "table")
+                                item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+                                self.tables_list.tables_needing_reload.add(table_name)
+                            else:
+                                # Add to root
+                                self.tables_list.add_table_item(table_name, os.path.basename(file_path), needs_reload=True)
                         else:
                             # File doesn't exist, but add to list with warning
                             self.db_manager.loaded_tables[table_name] = file_path
                             if 'columns' in table_info:
                                 self.db_manager.table_columns[table_name] = table_info['columns']
                                 
-                            # Add to the UI list with a reload icon
-                            self.tables_list.add_table_item(table_name, f"{os.path.basename(file_path)} (missing)", needs_reload=True)
+                            # Create item with reload icon and missing warning
+                            if parent_folder:
+                                # Add to folder
+                                item = QTreeWidgetItem(parent_folder)
+                                item.setText(0, f"{table_name} ({os.path.basename(file_path)} (missing))")
+                                item.setIcon(0, QIcon.fromTheme("view-refresh"))
+                                item.setData(0, Qt.ItemDataRole.UserRole, "table")
+                                item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+                                self.tables_list.tables_needing_reload.add(table_name)
+                            else:
+                                # Add to root
+                                self.tables_list.add_table_item(table_name, f"{os.path.basename(file_path)} (missing)", needs_reload=True)
                             
                     except Exception as e:
                         QMessageBox.warning(self, "Warning",
@@ -2151,10 +2351,10 @@ LIMIT 10
             elif file_ext in ['.db', '.sqlite', '.sqlite3']:
                 # Database file
                 # Clear existing database tables from the list widget
-                for i in range(self.tables_list.count() - 1, -1, -1):
-                    item = self.tables_list.item(i)
-                    if item and item.text().endswith('(database)'):
-                        self.tables_list.takeItem(i)
+                for i in range(self.tables_list.topLevelItemCount() - 1, -1, -1):
+                    item = self.tables_list.topLevelItem(i)
+                    if item and item.text(0).endswith('(database)'):
+                        self.tables_list.takeTopLevelItem(i)
                 
                 # Use the database manager to open the database
                 self.db_manager.open_database(file_path)
