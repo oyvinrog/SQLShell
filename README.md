@@ -2,11 +2,11 @@
 
 <div align="center">
 
-<img src="sqlshell_logo.png" alt="SQLShell Logo" width="256" height="256">
+<img src="sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
 
 **A powerful SQL shell with GUI interface for data analysis**
 
-![SQLShell Interface](sqlshell_demo.png)
+<img src="sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
 </div>
 
