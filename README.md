@@ -13,6 +13,7 @@
 ## 🚀 Key Features
 
 - **Interactive SQL Interface** - Rich syntax highlighting for enhanced query writing
+- **Context-Aware Suggestions** - Intelligent SQL autocompletion based on query context and schema
 - **DuckDB Integration** - Powerful analytical queries powered by DuckDB
 - **Multi-Format Support** - Import and query Excel (.xlsx, .xls), CSV, and Parquet files effortlessly
 - **Modern UI** - Clean, tabular results display with intuitive controls
@@ -74,6 +75,15 @@ pip install -e .
 
 5. **Test Data**
    - Load sample test data using the "Test" button for quick experimentation
+   
+6. **Using Context-Aware Suggestions**
+   - Press Ctrl+Space to manually trigger suggestions
+   - Suggestions appear automatically as you type
+   - Context-specific suggestions based on your query position:
+     - After SELECT: columns and functions
+     - After FROM/JOIN: tables with join conditions
+     - After WHERE: columns with appropriate operators
+     - Inside functions: relevant column suggestions
 
 ## 📝 Query Examples
 
@@ -104,6 +114,9 @@ FROM test_v;
 - Leverage keyboard shortcuts for efficient workflow
 - Explore the multi-format support for various data sources
 - Create multiple tabs for parallel query development
+- The context-aware suggestions learn from your query patterns
+- Type `table_name.` to see all columns for a specific table
+- After JOIN keyword, the system suggests relevant tables and join conditions
 
 ## 📋 Requirements
 

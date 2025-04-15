@@ -519,6 +519,12 @@ class SQLShell(QMainWindow):
             if self.tab_widget.count() == 0:
                 return
             
+            # Import the suggestion manager
+            from sqlshell.suggester_integration import get_suggestion_manager
+            
+            # Get the suggestion manager singleton
+            suggestion_mgr = get_suggestion_manager()
+            
             # Start a background update with a timer
             self.statusBar().showMessage("Updating auto-completion...", 2000)
             
@@ -527,7 +533,34 @@ class SQLShell(QMainWindow):
                 self.query_history = []
                 self.completion_usage = {}  # Track usage frequency
             
-            # Get completion words from the database manager
+            # Get schema information from the database manager
+            try:
+                # Get table and column information
+                tables = set(self.db_manager.loaded_tables.keys())
+                table_columns = self.db_manager.table_columns
+                
+                # Get column data types if available
+                column_types = {}
+                for table, columns in self.db_manager.table_columns.items():
+                    for col in columns:
+                        qualified_name = f"{table}.{col}"
+                        # Try to infer type from sample data
+                        if hasattr(self.db_manager, 'sample_data') and table in self.db_manager.sample_data:
+                            sample = self.db_manager.sample_data[table]
+                            if col in sample.columns:
+                                # Get data type from pandas
+                                col_dtype = str(sample[col].dtype)
+                                column_types[qualified_name] = col_dtype
+                                # Also store unqualified name
+                                column_types[col] = col_dtype
+                
+                # Update the suggestion manager with schema information
+                suggestion_mgr.update_schema(tables, table_columns, column_types)
+                
+            except Exception as e:
+                self.statusBar().showMessage(f"Error getting completions: {str(e)}", 2000)
+            
+            # Get all completion words from basic system (for backward compatibility)
             try:
                 completion_words = self.db_manager.get_all_table_columns()
             except Exception as e:
@@ -544,64 +577,10 @@ class SQLShell(QMainWindow):
                 )[:100]
                 
                 # Add these to our completion words
-                for term, _ in frequent_terms:
+                for term, count in frequent_terms:
+                    suggestion_mgr.suggester.usage_counts[term] = count
                     if term not in completion_words:
                         completion_words.append(term)
-            
-            # Limit to a reasonable number of items to prevent performance issues
-            MAX_COMPLETION_ITEMS = 2000  # Increased from 1000 to accommodate more smart suggestions
-            if len(completion_words) > MAX_COMPLETION_ITEMS:
-                # Create a more advanced prioritization strategy
-                prioritized_words = []
-                
-                # First, include all table names
-                tables = list(self.db_manager.loaded_tables.keys())
-                prioritized_words.extend(tables)
-                
-                # Then add most common SQL keywords and patterns
-                sql_keywords = [w for w in completion_words if w.isupper() and len(w) > 1]
-                prioritized_words.extend(sql_keywords[:200])  # Cap at 200 keywords
-                
-                # Add frequently used items
-                if hasattr(self, 'completion_usage'):
-                    frequent_items = [
-                        item for item, _ in sorted(
-                            self.completion_usage.items(), 
-                            key=lambda x: x[1], 
-                            reverse=True
-                        )[:100]  # Top 100 most used
-                    ]
-                    prioritized_words.extend(frequent_items)
-                
-                # Add table.column patterns which are very useful
-                qualified_columns = [w for w in completion_words if '.' in w and w.split('.')[0] in tables]
-                prioritized_words.extend(qualified_columns[:300])  # Cap at 300 qualified columns
-                
-                # Add common completion patterns
-                patterns = [w for w in completion_words if ' ' in w]  # Spaces indicate phrases/patterns
-                prioritized_words.extend(patterns[:200])  # Cap at 200 patterns
-                
-                # Finally add other columns
-                remaining_slots = MAX_COMPLETION_ITEMS - len(prioritized_words)
-                remaining_words = [
-                    w for w in completion_words 
-                    if w not in prioritized_words 
-                    and not w.isupper() 
-                    and '.' not in w 
-                    and ' ' not in w
-                ]
-                prioritized_words.extend(remaining_words[:remaining_slots])
-                
-                # Remove duplicates while preserving order
-                seen = set()
-                completion_words = []
-                for item in prioritized_words:
-                    if item not in seen:
-                        seen.add(item)
-                        completion_words.append(item)
-                
-                # Ensure we don't exceed the maximum
-                completion_words = completion_words[:MAX_COMPLETION_ITEMS]
             
             # Use a single model for all tabs to save memory and improve performance
             model = QStringListModel(completion_words)
@@ -609,76 +588,28 @@ class SQLShell(QMainWindow):
             # Keep a reference to the model to prevent garbage collection
             self._current_completer_model = model
             
-            # Only update the current tab immediately
-            current_index = self.tab_widget.currentIndex()
-            if current_index >= 0:
-                current_tab = self.tab_widget.widget(current_index)
-                if current_tab and hasattr(current_tab, 'query_edit'):
+            # Register editors with the suggestion manager
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                if tab and hasattr(tab, 'query_edit'):
+                    # Register this editor with the suggestion manager
+                    suggestion_mgr.register_editor(tab.query_edit, f"tab_{i}")
+                    
+                    # Also update the basic completer model for backward compatibility
                     try:
-                        current_tab.query_edit.update_completer_model(model)
+                        tab.query_edit.update_completer_model(model)
                     except Exception as e:
-                        self.statusBar().showMessage(f"Error updating current tab completer: {str(e)}", 2000)
-            
-            # Only schedule updates for additional tabs if we have more than 3 tabs
-            # This reduces overhead for common usage patterns
-            if self.tab_widget.count() > 1:
-                # Calculate a reasonable maximum delay (ms)
-                max_delay = min(500, 50 * self.tab_widget.count())
-                
-                # Store timers to prevent garbage collection
-                if not hasattr(self, '_completer_timers'):
-                    self._completer_timers = []
-                
-                # Clear old timers
-                for timer in self._completer_timers:
-                    if timer.isActive():
-                        timer.stop()
-                self._completer_timers = []
-                
-                # Schedule updates for other tabs with increasing delays
-                for i in range(self.tab_widget.count()):
-                    if i != current_index:
-                        tab = self.tab_widget.widget(i)
-                        if tab and not tab.isHidden() and hasattr(tab, 'query_edit'):
-                            delay = int((i + 1) / self.tab_widget.count() * max_delay)
-                            
-                            timer = QTimer()
-                            timer.setSingleShot(True)
-                            # Store tab and model as local variables for the lambda
-                            # to avoid closure issues
-                            tab_ref = tab
-                            model_ref = model
-                            timer.timeout.connect(
-                                lambda t=tab_ref, m=model_ref: self._update_tab_completer(t, m))
-                            self._completer_timers.append(timer)
-                            timer.start(delay)
+                        self.statusBar().showMessage(f"Error updating completer for tab {i}: {str(e)}", 2000)
             
             # Process events to keep UI responsive
             QApplication.processEvents()
             
-            # Return True to indicate success
             return True
             
         except Exception as e:
             # Catch any errors to prevent hanging
             self.statusBar().showMessage(f"Auto-completion update error: {str(e)}", 2000)
             return False
-            
-    def _update_tab_completer(self, tab, model):
-        """Helper method to update a tab's completer with the given model"""
-        if tab and not tab.isHidden() and hasattr(tab, 'query_edit'):  # Only update visible tabs with query editors
-            try:
-                tab.query_edit.update_completer_model(model)
-                QApplication.processEvents()  # Keep UI responsive
-            except Exception as e:
-                print(f"Error updating tab completer: {e}")
-                # Try a simpler approach as fallback
-                try:
-                    if hasattr(tab.query_edit, 'all_sql_keywords'):
-                        fallback_model = QStringListModel(tab.query_edit.all_sql_keywords)
-                        tab.query_edit.completer.setModel(fallback_model)
-                except Exception:
-                    pass  # Last resort: ignore errors to prevent crashes
 
     def execute_query(self):
         try:
@@ -702,7 +633,16 @@ class SQLShell(QMainWindow):
                 self.populate_table(result)
                 self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
                 
-                # Record query in history and update completion usage
+                # Record query for context-aware suggestions
+                try:
+                    from sqlshell.suggester_integration import get_suggestion_manager
+                    suggestion_mgr = get_suggestion_manager()
+                    suggestion_mgr.record_query(query)
+                except Exception as e:
+                    # Don't let suggestion errors affect query execution
+                    print(f"Error recording query for suggestions: {e}")
+                
+                # Record query in history and update completion usage (legacy)
                 self._update_query_history(query)
                 
             except SyntaxError as e:
