@@ -218,23 +218,6 @@ def get_tab_corner_stylesheet():
         }
     """
 
-def get_draggable_tables_list_stylesheet():
-    """Get the stylesheet for the draggable tables list"""
-    return """
-        QListWidget {
-            background-color: rgba(255, 255, 255, 0.1);
-            border: none;
-            border-radius: 4px;
-            color: white;
-        }
-        QListWidget::item:selected {
-            background-color: rgba(255, 255, 255, 0.2);
-        }
-        QListWidget::item:hover:!selected {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-    """
-
 def get_context_menu_stylesheet():
     """Get the stylesheet for context menus"""
     return """
@@ -250,20 +233,25 @@ def get_context_menu_stylesheet():
             background-color: #3498DB;
             color: white;
         }
+        QMenu::separator {
+            height: 1px;
+            background-color: #BDC3C7;
+            margin: 5px 15px;
+        }
     """
 
 def get_header_label_stylesheet():
-    """Get the stylesheet for header labels in the sidebar"""
-    return "color: white;"
+    """Get the stylesheet for header labels"""
+    return "color: white; font-weight: bold; font-size: 14px;"
 
 def get_db_info_label_stylesheet():
-    """Get the stylesheet for the database info label"""
-    return "color: white; background-color: rgba(255, 255, 255, 0.1); padding: 8px; border-radius: 4px;"
+    """Get the stylesheet for database info label"""
+    return "color: rgba(255, 255, 255, 0.8); padding: 8px 0; font-size: 13px;"
 
 def get_tables_header_stylesheet():
-    """Get the stylesheet for the tables header label"""
-    return "color: white; margin-top: 16px;"
+    """Get the stylesheet for tables header"""
+    return "color: white; font-weight: bold; font-size: 14px; margin-top: 8px;"
 
 def get_row_count_label_stylesheet():
-    """Get the stylesheet for the row count label"""
-    return "color: #7F8C8D; font-style: italic;" 
+    """Get the stylesheet for row count label"""
+    return "color: #7F8C8D; font-size: 12px; font-style: italic; padding: 8px 0;" 
