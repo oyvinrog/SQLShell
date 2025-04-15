@@ -4,12 +4,27 @@ import pandas as pd
 from PyQt6.QtWidgets import (QApplication, QListWidget, QListWidgetItem, 
                             QMessageBox, QMainWindow, QVBoxLayout, QLabel, 
                             QWidget, QHBoxLayout, QFrame, QTreeWidget, QTreeWidgetItem,
-                            QMenu, QInputDialog)
+                            QMenu, QInputDialog, QLineEdit)
 from PyQt6.QtCore import Qt, QPoint, QMimeData, QTimer, QSize
 from PyQt6.QtGui import QIcon, QDrag, QPainter, QColor, QBrush, QPixmap, QFont, QCursor, QAction
+from PyQt6.QtCore import pyqtSignal
 
 class DraggableTablesList(QTreeWidget):
-    """Custom QTreeWidget that provides folders and drag-and-drop functionality for table names."""
+    """Custom QTreeWidget that provides folders and drag-and-drop functionality for table names.
+    
+    Features:
+    - Hierarchical display of tables in folders
+    - Drag and drop tables between folders
+    - Visual feedback when dragging tables over folders
+    - Double-click to expand/collapse folders
+    - Tables can be dragged into query editor for SQL generation
+    - Context menu for folder management and table operations
+    - Tables needing reload are marked with special icons
+    - Tables can be dragged from root to folders and vice versa
+    """
+    
+    # Define signals
+    itemDropped = pyqtSignal(str, str, bool)  # source_item, target_folder, success
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -123,6 +138,17 @@ class DraggableTablesList(QTreeWidget):
         mime_data = QMimeData()
         mime_data.setText(table_name)
         
+        # Add additional information about the item for internal drags
+        full_text = item.text(0)
+        if ' (' in full_text:
+            source = full_text.split(' (')[1][:-1]  # Get the source part
+            needs_reload = table_name in self.tables_needing_reload
+            
+            # Store additional metadata in mime data
+            mime_data.setData('application/x-sqlshell-tablename', table_name.encode())
+            mime_data.setData('application/x-sqlshell-source', source.encode())
+            mime_data.setData('application/x-sqlshell-needs-reload', str(needs_reload).encode())
+        
         # Create drag object
         drag = QDrag(self)
         drag.setMimeData(mime_data)
@@ -195,18 +221,188 @@ class DraggableTablesList(QTreeWidget):
         if event.source() == self:  # Internal drop
             drop_pos = event.position().toPoint()
             target_item = self.itemAt(drop_pos)
+            current_item = self.currentItem()
             
-            if not target_item:
-                # Dropped outside an item, add to root
+            # Only proceed if we have both a current item and a target
+            if current_item and not self.is_folder_item(current_item):
+                # If dropping onto a folder, move the item to that folder
+                if target_item and self.is_folder_item(target_item):
+                    # Move the item to the target folder
+                    self.move_item_to_folder(current_item, target_item)
+                    
+                    # Get table name for status message
+                    table_name = self.get_table_name_from_item(current_item)
+                    folder_name = target_item.text(0)
+                    
+                    # Emit signal for successful drop
+                    self.itemDropped.emit(table_name, folder_name, True)
+                    
+                    # Show status message
+                    if self.parent:
+                        self.parent.statusBar().showMessage(f'Moved table "{table_name}" to folder "{folder_name}"')
+                    
+                    # Expand the folder
+                    target_item.setExpanded(True)
+                    
+                    # Prevent standard drop behavior as we've handled it
+                    event.accept()
+                    return
+                elif not target_item:
+                    # Dropping onto empty space - move to root
+                    parent = current_item.parent()
+                    if parent and self.is_folder_item(parent):
+                        # Get table name for status message
+                        table_name = self.get_table_name_from_item(current_item)
+                        
+                        # Get additional information from the item
+                        full_text = current_item.text(0)
+                        source = full_text.split(' (')[1][:-1] if ' (' in full_text else ""
+                        needs_reload = table_name in self.tables_needing_reload
+                        
+                        # Remove from current folder
+                        parent.removeChild(current_item)
+                        
+                        # Add to root
+                        self.add_table_item(table_name, source, needs_reload)
+                        
+                        # Emit signal for successful drop to root
+                        self.itemDropped.emit(table_name, "", True)
+                        
+                        # Show status message
+                        if self.parent:
+                            self.parent.statusBar().showMessage(f'Moved table "{table_name}" to root')
+                        
+                        # Prevent standard drop behavior
+                        event.accept()
+                        return
+            # For folders, let the default behavior handle it
+            elif current_item and self.is_folder_item(current_item):
+                # Use standard behavior for folders
                 super().dropEvent(event)
+                
+                # Show feedback
+                if target_item and self.is_folder_item(target_item):
+                    # Expand the folder
+                    target_item.setExpanded(True)
+                    
                 return
                 
-            if self.is_folder_item(target_item):
-                # Expand the folder when dropping into it
-                target_item.setExpanded(True)
+        # Try to extract table information from mime data for external drags
+        elif event.mimeData().hasText() and target_item and self.is_folder_item(target_item):
+            # This handles drops from other widgets
+            mime_data = event.mimeData()
             
-        # Handle the standard drop behavior
+            # Try to get additional information from custom mime types
+            if mime_data.hasFormat('application/x-sqlshell-tablename'):
+                # This is a drag from another part of the application with our custom data
+                table_name = bytes(mime_data.data('application/x-sqlshell-tablename')).decode()
+                source = bytes(mime_data.data('application/x-sqlshell-source')).decode()
+                needs_reload_str = bytes(mime_data.data('application/x-sqlshell-needs-reload')).decode()
+                needs_reload = needs_reload_str.lower() == 'true'
+                
+                # Create a new item in the target folder
+                item = QTreeWidgetItem(target_item)
+                item.setText(0, f"{table_name} ({source})")
+                item.setData(0, Qt.ItemDataRole.UserRole, "table")
+                
+                # Set appropriate icon based on reload status
+                if needs_reload:
+                    self.tables_needing_reload.add(table_name)
+                    item.setIcon(0, QIcon.fromTheme("view-refresh"))
+                    item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
+                else:
+                    item.setIcon(0, QIcon.fromTheme("x-office-spreadsheet"))
+                
+                # Set item flags
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
+                
+                # Expand the folder
+                target_item.setExpanded(True)
+                
+                # Emit signal for successful drop
+                self.itemDropped.emit(table_name, target_item.text(0), True)
+                
+                # Show status message
+                if self.parent:
+                    self.parent.statusBar().showMessage(f'Added table "{table_name}" to folder "{target_item.text(0)}"')
+                
+                event.accept()
+                return
+            else:
+                # Just a plain text drop - try to use it as a table name
+                table_name = mime_data.text()
+                
+                # Find if this table exists in our list
+                existing_item = self.find_table_item(table_name)
+                if existing_item:
+                    # Move existing item to the target folder
+                    self.move_item_to_folder(existing_item, target_item)
+                    
+                    # Emit signal for successful drop
+                    self.itemDropped.emit(table_name, target_item.text(0), True)
+                    
+                    # Show status message
+                    if self.parent:
+                        self.parent.statusBar().showMessage(f'Moved table "{table_name}" to folder "{target_item.text(0)}"')
+                    
+                    event.accept()
+                    return
+        
+        # Reset folder highlights before default handling
+        self._reset_folder_highlights()
+        
+        # For other cases, use the standard behavior
         super().dropEvent(event)
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter events with visual feedback"""
+        # Accept the event to allow internal drags
+        if event.source() == self:
+            event.acceptProposedAction()
+        else:
+            # Let parent class handle external drags
+            super().dragEnterEvent(event)
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move with visual feedback for potential drop targets"""
+        if event.source() == self:
+            # Show visual feedback when hovering over folders
+            drop_pos = event.position().toPoint()
+            target_item = self.itemAt(drop_pos)
+            
+            # Reset all folder backgrounds
+            self._reset_folder_highlights()
+            
+            # Highlight the current target folder if any
+            if target_item and self.is_folder_item(target_item):
+                target_item.setBackground(0, QBrush(QColor(52, 152, 219, 50)))  # Light blue highlight
+            
+            event.acceptProposedAction()
+        else:
+            # Let parent class handle external drags
+            super().dragMoveEvent(event)
+    
+    def _reset_folder_highlights(self):
+        """Reset highlights on all folder items"""
+        def reset_item(item):
+            if not item:
+                return
+                
+            if self.is_folder_item(item):
+                item.setBackground(0, QBrush())  # Clear background
+                
+            # Process children if this is a folder
+            for i in range(item.childCount()):
+                reset_item(item.child(i))
+        
+        # Reset all top-level items
+        for i in range(self.topLevelItemCount()):
+            reset_item(self.topLevelItem(i))
+    
+    def dragLeaveEvent(self, event):
+        """Handle drag leave events by resetting visual feedback"""
+        self._reset_folder_highlights()
+        super().dragLeaveEvent(event)
     
     def get_folder_by_name(self, folder_name):
         """Find a folder by name or create it if it doesn't exist"""
@@ -336,7 +532,7 @@ class DraggableTablesList(QTreeWidget):
             self, 
             "New Folder", 
             "Enter folder name:",
-            QInputDialog.TextEchoMode.Normal
+            QLineEdit.EchoMode.Normal
         )
         
         if ok and folder_name:
@@ -369,7 +565,7 @@ class DraggableTablesList(QTreeWidget):
             self,
             "Rename Folder",
             "Enter new folder name:",
-            QInputDialog.TextEchoMode.Normal,
+            QLineEdit.EchoMode.Normal,
             current_name
         )
         
@@ -409,6 +605,10 @@ class DraggableTablesList(QTreeWidget):
         """Move an item to a different folder"""
         if not item or not target_folder:
             return
+        
+        # Get table name before moving
+        table_name = self.get_table_name_from_item(item)
+        folder_name = target_folder.text(0)
             
         # Clone the item
         clone = item.clone()
@@ -431,6 +631,10 @@ class DraggableTablesList(QTreeWidget):
         
         # Select the moved item
         self.setCurrentItem(clone)
+        
+        # Emit signal for successful move, if we were able to get the table name
+        if table_name:
+            self.itemDropped.emit(table_name, folder_name, True)
     
     def clear(self):
         """Override clear to also reset the tables_needing_reload set"""
@@ -499,7 +703,7 @@ class TestTableListParent(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Table List Test")
+        self.setWindowTitle("Table List Test - Drag & Drop Tables to Folders")
         self.setGeometry(100, 100, 400, 600)
         
         # Create central widget and layout
@@ -522,7 +726,7 @@ class TestTableListParent(QMainWindow):
         self.status_frame.setStyleSheet("background-color: rgba(255,255,255,0.1); border-radius: 4px; padding: 8px;")
         status_layout = QVBoxLayout(self.status_frame)
         
-        self.status_label = QLabel("Double-click a table to see reload behavior")
+        self.status_label = QLabel("Try dragging tables between folders!")
         self.status_label.setStyleSheet("color: white;")
         status_layout.addWidget(self.status_label)
         
@@ -530,10 +734,11 @@ class TestTableListParent(QMainWindow):
         
         # Create info section
         info_label = QLabel(
-            "Drag items to test drag behavior\n"
-            "Double-click items marked with reload icon\n"
-            "Right-click for context menu options\n"
-            "This is a test UI for the DraggableTablesList component"
+            "• Drag tables to folders for organization\n"
+            "• Drag tables out of folders to root\n"
+            "• Double-click folders to expand/collapse\n"
+            "• Right-click for context menu options\n"
+            "• Visual feedback shows valid drop targets"
         )
         info_label.setStyleSheet("color: #3498DB; background-color: rgba(255,255,255,0.1); padding: 10px; border-radius: 4px;")
         main_layout.addWidget(info_label)
@@ -551,15 +756,20 @@ class TestTableListParent(QMainWindow):
         # Populate with sample data
         self.add_sample_data()
         
+        # Connect to status updates
+        self.tables_list.itemDropped.connect(self.update_drop_status)
+        
     def add_sample_data(self):
         """Add sample data to the table list"""
         # Create some folders
         sales_folder = self.tables_list.create_folder("Sales Data")
         analytics_folder = self.tables_list.create_folder("Analytics")
+        reports_folder = self.tables_list.create_folder("Reports")
         
         # Add some tables to root
         self.tables_list.add_table_item("customers", "sample.xlsx")
         self.tables_list.add_table_item("products", "database")
+        self.tables_list.add_table_item("employees", "hr.xlsx")
         
         # Add tables to folders
         self.tables_list.add_table_item("orders", "orders.csv", folder_name="Sales Data")
@@ -568,6 +778,19 @@ class TestTableListParent(QMainWindow):
         self.tables_list.add_table_item("analytics_data", "analytics.csv", needs_reload=True, folder_name="Analytics")
         self.tables_list.add_table_item("inventory", "query_result", folder_name="Analytics")
         
+        # Message to get started
+        self.statusBar().showMessage("Try dragging tables between folders and to root area", 5000)
+        
+    def update_drop_status(self, source_item, target_folder, success):
+        """Update status label with drag and drop information"""
+        if success:
+            if source_item and target_folder:
+                self.status_label.setText(f"Moved '{source_item}' to folder '{target_folder}'")
+            elif source_item:
+                self.status_label.setText(f"Moved '{source_item}' to root")
+        else:
+            self.status_label.setText("Drop operation failed")
+    
     def reload_selected_table(self, table_name):
         """Mock implementation of reload_selected_table for testing"""
         # Update status
@@ -655,6 +878,18 @@ class TestTableListParent(QMainWindow):
             if target_folder:
                 self.tables_list.move_item_to_folder(item, target_folder)
                 self.status_label.setText(f"Moved {table_name} to {target_folder.text(0)}")
+    
+    def statusBar(self):
+        """Override statusBar to update our status label"""
+        return self
+    
+    def showMessage(self, message, timeout=0):
+        """Implement showMessage to work with statusBar() call"""
+        self.status_label.setText(message)
+        
+        # If timeout is specified, schedule a reset
+        if timeout > 0:
+            QTimer.singleShot(timeout, lambda: self.status_label.setText("Try dragging tables between folders!"))
 
 
 def main():

@@ -816,11 +816,15 @@ class SQLEditor(QPlainTextEdit):
             # Get table name from dropped text
             text = event.mimeData().text()
             
-            # Extract actual table name (if it includes parentheses)
-            if " (" in text:
-                table_name = text.split(" (")[0]
+            # Try to extract table name from custom mime data if available
+            if event.mimeData().hasFormat('application/x-sqlshell-tablename'):
+                table_name = bytes(event.mimeData().data('application/x-sqlshell-tablename')).decode()
             else:
-                table_name = text
+                # Extract actual table name (if it includes parentheses)
+                if " (" in text:
+                    table_name = text.split(" (")[0]
+                else:
+                    table_name = text
                 
             # Get current cursor position and surrounding text
             cursor = self.textCursor()
