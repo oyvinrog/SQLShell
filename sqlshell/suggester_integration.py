@@ -8,6 +8,7 @@ with the SQL editor component for seamless context-aware autocompletion.
 from PyQt6.QtCore import QStringListModel, Qt
 from PyQt6.QtWidgets import QCompleter
 from typing import Dict, List, Any, Optional
+import re
 
 from sqlshell.context_suggester import ContextSuggester
 
@@ -94,6 +95,41 @@ class SuggestionManager:
                 text_before_cursor = editor_ref.toPlainText()[:position]
                 current_word = editor_ref.get_word_under_cursor()
                 
+                # Check if Ctrl key is being held down
+                from PyQt6.QtWidgets import QApplication
+                from PyQt6.QtCore import Qt
+                
+                # Don't show completions if Ctrl key is pressed (could be in preparation for Ctrl+Enter)
+                modifiers = QApplication.keyboardModifiers()
+                if modifiers & Qt.KeyboardModifier.ControlModifier:
+                    # If Ctrl is held down, don't show completions as user might be about to execute
+                    if editor_ref.completer and editor_ref.completer.popup().isVisible():
+                        editor_ref.completer.popup().hide()
+                    return
+                
+                # Special handling for function argument completions
+                # This helps with context like SELECT AVG(...) FROM table
+                in_function = False
+                open_parens = text_before_cursor.count('(')
+                close_parens = text_before_cursor.count(')')
+                
+                if open_parens > close_parens:
+                    in_function = True
+                    # Get further context for better suggestions inside function arguments
+                    context = suggestion_mgr.suggester.analyze_context(text_before_cursor, current_word)
+                    if 'tables_in_from' not in context or not context['tables_in_from']:
+                        # If tables not yet detected, try to look ahead for FROM clause
+                        full_text = editor_ref.toPlainText()
+                        after_cursor = full_text[position:]
+                        # Look for FROM clause after current position
+                        from_match = re.search(r'FROM\s+([a-zA-Z0-9_]+)', after_cursor, re.IGNORECASE)
+                        if from_match:
+                            table_name = from_match.group(1)
+                            # Add this table to the context for better suggestions
+                            context['tables_in_from'] = [table_name]
+                            # Update the context in suggester
+                            suggestion_mgr.suggester._context_cache[f"{text_before_cursor}:{current_word}"] = context
+                
                 # Get context-aware suggestions
                 suggestions = suggestion_mgr.get_suggestions(text_before_cursor, current_word)
                 
@@ -109,15 +145,38 @@ class SuggestionManager:
                         popup = editor_ref.completer.popup()
                         popup.setCurrentIndex(editor_ref.completer.completionModel().index(0, 0))
                         
-                        # Calculate position for the popup
-                        cr = editor_ref.cursorRect()
-                        cr.setWidth(
-                            editor_ref.completer.popup().sizeHintForColumn(0) + 
-                            editor_ref.completer.popup().verticalScrollBar().sizeHint().width()
-                        )
-                        
-                        # Show the popup
-                        editor_ref.completer.complete(cr)
+                        try:
+                            # Calculate position for the popup
+                            cr = editor_ref.cursorRect()
+                            
+                            # Ensure cursorRect is valid
+                            if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
+                                # Try to recompute using the text cursor
+                                cr = editor_ref.cursorRect(tc)
+                                
+                                # If still invalid, use a default position
+                                if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
+                                    pos = editor_ref.mapToGlobal(editor_ref.pos())
+                                    cr = QRect(pos.x() + 10, pos.y() + 10, 10, editor_ref.fontMetrics().height())
+                            
+                            # Calculate width for the popup that fits the content
+                            suggested_width = popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width()
+                            # Ensure minimum width
+                            popup_width = max(suggested_width, 200)
+                            cr.setWidth(popup_width)
+                            
+                            # Show the popup at the correct position
+                            editor_ref.completer.complete(cr)
+                        except Exception as e:
+                            # In case of any error, try a more direct approach
+                            print(f"Error positioning completion popup in suggestion manager: {e}")
+                            try:
+                                cursor_pos = editor_ref.mapToGlobal(editor_ref.cursorRect().bottomLeft())
+                                popup.move(cursor_pos)
+                                popup.show()
+                            except:
+                                # Last resort - if all else fails, hide the popup to avoid showing it in the wrong place
+                                popup.hide()
                     else:
                         editor_ref.completer.popup().hide()
                 else:
@@ -126,7 +185,7 @@ class SuggestionManager:
                         editor_ref._original_complete()
                     else:
                         editor_ref.completer.popup().hide()
-                        
+                    
             editor.complete = enhanced_complete
     
     def unregister_editor(self, editor_id):

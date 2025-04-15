@@ -496,15 +496,55 @@ class SQLEditor(QPlainTextEdit):
         popup = self.completer.popup()
         popup.setCurrentIndex(self.completer.completionModel().index(0, 0))
         
-        # Calculate position for the popup
-        cr = self.cursorRect()
-        cr.setWidth(self.completer.popup().sizeHintForColumn(0) + 
-                   self.completer.popup().verticalScrollBar().sizeHint().width())
-        
-        # Show the popup
-        self.completer.complete(cr)
+        try:
+            # Calculate position for the popup
+            cr = self.cursorRect()
+            
+            # Ensure cursorRect is valid
+            if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
+                # Try to recompute using the text cursor
+                cursor = self.textCursor()
+                cr = self.cursorRect(cursor)
+                
+                # If still invalid, use a default position
+                if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
+                    pos = self.mapToGlobal(self.pos())
+                    cr = QRect(pos.x() + 10, pos.y() + 10, 10, self.fontMetrics().height())
+            
+            # Calculate width for the popup that fits the content
+            suggested_width = popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width()
+            # Ensure minimum width
+            popup_width = max(suggested_width, 200)
+            cr.setWidth(popup_width)
+            
+            # Show the popup at the correct position
+            self.completer.complete(cr)
+        except Exception as e:
+            # In case of any error, try a more direct approach
+            print(f"Error positioning completion popup: {e}")
+            try:
+                cursor_pos = self.mapToGlobal(self.cursorRect().bottomLeft())
+                popup.move(cursor_pos)
+                popup.show()
+            except:
+                # Last resort - if all else fails, hide the popup to avoid showing it in the wrong place
+                popup.hide()
 
     def keyPressEvent(self, event):
+        # Check for Ctrl+Enter first, which should take precedence over other behaviors
+        if event.key() == Qt.Key.Key_Return and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            # If autocomplete popup is showing, hide it
+            if self.completer and self.completer.popup().isVisible():
+                self.completer.popup().hide()
+            
+            # Cancel any pending autocomplete timers
+            if hasattr(self, '_completion_timer') and self._completion_timer.isActive():
+                self._completion_timer.stop()
+            
+            # Let the main window handle query execution
+            super().keyPressEvent(event)
+            return
+        
         # Handle completer popup navigation
         if self.completer and self.completer.popup().isVisible():
             # Handle Tab key to complete the current selection

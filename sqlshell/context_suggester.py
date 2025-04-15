@@ -42,54 +42,67 @@ class ContextSuggester:
         # Initialize with common SQL elements
         self._initialize_sql_keywords()
     
-    def _initialize_sql_keywords(self):
-        """Initialize built-in SQL keywords and functions"""
-        # Basic SQL keywords
+    def _initialize_sql_keywords(self) -> None:
+        """Initialize common SQL keywords by category"""
         self.sql_keywords = {
             'basic': [
-                "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", 
-                "ALTER", "TABLE", "VIEW", "INDEX", "TRIGGER", "PROCEDURE", "FUNCTION", 
-                "AS", "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "IS NULL", "IS NOT NULL",
-                "ORDER BY", "GROUP BY", "HAVING", "LIMIT", "OFFSET", "TOP", "DISTINCT",
-                "ON", "SET", "VALUES", "INTO", "DEFAULT", "PRIMARY KEY", "FOREIGN KEY",
-                "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN", "OUTER JOIN",
-                "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "BEGIN", "END", "COMMIT",
-                "ROLLBACK"
+                'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'HAVING',
+                'LIMIT', 'OFFSET', 'INSERT INTO', 'VALUES', 'UPDATE', 'SET',
+                'DELETE FROM', 'CREATE TABLE', 'DROP TABLE', 'ALTER TABLE',
+                'ADD COLUMN', 'DROP COLUMN', 'RENAME TO', 'UNION', 'UNION ALL',
+                'INTERSECT', 'EXCEPT', 'AS', 'WITH', 'DISTINCT', 'CASE', 'WHEN',
+                'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT', 'LIKE', 'IN', 'BETWEEN',
+                'IS NULL', 'IS NOT NULL', 'ALL', 'ANY', 'EXISTS'
             ],
             'aggregation': [
-                "SUM", "AVG", "COUNT", "MIN", "MAX", "STDDEV", "VARIANCE", "FIRST",
-                "LAST", "GROUP_CONCAT"
-            ],
-            'join': [
-                "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN",
-                "LEFT OUTER JOIN", "RIGHT OUTER JOIN", "NATURAL JOIN",
-                "JOIN ... ON", "JOIN ... USING"
+                'AVG(', 'COUNT(', 'COUNT(*)', 'COUNT(DISTINCT ', 'SUM(', 'MIN(', 'MAX(',
+                'MEDIAN(', 'PERCENTILE_CONT(', 'PERCENTILE_DISC(', 'VARIANCE(', 'STDDEV(',
+                'FIRST(', 'LAST(', 'ARRAY_AGG(', 'STRING_AGG(', 'GROUP_CONCAT('
             ],
             'functions': [
-                "SUBSTR", "SUBSTRING", "UPPER", "LOWER", "TRIM", "LTRIM", "RTRIM",
-                "LENGTH", "CONCAT", "REPLACE", "INSTR", "CAST", "CONVERT", "COALESCE",
-                "NULLIF", "NVL", "IFNULL", "DECODE", "ROUND", "TRUNC", "FLOOR", "CEILING",
-                "ABS", "MOD", "DATE", "TIME", "DATETIME", "TIMESTAMP", "EXTRACT", "DATEADD",
-                "DATEDIFF", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"
-            ],
-            'patterns': [
-                # Join patterns
-                "INNER JOIN {table} ON {table}.{column} = {prev_table}.{prev_column}",
-                "LEFT JOIN {table} ON {table}.{column} = {prev_table}.{prev_column}",
+                # String functions
+                'LOWER(', 'UPPER(', 'INITCAP(', 'TRIM(', 'LTRIM(', 'RTRIM(', 'SUBSTRING(',
+                'SUBSTR(', 'REPLACE(', 'POSITION(', 'CONCAT(', 'LENGTH(', 'CHAR_LENGTH(',
+                'LEFT(', 'RIGHT(', 'REGEXP_REPLACE(', 'REGEXP_EXTRACT(', 'REGEXP_MATCH(',
+                'FORMAT(', 'LPAD(', 'RPAD(', 'REVERSE(', 'SPLIT_PART(',
                 
-                # Common patterns
-                "SELECT * FROM {table} WHERE {column} = ",
-                "GROUP BY {column} HAVING COUNT(*) > ",
-                "ORDER BY {column} DESC",
-                "ORDER BY {column} ASC",
+                # Numeric functions
+                'ABS(', 'SIGN(', 'ROUND(', 'CEIL(', 'FLOOR(', 'TRUNC(', 'MOD(',
+                'POWER(', 'SQRT(', 'CBRT(', 'LOG(', 'LOG10(', 'EXP(', 'RANDOM(',
+                
+                # Date/time functions
+                'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'NOW()',
+                'DATE(', 'TIME(', 'DATETIME(', 'EXTRACT(', 'DATE_TRUNC(', 'DATE_PART(',
+                'DATEADD(', 'DATEDIFF(', 'DATE_FORMAT(', 'STRFTIME(', 'MAKEDATE(',
+                'YEAR(', 'QUARTER(', 'MONTH(', 'WEEK(', 'DAY(', 'HOUR(', 'MINUTE(', 'SECOND(',
+                
+                # Conditional functions
+                'CASE', 'COALESCE(', 'NULLIF(', 'GREATEST(', 'LEAST(', 'IFF(', 'IFNULL(',
+                'DECODE(', 'NVL(', 'NVL2(',
+                
+                # Type conversion
+                'CAST(', 'CONVERT(', 'TRY_CAST(', 'TO_CHAR(', 'TO_DATE(', 'TO_NUMBER(',
+                'TO_TIMESTAMP(', 'PARSE_JSON(',
+                
+                # Window functions
+                'ROW_NUMBER() OVER (', 'RANK() OVER (', 'DENSE_RANK() OVER (',
+                'LEAD(', 'LAG(', 'FIRST_VALUE(', 'LAST_VALUE(', 'NTH_VALUE('
+            ],
+            'table_ops': [
+                'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'INSERT', 'UPDATE', 'DELETE',
+                'MERGE', 'COPY', 'GRANT', 'REVOKE', 'INDEX', 'PRIMARY KEY', 'FOREIGN KEY',
+                'REFERENCES', 'UNIQUE', 'NOT NULL', 'CHECK', 'DEFAULT'
+            ],
+            'join': [
+                'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'CROSS JOIN',
+                'NATURAL JOIN', 'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'FULL OUTER JOIN'
             ]
         }
         
-        # Build flat list of all keywords
+        # Create a flattened list of all keywords for easy lookup
         self.all_keywords = []
-        for category in self.sql_keywords.keys():
-            if category != 'patterns':  # Exclude patterns as they need formatting
-                self.all_keywords.extend(self.sql_keywords[category])
+        for category, keywords in self.sql_keywords.items():
+            self.all_keywords.extend(keywords)
     
     def update_schema(self, tables: Set[str], table_columns: Dict[str, List[str]], 
                      column_types: Dict[str, str] = None) -> None:
@@ -282,7 +295,20 @@ class ContextSuggester:
             'tables_in_from': [],
             'last_token': '',
             'current_word': current_word,
+            'current_function': None,
         }
+        
+        # Extract tables from the query for context-aware suggestions
+        # Look for tables after FROM and JOIN
+        from_matches = re.findall(r'FROM\s+([a-zA-Z0-9_]+)', text_upper)
+        join_matches = re.findall(r'JOIN\s+([a-zA-Z0-9_]+)', text_upper)
+        
+        # Add all found tables to context
+        if from_matches or join_matches:
+            tables = []
+            tables.extend(from_matches)
+            tables.extend(join_matches)
+            context['tables_in_from'] = tables
         
         # Check for table.column context
         if '.' in current_word:
@@ -297,6 +323,27 @@ class ContextSuggester:
         last_keyword = last_keywords[-1] if last_keywords else ""
         context['last_token'] = last_keyword
         
+        # Check for function context - match the last opening parenthesis
+        if '(' in text_before_cursor:
+            # Count parentheses to check if we're inside function arguments
+            open_parens = text_before_cursor.count('(')
+            close_parens = text_before_cursor.count(')')
+            
+            if open_parens > close_parens:
+                context['type'] = 'function_arg'
+                context['in_function_args'] = True
+                
+                # Find the last open parenthesis position
+                last_open_paren_pos = text_before_cursor.rindex('(')
+                
+                # Extract text before the parenthesis to identify the function
+                func_text = text_before_cursor[:last_open_paren_pos].strip()
+                # Get the last word which should be the function name
+                func_words = re.findall(r'\b([A-Za-z0-9_]+)\b', func_text)
+                if func_words:
+                    context['current_function'] = func_words[-1].upper()
+                    context['last_token'] = context['current_function']
+        
         # Extract the last line or statement
         last_line = text_before_cursor.split('\n')[-1].strip().upper()
         
@@ -306,16 +353,10 @@ class ContextSuggester:
         if 'FROM' in last_keywords and not any(k in last_keywords[last_keywords.index('FROM'):] for k in ['WHERE', 'GROUP', 'HAVING', 'ORDER']):
             context['type'] = 'table'
             context['after_from'] = True
-            # Try to extract tables already in FROM clause
-            context['tables_in_from'] = self._extract_tables_from_query(text_before_cursor)
         
         elif any(k.endswith('JOIN') for k in last_keywords):
             context['type'] = 'table'
             context['after_join'] = True
-            # If we're after a join, find the previous table for potential relationship suggestions
-            joins = re.findall(r'(FROM|JOIN)\s+([a-zA-Z0-9_]+)', text_upper)
-            if joins:
-                context['tables_in_from'] = [j[1] for j in joins]
         
         # WHERE/AND/OR context - likely to be followed by columns or expressions
         elif any(kw in last_keywords for kw in ['WHERE', 'AND', 'OR']):
@@ -333,26 +374,19 @@ class ContextSuggester:
             context['columns_already_selected'] = [c.strip() for c in select_text.split(',')[1:]]
             
         # GROUP BY context
-        elif 'GROUP' in last_keywords or 'BY' in last_keywords and len(last_keywords) >= 2 and last_keywords[-2:] == ['GROUP', 'BY']:
+        elif 'GROUP' in last_keywords or ('BY' in last_keywords and len(last_keywords) >= 2 and last_keywords[-2:] == ['GROUP', 'BY']):
             context['type'] = 'column'
             context['after_group_by'] = True
         
         # ORDER BY context
-        elif 'ORDER' in last_keywords or 'BY' in last_keywords and len(last_keywords) >= 2 and last_keywords[-2:] == ['ORDER', 'BY']:
+        elif 'ORDER' in last_keywords or ('BY' in last_keywords and len(last_keywords) >= 2 and last_keywords[-2:] == ['ORDER', 'BY']):
             context['type'] = 'column'
             context['after_order_by'] = True
-            
+        
         # HAVING context
         elif 'HAVING' in last_keywords:
             context['type'] = 'aggregation'
             context['after_having'] = True
-        
-        # Check for function context (inside parentheses)
-        open_parens = text_before_cursor.count('(')
-        close_parens = text_before_cursor.count(')')
-        if open_parens > close_parens:
-            context['type'] = 'function_arg'
-            context['in_function_args'] = True
         
         # Cache the context
         self._context_cache[cache_key] = context
@@ -437,15 +471,31 @@ class ContextSuggester:
         suggestions.extend(self.sql_keywords['aggregation'])
         suggestions.extend(self.sql_keywords['functions'])
         
-        # Include standalone column names
-        for columns in self.table_columns.values():
-            suggestions.extend(columns)
+        # Identify active tables in the current query
+        active_tables = set()
+        # First check tables extracted from FROM/JOIN clauses
+        if 'tables_in_from' in context and context['tables_in_from']:
+            active_tables.update(context['tables_in_from'])
         
-        # Include qualified column names
-        for table in self.tables:
+        # Define column lists by priority
+        active_table_columns = []
+        other_columns = []
+        
+        # Get columns from active tables first
+        for table in active_tables:
             if table in self.table_columns:
-                for col in self.table_columns[table]:
-                    suggestions.append(f"{table}.{col}")
+                columns = self.table_columns[table]
+                # Add both plain column names and qualified ones
+                active_table_columns.extend(columns)
+                active_table_columns.extend([f"{table}.{col}" for col in columns])
+        
+        # Then get all other columns as fallback
+        for table, columns in self.table_columns.items():
+            if table not in active_tables:
+                other_columns.extend(columns)
+                # Only add qualified names if we have multiple tables to avoid confusion
+                if len(self.table_columns) > 1:
+                    other_columns.extend([f"{table}.{col}" for col in columns])
         
         # Add * and table.* suggestions
         suggestions.append("*")
@@ -461,21 +511,55 @@ class ContextSuggester:
             for col in already_selected:
                 if col in suggestions:
                     suggestions.remove(col)
-            
+        
         elif context['after_where']:
             # Add comparison operators for WHERE clause
             operators = ["=", ">", "<", ">=", "<=", "<>", "!=", "LIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"]
             suggestions.extend(operators)
         
-        return suggestions
+        # Add columns with priority ordering
+        suggestions.extend(active_table_columns)
+        suggestions.extend(other_columns)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        filtered_suggestions = []
+        for item in suggestions:
+            if item not in seen:
+                seen.add(item)
+                filtered_suggestions.append(item)
+        
+        return filtered_suggestions
     
     def _get_function_arg_suggestions(self, context: Dict[str, Any]) -> List[str]:
         """Get suggestions for function arguments"""
         suggestions = []
         
-        # Add column names as basic function arguments
-        for columns in self.table_columns.values():
-            suggestions.extend(columns)
+        # Identify active tables in the current query
+        active_tables = set()
+        # First check tables extracted from FROM/JOIN clauses
+        if 'tables_in_from' in context and context['tables_in_from']:
+            active_tables.update(context['tables_in_from'])
+        
+        # Add column names as function arguments, prioritizing columns from active tables
+        active_table_columns = []
+        other_columns = []
+        
+        # First get columns from active tables
+        for table in active_tables:
+            if table in self.table_columns:
+                columns = self.table_columns[table]
+                # Add both plain column names and qualified ones
+                active_table_columns.extend(columns)
+                active_table_columns.extend([f"{table}.{col}" for col in columns])
+        
+        # Then get all other columns as fallback
+        for table, columns in self.table_columns.items():
+            if table not in active_tables:
+                other_columns.extend(columns)
+                # Only add qualified names if we have multiple tables to avoid confusion
+                if len(self.table_columns) > 1:
+                    other_columns.extend([f"{table}.{col}" for col in columns])
         
         # Add context-specific suggestions based on the last token
         last_token = context['last_token']
@@ -483,28 +567,93 @@ class ContextSuggester:
         if last_token in ['AVG', 'SUM', 'MIN', 'MAX', 'COUNT']:
             # For aggregate functions, prioritize numeric columns
             numeric_columns = []
-            for col_name, data_type in self.column_types.items():
-                if data_type and any(t in data_type.upper() for t in ['INT', 'NUM', 'FLOAT', 'DOUBLE', 'DECIMAL']):
-                    numeric_columns.append(col_name)
-            suggestions = numeric_columns + suggestions
+            
+            # First check active tables for numeric columns
+            for table in active_tables:
+                if table in self.table_columns:
+                    for col in self.table_columns[table]:
+                        qualified_name = f"{table}.{col}"
+                        # Check if column type info is available
+                        if qualified_name in self.column_types:
+                            data_type = self.column_types[qualified_name].upper()
+                            if any(t in data_type for t in ['INT', 'NUM', 'FLOAT', 'DOUBLE', 'DECIMAL']):
+                                numeric_columns.append(qualified_name)
+                                numeric_columns.append(col)
+            
+            # If no numeric columns found in active tables, check all columns
+            if not numeric_columns:
+                for col_name, data_type in self.column_types.items():
+                    if data_type and any(t in data_type.upper() for t in ['INT', 'NUM', 'FLOAT', 'DOUBLE', 'DECIMAL']):
+                        numeric_columns.append(col_name)
+            
+            # Build final suggestion list with priority order:
+            # 1. Numeric columns from active tables
+            # 2. All columns from active tables
+            # 3. Numeric columns from other tables
+            # 4. All other columns
+            suggestions = numeric_columns + active_table_columns + other_columns
             
         elif last_token in ['SUBSTRING', 'LOWER', 'UPPER', 'TRIM', 'REPLACE', 'CONCAT']:
             # For string functions, prioritize text columns
             text_columns = []
-            for col_name, data_type in self.column_types.items():
-                if data_type and any(t in data_type.upper() for t in ['CHAR', 'VARCHAR', 'TEXT', 'STRING']):
-                    text_columns.append(col_name)
-            suggestions = text_columns + suggestions
+            
+            # First check active tables for text columns
+            for table in active_tables:
+                if table in self.table_columns:
+                    for col in self.table_columns[table]:
+                        qualified_name = f"{table}.{col}"
+                        # Check if column type info is available
+                        if qualified_name in self.column_types:
+                            data_type = self.column_types[qualified_name].upper()
+                            if any(t in data_type for t in ['CHAR', 'VARCHAR', 'TEXT', 'STRING']):
+                                text_columns.append(qualified_name)
+                                text_columns.append(col)
+            
+            # If no text columns found in active tables, check all columns
+            if not text_columns:
+                for col_name, data_type in self.column_types.items():
+                    if data_type and any(t in data_type.upper() for t in ['CHAR', 'VARCHAR', 'TEXT', 'STRING']):
+                        text_columns.append(col_name)
+            
+            suggestions = text_columns + active_table_columns + other_columns
             
         elif last_token in ['DATE', 'DATETIME', 'EXTRACT', 'DATEADD', 'DATEDIFF']:
             # For date functions, prioritize date columns
             date_columns = []
-            for col_name, data_type in self.column_types.items():
-                if data_type and any(t in data_type.upper() for t in ['DATE', 'TIME', 'TIMESTAMP']):
-                    date_columns.append(col_name)
-            suggestions = date_columns + suggestions
+            
+            # First check active tables for date columns
+            for table in active_tables:
+                if table in self.table_columns:
+                    for col in self.table_columns[table]:
+                        qualified_name = f"{table}.{col}"
+                        # Check if column type info is available
+                        if qualified_name in self.column_types:
+                            data_type = self.column_types[qualified_name].upper()
+                            if any(t in data_type for t in ['DATE', 'TIME', 'TIMESTAMP']):
+                                date_columns.append(qualified_name)
+                                date_columns.append(col)
+            
+            # If no date columns found in active tables, check all columns
+            if not date_columns:
+                for col_name, data_type in self.column_types.items():
+                    if data_type and any(t in data_type.upper() for t in ['DATE', 'TIME', 'TIMESTAMP']):
+                        date_columns.append(col_name)
+            
+            suggestions = date_columns + active_table_columns + other_columns
+            
+        else:
+            # For other functions or generic cases, prioritize active table columns
+            suggestions = active_table_columns + other_columns
         
-        return suggestions
+        # Remove duplicates while preserving order
+        seen = set()
+        filtered_suggestions = []
+        for item in suggestions:
+            if item not in seen:
+                seen.add(item)
+                filtered_suggestions.append(item)
+        
+        return filtered_suggestions
     
     def _get_aggregation_suggestions(self, context: Dict[str, Any]) -> List[str]:
         """Get suggestions for aggregation functions (HAVING clause)"""
