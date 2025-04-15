@@ -582,20 +582,26 @@ class SQLShell(QMainWindow):
                     if term not in completion_words:
                         completion_words.append(term)
             
-            # Use a single model for all tabs to save memory and improve performance
+            # Create a single shared model for all tabs to save memory
             model = QStringListModel(completion_words)
             
             # Keep a reference to the model to prevent garbage collection
             self._current_completer_model = model
             
-            # Register editors with the suggestion manager
+            # First unregister all existing editors to avoid duplicates
+            existing_editors = suggestion_mgr._editors.copy()
+            for editor_id in existing_editors:
+                suggestion_mgr.unregister_editor(editor_id)
+            
+            # Register editors with the suggestion manager and update their completer models
             for i in range(self.tab_widget.count()):
                 tab = self.tab_widget.widget(i)
                 if tab and hasattr(tab, 'query_edit'):
-                    # Register this editor with the suggestion manager
-                    suggestion_mgr.register_editor(tab.query_edit, f"tab_{i}")
+                    # Register this editor with the suggestion manager using a unique ID
+                    editor_id = f"tab_{i}_{id(tab.query_edit)}"
+                    suggestion_mgr.register_editor(tab.query_edit, editor_id)
                     
-                    # Also update the basic completer model for backward compatibility
+                    # Update the basic completer model for backward compatibility
                     try:
                         tab.query_edit.update_completer_model(model)
                     except Exception as e:
@@ -2401,6 +2407,24 @@ LIMIT 10
         # Process events to keep UI responsive
         QApplication.processEvents()
         
+        # Update completer for the new tab
+        try:
+            from sqlshell.suggester_integration import get_suggestion_manager
+            
+            # Get the suggestion manager singleton
+            suggestion_mgr = get_suggestion_manager()
+            
+            # Register the new editor with a unique ID
+            editor_id = f"tab_{index}_{id(tab.query_edit)}"
+            suggestion_mgr.register_editor(tab.query_edit, editor_id)
+            
+            # Apply the current completer model if available
+            if hasattr(self, '_current_completer_model'):
+                tab.query_edit.update_completer_model(self._current_completer_model)
+        except Exception as e:
+            # Don't let autocomplete errors affect tab creation
+            print(f"Error setting up autocomplete for new tab: {e}")
+        
         return tab
     
     def duplicate_current_tab(self):
@@ -2477,11 +2501,27 @@ LIMIT 10
                 tab.results_table.setColumnCount(0)
             return
             
+        # Get the widget before removing the tab
+        widget = self.tab_widget.widget(index)
+        
+        # Unregister the editor from the suggestion manager before closing
+        try:
+            from sqlshell.suggester_integration import get_suggestion_manager
+            suggestion_mgr = get_suggestion_manager()
+            
+            # Find and unregister this editor
+            for editor_id in list(suggestion_mgr._editors.keys()):
+                if editor_id.startswith(f"tab_{index}_") or (hasattr(widget, 'query_edit') and 
+                    str(id(widget.query_edit)) in editor_id):
+                    suggestion_mgr.unregister_editor(editor_id)
+        except Exception as e:
+            # Don't let errors affect tab closing
+            print(f"Error unregistering editor from suggestion manager: {e}")
+        
         # Block signals temporarily to improve performance when removing multiple tabs
         was_blocked = self.tab_widget.blockSignals(True)
         
         # Remove the tab
-        widget = self.tab_widget.widget(index)
         self.tab_widget.removeTab(index)
         
         # Restore signals
@@ -2496,6 +2536,36 @@ LIMIT 10
         
         # Process events to keep UI responsive
         QApplication.processEvents()
+        
+        # Update tab indices in the suggestion manager
+        QTimer.singleShot(100, self.update_tab_indices_in_suggestion_manager)
+    
+    def update_tab_indices_in_suggestion_manager(self):
+        """Update tab indices in the suggestion manager after tab removal"""
+        try:
+            from sqlshell.suggester_integration import get_suggestion_manager
+            suggestion_mgr = get_suggestion_manager()
+            
+            # Get current editors
+            old_editors = suggestion_mgr._editors.copy()
+            old_completers = suggestion_mgr._completers.copy()
+            
+            # Clear current registrations
+            suggestion_mgr._editors.clear()
+            suggestion_mgr._completers.clear()
+            
+            # Re-register with updated indices
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                if tab and hasattr(tab, 'query_edit'):
+                    # Register with new index
+                    editor_id = f"tab_{i}_{id(tab.query_edit)}"
+                    suggestion_mgr._editors[editor_id] = tab.query_edit
+                    if hasattr(tab.query_edit, 'completer') and tab.query_edit.completer:
+                        suggestion_mgr._completers[editor_id] = tab.query_edit.completer
+        except Exception as e:
+            # Don't let errors affect application
+            print(f"Error updating tab indices in suggestion manager: {e}")
     
     def close_current_tab(self):
         """Close the current tab"""
