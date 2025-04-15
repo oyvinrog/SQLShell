@@ -55,6 +55,9 @@ class QueryTab(QWidget):
                 completer.setModel(model)
                 self.query_edit.set_completer(completer)
         
+        # Connect keyboard events for direct handling of Ctrl+Enter
+        self.query_edit.installEventFilter(self)
+        
         query_layout.addWidget(self.query_edit)
         
         # Button row
@@ -172,4 +175,27 @@ class QueryTab(QWidget):
     def export_to_parquet(self):
         """Export results to Parquet"""
         if hasattr(self.parent, 'export_to_parquet'):
-            self.parent.export_to_parquet() 
+            self.parent.export_to_parquet()
+            
+    def eventFilter(self, obj, event):
+        """Event filter to intercept Ctrl+Enter and send it to the main window"""
+        from PyQt6.QtCore import QEvent, Qt
+        
+        # Check if it's a key press event
+        if event.type() == QEvent.Type.KeyPress:
+            # Check for Ctrl+Enter specifically
+            if (event.key() == Qt.Key.Key_Return and 
+                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                
+                # Hide any autocomplete popup if it's visible
+                if hasattr(obj, 'completer') and obj.completer and obj.completer.popup().isVisible():
+                    obj.completer.popup().hide()
+                
+                # Execute the query via the parent (main window)
+                if hasattr(self.parent, 'execute_query'):
+                    self.parent.execute_query()
+                    # Mark event as handled
+                    return True
+                    
+        # Default - let the event propagate normally
+        return super().eventFilter(obj, event) 

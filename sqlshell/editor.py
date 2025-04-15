@@ -542,6 +542,19 @@ class SQLEditor(QPlainTextEdit):
                 self._completion_timer.stop()
             
             # Let the main window handle query execution
+            # Important: We need to emit event to parent to trigger execution
+            # and prevent it from being treated as an autocomplete selection
+            event.accept()  # Mark the event as handled
+            
+            # Find the parent SQLShell instance and call its execute_query method
+            parent = self
+            while parent is not None:
+                if hasattr(parent, 'execute_query'):
+                    parent.execute_query()
+                    return
+                parent = parent.parent()
+                
+            # If we couldn't find the execute_query method, pass the event up
             super().keyPressEvent(event)
             return
         

@@ -105,6 +105,17 @@ class SuggestionManager:
                     # If Ctrl is held down, don't show completions as user might be about to execute
                     if editor_ref.completer and editor_ref.completer.popup().isVisible():
                         editor_ref.completer.popup().hide()
+                        
+                        # Also check for Ctrl+Enter specifically
+                        if hasattr(QApplication, 'keyboardModifiers'):
+                            if QApplication.keyboardModifiers() == (Qt.KeyboardModifier.ControlModifier):
+                                # Find main window and trigger query execution
+                                parent = editor_ref
+                                while parent is not None:
+                                    if hasattr(parent, 'execute_query'):
+                                        # This is likely the main window
+                                        return True
+                                    parent = parent.parent()
                     return
                 
                 # Special handling for function argument completions
