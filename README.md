@@ -118,6 +118,35 @@ FROM test_v;
 - Type `table_name.` to see all columns for a specific table
 - After JOIN keyword, the system suggests relevant tables and join conditions
 
+## 📊 Column Profiler
+
+The Column Profiler provides quick statistical insights into your table columns:
+
+<img src="column_profiler.png" alt="Column Profiler" width="80%" height="auto">
+
+### Using the Column Profiler
+
+1. **Access the Profiler**
+   - Right-click on any table in the schema browser
+   - Select "Profile Table" from the context menu
+
+2. **View Column Statistics**
+   - Instantly see key metrics for each column:
+     - Data type
+     - Non-null count and percentage
+     - Unique values count
+     - Mean, median, min, and max values (for numeric columns)
+     - Most frequent values and their counts
+     - Distribution visualization
+
+3. **Benefits**
+   - Quickly understand data distribution
+   - Identify outliers and data quality issues
+   - Make informed decisions about query conditions
+   - Assess column cardinality for join operations
+
+The Column Profiler is an invaluable tool for exploratory data analysis, helping you gain insights before writing complex queries.
+
 ## 📋 Requirements
 
 - Python 3.8 or higher
