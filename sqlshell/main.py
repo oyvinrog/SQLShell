@@ -1221,6 +1221,11 @@ LIMIT 10
         select_from_action = context_menu.addAction("Select from")
         add_to_editor_action = context_menu.addAction("Just add to editor")
         
+        # Add entropy profiler action
+        context_menu.addSeparator()
+        analyze_entropy_action = context_menu.addAction("Analyze Column Importance")
+        analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
+        
         # Check if table needs reloading and add appropriate action
         if table_name in self.tables_list.tables_needing_reload:
             reload_action = context_menu.addAction("Reload Table")
@@ -1273,6 +1278,9 @@ LIMIT 10
             current_tab.query_edit.setFocus()
         elif action == reload_action:
             self.reload_selected_table(table_name)
+        elif action == analyze_entropy_action:
+            # Call the entropy analysis method
+            self.analyze_table_entropy(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -3115,6 +3123,46 @@ LIMIT 10
             self.load_delta_table()
         elif option == "test":
             self.load_test_data()
+
+    def analyze_table_entropy(self, table_name):
+        """Analyze a table with the entropy profiler to identify important columns"""
+        try:
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Analyzing table "{table_name}" columns...')
+            
+            # Get the table data
+            if table_name in self.db_manager.loaded_tables:
+                # Check if table needs reloading first
+                if table_name in self.tables_list.tables_needing_reload:
+                    # Reload the table immediately
+                    self.reload_selected_table(table_name)
+                
+                # Get the data as a dataframe
+                query = f'SELECT * FROM "{table_name}"'
+                df = self.db_manager.execute_query(query)
+                
+                if df is not None and not df.empty:
+                    # Import the entropy profiler
+                    from sqlshell.utils.profile_entropy import visualize_profile
+                    
+                    # Create and show the visualization
+                    self.statusBar().showMessage(f'Generating entropy profile for "{table_name}"...')
+                    vis = visualize_profile(df)
+                    
+                    # Store a reference to prevent garbage collection
+                    self._entropy_window = vis
+                    
+                    self.statusBar().showMessage(f'Entropy profile generated for "{table_name}"')
+                else:
+                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
+            else:
+                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                self.statusBar().showMessage(f'Table "{table_name}" not found')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"Error analyzing table:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error analyzing table: {str(e)}')
 
 def main():
     # Parse command line arguments
