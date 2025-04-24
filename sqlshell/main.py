@@ -1226,6 +1226,10 @@ LIMIT 10
         analyze_entropy_action = context_menu.addAction("Analyze Column Importance")
         analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
         
+        # Add table profiler action
+        profile_table_action = context_menu.addAction("Profile Table Structure")
+        profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
+        
         # Check if table needs reloading and add appropriate action
         if table_name in self.tables_list.tables_needing_reload:
             reload_action = context_menu.addAction("Reload Table")
@@ -1281,6 +1285,9 @@ LIMIT 10
         elif action == analyze_entropy_action:
             # Call the entropy analysis method
             self.analyze_table_entropy(table_name)
+        elif action == profile_table_action:
+            # Call the table profile method
+            self.profile_table_structure(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -3163,6 +3170,46 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Analysis Error", f"Error analyzing table:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error analyzing table: {str(e)}')
+            
+    def profile_table_structure(self, table_name):
+        """Analyze a table's structure to identify candidate keys and functional dependencies"""
+        try:
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Profiling table structure for "{table_name}"...')
+            
+            # Get the table data
+            if table_name in self.db_manager.loaded_tables:
+                # Check if table needs reloading first
+                if table_name in self.tables_list.tables_needing_reload:
+                    # Reload the table immediately
+                    self.reload_selected_table(table_name)
+                
+                # Get the data as a dataframe
+                query = f'SELECT * FROM "{table_name}"'
+                df = self.db_manager.execute_query(query)
+                
+                if df is not None and not df.empty:
+                    # Import the key profiler
+                    from sqlshell.utils.profile_keys import visualize_profile
+                    
+                    # Create and show the visualization
+                    self.statusBar().showMessage(f'Generating table profile for "{table_name}"...')
+                    vis = visualize_profile(df)
+                    
+                    # Store a reference to prevent garbage collection
+                    self._keys_profile_window = vis
+                    
+                    self.statusBar().showMessage(f'Table structure profile generated for "{table_name}"')
+                else:
+                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
+            else:
+                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                self.statusBar().showMessage(f'Table "{table_name}" not found')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Profile Error", f"Error profiling table structure:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error profiling table: {str(e)}')
 
 def main():
     # Parse command line arguments
