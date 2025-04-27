@@ -1,6 +1,7 @@
 import sys
 import itertools
 import pandas as pd
+import random
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QMainWindow
 )
@@ -32,6 +33,68 @@ def find_functional_dependencies(df: pd.DataFrame, max_lhs_size: int = 2):
     return fds
 
 
+def propose_normalized_tables(cols, candidate_keys, fds):
+    """
+    Propose a set of normalized tables based on functional dependencies.
+    Uses a simplified approach to create 3NF tables.
+    
+    Parameters:
+    - cols: list of all columns
+    - candidate_keys: list of candidate keys
+    - fds: list of functional dependencies as (lhs, rhs) tuples
+    
+    Returns:
+    - List of proposed tables as (table_name, primary_key, attributes) tuples
+    """
+    # Start with a set of all attributes
+    all_attrs = set(cols)
+    proposed_tables = []
+    
+    # Group FDs by their determinants (LHS)
+    determinant_groups = {}
+    for lhs, rhs in fds:
+        lhs_key = tuple(sorted(lhs))
+        if lhs_key not in determinant_groups:
+            determinant_groups[lhs_key] = []
+        determinant_groups[lhs_key].append(rhs)
+    
+    # Create tables for each determinant group
+    table_counter = 1
+    for lhs, rhs_list in determinant_groups.items():
+        table_attrs = set(lhs) | set(rhs_list)
+        if table_attrs:  # Skip empty tables
+            table_name = f"Table_{table_counter}"
+            primary_key = ", ".join(lhs)
+            attributes = list(table_attrs)
+            proposed_tables.append((table_name, primary_key, attributes))
+            table_counter += 1
+    
+    # Create a table for any remaining attributes not in any FD
+    # or create a table with a candidate key if none exists yet
+    used_attrs = set()
+    for _, _, attrs in proposed_tables:
+        used_attrs.update(attrs)
+    
+    remaining_attrs = all_attrs - used_attrs
+    if remaining_attrs:
+        # If we have a candidate key, use it for remaining attributes
+        for key in candidate_keys:
+            key_set = set(key)
+            if key_set & remaining_attrs:  # If key has overlap with remaining attrs
+                table_name = f"Table_{table_counter}"
+                primary_key = ", ".join(key)
+                attributes = list(remaining_attrs | key_set)
+                proposed_tables.append((table_name, primary_key, attributes))
+                break
+        else:  # No suitable candidate key
+            table_name = f"Table_{table_counter}"
+            primary_key = "id (suggested)"
+            attributes = list(remaining_attrs)
+            proposed_tables.append((table_name, primary_key, attributes))
+    
+    return proposed_tables
+
+
 def profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int = 2):
     """
     Analyze a pandas DataFrame to suggest candidate keys and discover functional dependencies.
@@ -42,7 +105,7 @@ def profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int =
     - max_lhs_size: max size of LHS in discovered FDs.
     
     Returns:
-    - Tuple of (fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size)
+    - Tuple of (fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size, normalized_tables)
     """
     n_rows = len(df)
     cols = list(df.columns)
@@ -106,7 +169,11 @@ def profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int =
     key_results = [(", ".join(c), u, f"{u/n_rows:.2%}", k) 
                    for c, u, _, _, k in results]
     
-    return fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size
+    # Propose normalized tables
+    normalized_tables = propose_normalized_tables(cols, candidate_keys, fds)
+    
+    return fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size, normalized_tables
+
 
 def visualize_profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int = 2):
     """
@@ -121,7 +188,7 @@ def visualize_profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_s
     - QMainWindow: The visualization window
     """
     # Get profile results
-    fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size = profile(
+    fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size, normalized_tables = profile(
         df, max_combination_size, max_lhs_size
     )
     
@@ -210,25 +277,78 @@ def visualize_profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_s
     fd_tab.setLayout(fd_layout)
     tabs.addTab(fd_tab, "Functional Dependencies")
     
+    # Tab for Normalized Tables
+    norm_tab = QWidget()
+    norm_layout = QVBoxLayout()
+    
+    norm_header = QLabel("Proposed Normalized Tables (Based on Functional Dependencies)")
+    norm_header.setStyleSheet("font-weight: bold;")
+    norm_layout.addWidget(norm_header)
+    
+    norm_description = QLabel(
+        "These tables represent a proposed normalized schema based on the discovered functional dependencies. "
+        "Each table includes attributes that are functionally dependent on its primary key. "
+        "This is an approximate 3NF decomposition and may need further refinement."
+    )
+    norm_description.setWordWrap(True)
+    norm_description.setStyleSheet("margin-bottom: 10px;")
+    norm_layout.addWidget(norm_description)
+    
+    norm_table = QTableWidget(len(normalized_tables), 3)
+    norm_table.setHorizontalHeaderLabels(["Table Name", "Primary Key", "Attributes"])
+    norm_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+    for i, (table_name, primary_key, attributes) in enumerate(normalized_tables):
+        norm_table.setItem(i, 0, QTableWidgetItem(table_name))
+        
+        pk_item = QTableWidgetItem(primary_key)
+        pk_item.setForeground(Qt.GlobalColor.darkGreen)
+        norm_table.setItem(i, 1, pk_item)
+        
+        norm_table.setItem(i, 2, QTableWidgetItem(", ".join(attributes)))
+    
+    norm_layout.addWidget(norm_table)
+    norm_tab.setLayout(norm_layout)
+    tabs.addTab(norm_tab, "Normalized Tables")
+    
     layout.addWidget(tabs)
     
     # Show the window
     window.show()
     return window
 
-def test_profile_keys():
-    # Generate a dataframe with some realistic examples 
-    df = pd.DataFrame({
-                       "customer_id": [1, 2, 3, 4, 5],
-                       "customer_name": ["John", "Jane", "John", "Jane", "John"],
-                       "product_name": ["Apple", "Banana", "Apple", "Banana", "Apple"],
-                       "product_group": ["Fruit", "Fruit", "Fruit", "Fruit", "Fruit"],
-                       "order_date": ["2021-01-01", "2021-01-01", "2021-01-02", "2021-01-02", "2021-01-03"],
-                       "order_amount": [100, 200, 150, 250, 120]})
+
+def test_profile_keys(test_size=100):
+    # Generate a dataframe with some realistic examples of a customer-product-order relationship
+    # Create customer data
+    customer_ids = list(range(1, 21))  # 20 customers
+    customer_names = ["John", "Jane", "Alice", "Bob", "Charlie", "Diana", "Edward", "Fiona", "George", "Hannah"]
+    
+    # Create product data
+    product_names = ["Apple", "Banana", "Orange", "Grape", "Mango", "Strawberry", "Blueberry", "Kiwi", "Pineapple", "Watermelon"]
+    product_groups = ["Fruit"] * len(product_names)
+    
+    # Generate random orders
+    random.seed(42)  # For reproducibility
+    df_data = {
+        "customer_id": [random.choice(customer_ids) for _ in range(test_size)],
+        "customer_name": [customer_names[i % len(customer_names)] for i in range(test_size)],
+        "product_name": [random.choice(product_names) for _ in range(test_size)],
+        "product_group": ["Fruit" for _ in range(test_size)],
+        "order_date": [pd.Timestamp("2021-01-01") + pd.Timedelta(days=random.randint(0, 30)) for _ in range(test_size)],
+        "order_amount": [random.randint(100, 1000) for _ in range(test_size)]
+    }
+    
+    # Ensure consistent relationships
+    for i in range(test_size):
+        # Ensure customer_name is consistently associated with customer_id
+        customer_idx = df_data["customer_id"][i] % len(customer_names)
+        df_data["customer_name"][i] = customer_names[customer_idx]
+    
+    df = pd.DataFrame(df_data)
     
     # Create and show visualization
     app = QApplication(sys.argv)
-    window = visualize_profile(df, max_combination_size=2)
+    window = visualize_profile(df, max_combination_size=3, max_lhs_size=2)
     sys.exit(app.exec())
 
 # Only run the test function when script is executed directly
