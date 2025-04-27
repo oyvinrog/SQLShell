@@ -3,7 +3,7 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-    QTableView, QHeaderView, QLabel, QFrame
+    QTableView, QHeaderView, QLabel, QFrame, QScrollArea
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor, QPalette, QBrush
 
@@ -146,7 +146,15 @@ class EntropyVisualization(QMainWindow):
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame.setLineWidth(1)
-        bars_layout = QVBoxLayout(frame)
+        
+        # Create a scroll area for the bars
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        
+        # Content widget for the scroll area
+        content_widget = QWidget()
+        bars_layout = QVBoxLayout(content_widget)
         
         # Scale for better visualization
         max_width = 500
@@ -193,7 +201,20 @@ class EntropyVisualization(QMainWindow):
             bars_layout.addWidget(bar_container)
         
         bars_layout.addStretch()
+        
+        # Set the content widget to the scroll area
+        scroll_area.setWidget(content_widget)
+        
+        # Add the scroll area to the frame layout
+        frame_layout = QVBoxLayout(frame)
+        frame_layout.addWidget(scroll_area)
+        
+        # Add to main layout
         layout.addWidget(frame)
+        
+        # Set a reasonable maximum height for the scroll area
+        if len(df) > 10:
+            scroll_area.setMaximumHeight(400)
     
     def create_table_view(self, layout, df):
         """Create a table view showing the entropy results"""
@@ -285,7 +306,25 @@ def test_profile_entropy():
         'normal': np.random.normal(50, 10, size=1000),    # Medium entropy
         'binary': np.random.choice([0, 1], size=1000),    # Low entropy (only two values)
         'constant': np.ones(1000),                        # Zero entropy (same value)
-        'skewed': np.random.exponential(5, size=1000)     # Skewed distribution
+        'skewed': np.random.exponential(5, size=1000),     # Skewed distribution,
+        'categorical': np.random.choice(['A', 'B', 'C'], size=1000),  # Categorical data
+        'mixed': np.random.randint(0, 100, size=1000) * np.random.choice([0, 1], size=1000),  # Mixed data
+        'datetime': pd.date_range('2020-01-01', periods=1000),  # Datetime data
+        'text': pd.Series(['a', 'b', 'c'] * 334)[:1000],  # Text data  
+        'boolean': np.random.choice([True, False], size=1000), # Boolean data
+        # add 20 more dummy columns with different distributions
+        'dummy1': np.random.randint(0, 100, size=1000),
+        'dummy2': np.random.normal(50, 10, size=1000),
+        'dummy3': np.random.choice([0, 1], size=1000),
+        'dummy4': np.ones(1000),
+        'dummy5': np.random.exponential(5, size=1000),
+        # add 20 more dummy columns with different distributions
+        'dummy6': np.random.randint(0, 100, size=1000),
+        'dummy7': np.random.normal(50, 10, size=1000),
+        'dummy8': np.random.choice([0, 1], size=1000),
+        'dummy9': np.ones(1000),
+        'dummy10': np.random.exponential(5, size=1000),
+        
     })
     
     # Add a categorical column with few categories
