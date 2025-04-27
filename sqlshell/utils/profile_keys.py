@@ -53,17 +53,58 @@ def profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int =
     # Prepare FD results
     fd_results = [(", ".join(lhs), rhs) for lhs, rhs in fds]
 
-    # Profile candidate keys (by uniqueness)
-    results = []
+    # Profile keys (by uniqueness)
+    all_keys = []
     for size in range(1, max_combination_size + 1):
         for combo in itertools.combinations(cols, size):
             unique_count = df.drop_duplicates(subset=combo).shape[0]
             unique_ratio = unique_count / n_rows
             is_key = unique_count == n_rows
-            results.append((combo, unique_count, unique_ratio, is_key))
+            if is_key:
+                all_keys.append(combo)
+    
+    # Distinguish between candidate keys and superkeys
+    candidate_keys = []
+    superkeys = []
+    
+    for key in all_keys:
+        is_candidate = True
+        # Check if any proper subset of this key is also a key
+        for i in range(1, len(key)):
+            for subset in itertools.combinations(key, i):
+                if subset in all_keys:
+                    is_candidate = False
+                    break
+            if not is_candidate:
+                break
+        
+        if is_candidate:
+            candidate_keys.append(key)
+        else:
+            superkeys.append(key)
+    
+    # Prepare results for all keys (both candidate keys and superkeys)
+    results = []
+    for size in range(1, max_combination_size + 1):
+        for combo in itertools.combinations(cols, size):
+            unique_count = df.drop_duplicates(subset=combo).shape[0]
+            unique_ratio = unique_count / n_rows
+            is_key = combo in all_keys
+            is_candidate = combo in candidate_keys
+            is_superkey = combo in superkeys
+            
+            # Use icons for different key types
+            key_type = ""
+            if is_candidate:
+                key_type = "★ Candidate Key"  # Star for candidate keys
+            elif is_superkey:
+                key_type = "⊃ Superkey"       # Superset symbol for superkeys
+            
+            results.append((combo, unique_count, unique_ratio, is_key, key_type))
+    
     results.sort(key=lambda x: (not x[3], -x[2], len(x[0])))
-    key_results = [(", ".join(c), u, f"{u/n_rows:.2%}", "✅" if k else "")
-                   for c, u, _, k in results]
+    key_results = [(", ".join(c), u, f"{u/n_rows:.2%}", k) 
+                   for c, u, _, _, k in results]
     
     return fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size
 
@@ -103,13 +144,20 @@ def visualize_profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_s
     # Add description
     description = QLabel(
         "This profile helps identify candidate keys and functional dependencies in your data. "
-        "Candidate keys are combinations of columns that uniquely identify rows. "
+        "★ Candidate keys are minimal combinations of columns that uniquely identify rows. "
+        "⊃ Superkeys are non-minimal column sets that uniquely identify rows. "
         "Functional dependencies indicate when one column's values determine another's."
     )
     description.setAlignment(Qt.AlignmentFlag.AlignCenter)
     description.setWordWrap(True)
     description.setStyleSheet("margin-bottom: 10px;")
     layout.addWidget(description)
+    
+    # Add key for icons
+    icons_key = QLabel("Key: ★ = Minimal Candidate Key | ⊃ = Non-minimal Superkey")
+    icons_key.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    icons_key.setStyleSheet("font-style: italic; margin-bottom: 15px;")
+    layout.addWidget(icons_key)
     
     # Create tabs
     tabs = QTabWidget()
@@ -118,21 +166,29 @@ def visualize_profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_s
     key_tab = QWidget()
     key_layout = QVBoxLayout()
     
-    key_header = QLabel("Candidate Keys (Column Combinations that Uniquely Identify Rows)")
+    key_header = QLabel("Keys (Column Combinations that Uniquely Identify Rows)")
     key_header.setStyleSheet("font-weight: bold;")
     key_layout.addWidget(key_header)
     
     key_table = QTableWidget(len(key_results), 4)
-    key_table.setHorizontalHeaderLabels(["Columns", "Unique Count", "Uniqueness Ratio", "Candidate Key?"])
+    key_table.setHorizontalHeaderLabels(["Columns", "Unique Count", "Uniqueness Ratio", "Key Type"])
     key_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-    for row, (cols_str, count, ratio, mark) in enumerate(key_results):
+    for row, (cols_str, count, ratio, key_type) in enumerate(key_results):
         key_table.setItem(row, 0, QTableWidgetItem(cols_str))
         key_table.setItem(row, 1, QTableWidgetItem(str(count)))
         key_table.setItem(row, 2, QTableWidgetItem(ratio))
-        key_table.setItem(row, 3, QTableWidgetItem(mark))
+        
+        # Create item with appropriate styling
+        type_item = QTableWidgetItem(key_type)
+        if "Candidate Key" in key_type:
+            type_item.setForeground(Qt.GlobalColor.darkGreen)
+        elif "Superkey" in key_type:
+            type_item.setForeground(Qt.GlobalColor.darkBlue)
+        key_table.setItem(row, 3, type_item)
+        
     key_layout.addWidget(key_table)
     key_tab.setLayout(key_layout)
-    tabs.addTab(key_tab, "Candidate Keys")
+    tabs.addTab(key_tab, "Keys")
     
     # Tab for FDs
     fd_tab = QWidget()
