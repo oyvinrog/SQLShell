@@ -3,6 +3,7 @@ import os
 import json
 import argparse
 from pathlib import Path
+import tempfile
 
 # Ensure proper path setup for resources when running directly
 if __name__ == "__main__":
@@ -801,8 +802,8 @@ class SQLShell(QMainWindow):
             # Show loading indicator
             self.statusBar().showMessage('Generating test data...')
             
-            # Create test data directory if it doesn't exist
-            os.makedirs('test_data', exist_ok=True)
+            # Create temporary directory for test data
+            temp_dir = tempfile.mkdtemp(prefix='sqlshell_test_')
             
             # Generate test data
             sales_df = create_test_data.create_sales_data()
@@ -810,17 +811,22 @@ class SQLShell(QMainWindow):
             product_df = create_test_data.create_product_data()
             large_numbers_df = create_test_data.create_large_numbers_data()
             
-            # Save test data
-            sales_df.to_excel('test_data/sample_sales_data.xlsx', index=False)
-            customer_df.to_parquet('test_data/customer_data.parquet', index=False)
-            product_df.to_excel('test_data/product_catalog.xlsx', index=False)
-            large_numbers_df.to_excel('test_data/large_numbers.xlsx', index=False)
+            # Save test data to temporary directory
+            sales_path = os.path.join(temp_dir, 'sample_sales_data.xlsx')
+            customer_path = os.path.join(temp_dir, 'customer_data.parquet')
+            product_path = os.path.join(temp_dir, 'product_catalog.xlsx')
+            large_numbers_path = os.path.join(temp_dir, 'large_numbers.xlsx')
+            
+            sales_df.to_excel(sales_path, index=False)
+            customer_df.to_parquet(customer_path, index=False)
+            product_df.to_excel(product_path, index=False)
+            large_numbers_df.to_excel(large_numbers_path, index=False)
             
             # Register the tables in the database manager
-            self.db_manager.register_dataframe(sales_df, 'sample_sales_data', 'test_data/sample_sales_data.xlsx')
-            self.db_manager.register_dataframe(product_df, 'product_catalog', 'test_data/product_catalog.xlsx')
-            self.db_manager.register_dataframe(customer_df, 'customer_data', 'test_data/customer_data.parquet')
-            self.db_manager.register_dataframe(large_numbers_df, 'large_numbers', 'test_data/large_numbers.xlsx')
+            self.db_manager.register_dataframe(sales_df, 'sample_sales_data', sales_path)
+            self.db_manager.register_dataframe(product_df, 'product_catalog', product_path)
+            self.db_manager.register_dataframe(customer_df, 'customer_data', customer_path)
+            self.db_manager.register_dataframe(large_numbers_df, 'large_numbers', large_numbers_path)
             
             # Update UI
             self.tables_list.clear()

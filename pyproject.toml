@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlshell"
-version = "0.1.9"
+version = "0.2.2"
 description = "A powerful SQL shell with GUI interface for data analysis"
 readme = "README.md"
 authors = [
@@ -48,15 +48,23 @@ packages = [
     "sqlshell.db",
     "sqlshell.resources",
     "sqlshell.sqlshell",
-    "sqlshell.ui"
+    "sqlshell.ui",
+    "sqlshell.utils"
 ]
 
 [tool.setuptools.package-data]
 sqlshell = [
     "*.db",
-    "resources/*",
-    "data/*",
-    "test_data/*",
+    "resources/*.png",
+    "resources/*.gif",
+    "data/*.py",
     "*.png",
     "*.ico"
+]
+
+[tool.setuptools.exclude-package-data]
+sqlshell = [
+    "tests/*",
+    "*/tests/*",
+    "tests/data/*"
 ] 

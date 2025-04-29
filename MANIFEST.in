@@ -3,8 +3,18 @@ include LICENSE
 include sqlshell_logo.png
 include sqlshell_demo.png
 include pool.db
-recursive-include sqlshell/resources *
-recursive-include sqlshell/data *
-recursive-include test_data *
+include sqlshell/resources/*.png
+include sqlshell/resources/*.gif
+include sqlshell/data/*.py
 global-exclude __pycache__
-global-exclude *.py[cod] 
+global-exclude *.py[cod]
+global-exclude tests/data
+global-exclude */tests/data
+global-exclude *.db
+global-exclude *.parquet
+global-exclude *.xlsx
+global-exclude *.xls
+global-exclude *.csv
+global-exclude *.delta
+global-exclude test.duckdb
+prune tests/data 

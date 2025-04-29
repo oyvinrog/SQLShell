@@ -1,5 +1,6 @@
-include README.md
 include LICENSE
+include MANIFEST.in
+include README.md
+include sqlshell_demo.png
 recursive-include sqlshell *.py
-recursive-include sqlshell *.db
-recursive-include sqlshell/test_data * 
+recursive-include sqlshell *.db 

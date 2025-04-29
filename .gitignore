@@ -3,7 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-test_data/
 .Python
 build/
 develop-eggs/
@@ -21,21 +20,45 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
-venv/
-env/
-ENV/
-.env
-.venv
+# Test data files
+tests/data/*.db
+tests/data/*.parquet
+tests/data/*.xlsx
+tests/data/*.xls
+tests/data/*.csv
+tests/data/*.delta
+tests/data/*.duckdb
+tests/data/*.sqls
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.project
-.pydevproject
-.settings/
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Generated files
+*.log
+.coverage
+htmlcov/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+.venv
 
 # Project specific
 *.db
@@ -53,6 +76,7 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
+tests/
 
 # Distribution / packaging
 *.spec
@@ -60,4 +84,5 @@ desktop.ini
 *.spec 
 *.parquet 
 *.sqls
+sqlshell-0.2.0/
 TODO
