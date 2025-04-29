@@ -59,6 +59,11 @@ pip install -e .
    ```bash
    sqls
    ```
+   
+   If the `sqls` command doesn't work (e.g., "access denied" on Windows), you can use this alternative:
+   ```bash
+   python -c "import sqlshell; sqlshell.start()"
+   ```
 
 2. **Database Connection**
    - SQLShell automatically connects to a local DuckDB database named 'pool.db'
