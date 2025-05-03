@@ -811,6 +811,7 @@ class SQLShell(QMainWindow):
             large_customer_df = create_test_data.create_large_customer_data()
             product_df = create_test_data.create_product_data()
             large_numbers_df = create_test_data.create_large_numbers_data()
+            california_housing_df = create_test_data.create_california_housing_data()
             
             # Save test data to temporary directory
             sales_path = os.path.join(temp_dir, 'sample_sales_data.xlsx')
@@ -818,17 +819,22 @@ class SQLShell(QMainWindow):
             product_path = os.path.join(temp_dir, 'product_catalog.xlsx')
             large_numbers_path = os.path.join(temp_dir, 'large_numbers.xlsx')
             large_customer_path = os.path.join(temp_dir, 'large_customer_data.parquet')
+            california_housing_path = os.path.join(temp_dir, 'california_housing_data.parquet')
             sales_df.to_excel(sales_path, index=False)
             customer_df.to_parquet(customer_path, index=False)
             product_df.to_excel(product_path, index=False)
             large_numbers_df.to_excel(large_numbers_path, index=False)
             large_customer_df.to_parquet(large_customer_path, index=False)
+            california_housing_df.to_parquet(california_housing_path, index=False)
+
             # Register the tables in the database manager
             self.db_manager.register_dataframe(sales_df, 'sample_sales_data', sales_path)
             self.db_manager.register_dataframe(product_df, 'product_catalog', product_path)
             self.db_manager.register_dataframe(customer_df, 'customer_data', customer_path)
             self.db_manager.register_dataframe(large_numbers_df, 'large_numbers', large_numbers_path)
             self.db_manager.register_dataframe(large_customer_df, 'large_customer_data', large_customer_path)
+            self.db_manager.register_dataframe(california_housing_df, 'california_housing_data', california_housing_path)
+            
             # Update UI
             self.tables_list.clear()
             for table_name, file_path in self.db_manager.loaded_tables.items():

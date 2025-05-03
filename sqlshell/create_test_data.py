@@ -10,6 +10,15 @@ np.random.seed(42)
 OUTPUT_DIR = 'test_data'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+def create_california_housing_data(output_file='california_housing_data.parquet'):
+    """Use the real world california housing dataset"""
+    # Load the dataset
+    df = pd.read_csv('https://raw.githubusercontent.com/ageron/handson-ml/master/datasets/housing/housing.csv')
+    
+    # Save to Parquet
+    df.to_parquet(output_file)
+    return df
+
 def create_large_customer_data(num_customers=1_000_000, chunk_size=100_000, output_file='large_customer_data.parquet'):
     """Create a large customer dataset """
     # Generate customer data
