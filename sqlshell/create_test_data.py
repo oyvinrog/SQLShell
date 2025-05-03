@@ -10,6 +10,26 @@ np.random.seed(42)
 OUTPUT_DIR = 'test_data'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+def create_large_customer_data(num_customers=1_000_000, chunk_size=100_000, output_file='large_customer_data.parquet'):
+    """Create a large customer dataset """
+    # Generate customer data
+    data = {
+        'CustomerID': range(1, num_customers + 1),
+        'FirstName': [f'Customer{i}' for i in range(1, num_customers + 1)],
+        'LastName': [f'Lastname{i}' for i in range(1, num_customers + 1)],
+        'Email': [f'customer{i}@example.com' for i in range(1, num_customers + 1)],
+        'JoinDate': [datetime.now() - timedelta(days=np.random.randint(1, 1000)) 
+                     for _ in range(num_customers)],
+        'CustomerType': np.random.choice(['Regular', 'Premium', 'VIP'], num_customers),
+        'CreditScore': np.random.randint(300, 851, num_customers)
+    }
+    
+    # Create DataFrame
+    df = pd.DataFrame(data)
+    
+    return df
+
+
 def create_sales_data(num_records=1000):
     # Generate dates for the last 365 days
     end_date = datetime.now()

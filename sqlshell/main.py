@@ -808,6 +808,7 @@ class SQLShell(QMainWindow):
             # Generate test data
             sales_df = create_test_data.create_sales_data()
             customer_df = create_test_data.create_customer_data()
+            large_customer_df = create_test_data.create_large_customer_data()
             product_df = create_test_data.create_product_data()
             large_numbers_df = create_test_data.create_large_numbers_data()
             
@@ -816,18 +817,18 @@ class SQLShell(QMainWindow):
             customer_path = os.path.join(temp_dir, 'customer_data.parquet')
             product_path = os.path.join(temp_dir, 'product_catalog.xlsx')
             large_numbers_path = os.path.join(temp_dir, 'large_numbers.xlsx')
-            
+            large_customer_path = os.path.join(temp_dir, 'large_customer_data.parquet')
             sales_df.to_excel(sales_path, index=False)
             customer_df.to_parquet(customer_path, index=False)
             product_df.to_excel(product_path, index=False)
             large_numbers_df.to_excel(large_numbers_path, index=False)
-            
+            large_customer_df.to_parquet(large_customer_path, index=False)
             # Register the tables in the database manager
             self.db_manager.register_dataframe(sales_df, 'sample_sales_data', sales_path)
             self.db_manager.register_dataframe(product_df, 'product_catalog', product_path)
             self.db_manager.register_dataframe(customer_df, 'customer_data', customer_path)
             self.db_manager.register_dataframe(large_numbers_df, 'large_numbers', large_numbers_path)
-            
+            self.db_manager.register_dataframe(large_customer_df, 'large_customer_data', large_customer_path)
             # Update UI
             self.tables_list.clear()
             for table_name, file_path in self.db_manager.loaded_tables.items():
