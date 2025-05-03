@@ -1237,6 +1237,10 @@ LIMIT 10
         profile_table_action = context_menu.addAction("Profile Table Structure")
         profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
         
+        # Add distributions profiler action
+        profile_distributions_action = context_menu.addAction("Analyze Column Distributions")
+        profile_distributions_action.setIcon(QIcon.fromTheme("accessories-calculator"))
+        
         # Check if table needs reloading and add appropriate action
         if table_name in self.tables_list.tables_needing_reload:
             reload_action = context_menu.addAction("Reload Table")
@@ -1295,6 +1299,9 @@ LIMIT 10
         elif action == profile_table_action:
             # Call the table profile method
             self.profile_table_structure(table_name)
+        elif action == profile_distributions_action:
+            # Call the distributions profile method
+            self.profile_distributions(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -3226,6 +3233,55 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Profile Error", f"Error profiling table structure:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error profiling table: {str(e)}')
+    
+    def profile_distributions(self, table_name):
+        """Analyze a table's column distributions to understand data patterns"""
+        try:
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Analyzing column distributions for "{table_name}"...')
+            
+            # Get the table data
+            if table_name in self.db_manager.loaded_tables:
+                # Check if table needs reloading first
+                if table_name in self.tables_list.tables_needing_reload:
+                    # Reload the table immediately
+                    self.reload_selected_table(table_name)
+                
+                # Get the data as a dataframe
+                query = f'SELECT * FROM "{table_name}"'
+                df = self.db_manager.execute_query(query)
+                
+                if df is not None and not df.empty:
+                    # Sample the data if it's larger than 10,000 rows
+                    row_count = len(df)
+                    if row_count > 10000:
+                        self.statusBar().showMessage(f'Sampling {table_name} (using 10,000 rows from {row_count} total)...')
+                        df = df.sample(n=10000, random_state=42)
+                    
+                    # Import the distribution profiler
+                    from sqlshell.utils.profile_distributions import visualize_profile
+                    
+                    # Create and show the visualization
+                    self.statusBar().showMessage(f'Generating distribution profile for "{table_name}"...')
+                    vis = visualize_profile(df)
+                    
+                    # Store a reference to prevent garbage collection
+                    self._distributions_window = vis
+                    
+                    if row_count > 10000:
+                        self.statusBar().showMessage(f'Distribution profile generated for "{table_name}" (sampled 10,000 rows from {row_count})')
+                    else:
+                        self.statusBar().showMessage(f'Distribution profile generated for "{table_name}"')
+                else:
+                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
+            else:
+                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                self.statusBar().showMessage(f'Table "{table_name}" not found')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Profile Error", f"Error analyzing distributions:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error analyzing distributions: {str(e)}')
 
 def main():
     # Parse command line arguments
