@@ -1210,6 +1210,30 @@ LIMIT 10
 
     def show_tables_context_menu(self, position):
         """Show context menu for tables list"""
+        # Check if we have multiple selected items
+        selected_items = self.tables_list.selectedItems()
+        if len(selected_items) > 1:
+            # Filter out any folder items from selection
+            table_items = [item for item in selected_items if not self.tables_list.is_folder_item(item)]
+            
+            if len(table_items) > 1:
+                # Create context menu for multiple table selection
+                context_menu = QMenu(self)
+                context_menu.setStyleSheet(get_context_menu_stylesheet())
+                
+                # Add foreign key analysis option
+                analyze_fk_action = context_menu.addAction(f"Analyze Foreign Keys Between {len(table_items)} Tables")
+                analyze_fk_action.setIcon(QIcon.fromTheme("system-search"))
+                
+                # Show menu and get selected action
+                action = context_menu.exec(self.tables_list.mapToGlobal(position))
+                
+                if action == analyze_fk_action:
+                    self.analyze_foreign_keys_between_tables(table_items)
+                
+                return
+        
+        # Single item selection (original functionality)
         item = self.tables_list.itemAt(position)
         
         # If no item or it's a folder, let the tree widget handle it
@@ -1363,6 +1387,73 @@ LIMIT 10
             if target_folder:
                 self.tables_list.move_item_to_folder(item, target_folder)
                 self.statusBar().showMessage(f'Moved table "{table_name}" to folder "{target_folder.text(0)}"')
+                
+    def analyze_foreign_keys_between_tables(self, table_items):
+        """Analyze foreign key relationships between selected tables"""
+        try:
+            # Show a loading indicator
+            table_count = len(table_items)
+            self.statusBar().showMessage(f'Analyzing foreign key relationships between {table_count} tables...')
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for foreign key analysis.")
+                return
+            
+            # Check if any tables need to be reloaded
+            tables_to_reload = [tn for tn in table_names if tn in self.tables_list.tables_needing_reload]
+            for table_name in tables_to_reload:
+                # Reload the table immediately
+                self.reload_selected_table(table_name)
+            
+            # Fetch data for each table
+            dfs = []
+            for table_name in table_names:
+                try:
+                    # Get the data as a dataframe
+                    query = f'SELECT * FROM "{table_name}"'
+                    df = self.db_manager.execute_query(query)
+                    
+                    if df is not None and not df.empty:
+                        # Sample large tables to improve performance
+                        if len(df) > 10000:
+                            self.statusBar().showMessage(f'Sampling {table_name} (using 10,000 rows from {len(df)} total)...')
+                            df = df.sample(n=10000, random_state=42)
+                        dfs.append(df)
+                    else:
+                        QMessageBox.warning(self, "Empty Table", 
+                                            f"Table '{table_name}' has no data and will be skipped.")
+                except Exception as e:
+                    QMessageBox.warning(self, "Table Error", 
+                                       f"Error loading table '{table_name}': {str(e)}\nThis table will be skipped.")
+            
+            if len(dfs) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                   "At least two tables with data are required for foreign key analysis.")
+                return
+            
+            # Import the foreign key analyzer
+            from sqlshell.utils.profile_foreign_keys import visualize_foreign_keys
+            
+            # Create and show the visualization
+            self.statusBar().showMessage(f'Analyzing foreign key relationships between {len(dfs)} tables...')
+            vis = visualize_foreign_keys(dfs, table_names)
+            
+            # Store a reference to prevent garbage collection
+            self._fk_analysis_window = vis
+            
+            self.statusBar().showMessage(f'Foreign key analysis complete for {len(dfs)} tables')
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"Error analyzing foreign keys:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error analyzing foreign keys: {str(e)}')
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""

@@ -37,7 +37,7 @@ class DraggableTablesList(QTreeWidget):
         self.setHeaderHidden(True)
         self.setColumnCount(1)
         self.setIndentation(15)  # Smaller indentation for a cleaner look
-        self.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.setExpandsOnDoubleClick(False)  # Handle double-clicks manually
         
         # Apply custom styling
@@ -120,6 +120,95 @@ class DraggableTablesList(QTreeWidget):
     
     def startDrag(self, supportedActions):
         """Override startDrag to customize the drag data."""
+        # Check for multiple selected items
+        selected_items = self.selectedItems()
+        if len(selected_items) > 1:
+            # Only support dragging multiple items to the editor (not for folder management)
+            # Filter out folder items
+            table_items = [item for item in selected_items if not self.is_folder_item(item)]
+            
+            if not table_items:
+                return
+            
+            # Extract table names
+            table_names = [self.get_table_name_from_item(item) for item in table_items]
+            table_names = [name for name in table_names if name]  # Remove None values
+            
+            if not table_names:
+                return
+                
+            # Create mime data with comma-separated table names
+            mime_data = QMimeData()
+            mime_data.setText(", ".join(table_names))
+            
+            # Create drag object
+            drag = QDrag(self)
+            drag.setMimeData(mime_data)
+            
+            # Create a visually appealing drag pixmap
+            font = self.font()
+            font.setBold(True)
+            metrics = self.fontMetrics()
+            
+            # Build a preview label with limited number of tables
+            display_names = table_names[:3]
+            if len(table_names) > 3:
+                display_text = f"{', '.join(display_names)} (+{len(table_names) - 3} more)"
+            else:
+                display_text = ", ".join(display_names)
+                
+            text_width = metrics.horizontalAdvance(display_text)
+            text_height = metrics.height()
+            
+            # Make the pixmap large enough for the text plus padding and a small icon
+            padding = 10
+            pixmap = QPixmap(text_width + padding * 2 + 16, text_height + padding)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            
+            # Begin painting
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Draw a nice rounded rectangle background
+            bg_color = QColor(44, 62, 80, 220)  # Dark blue with transparency
+            painter.setBrush(QBrush(bg_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(0, 0, pixmap.width(), pixmap.height(), 5, 5)
+            
+            # Draw text
+            painter.setPen(Qt.GlobalColor.white)
+            painter.setFont(font)
+            painter.drawText(int(padding + 16), int(text_height + (padding / 2) - 2), display_text)
+            
+            # Draw a small database icon (simulated)
+            icon_x = padding / 2
+            icon_y = (pixmap.height() - 12) / 2
+            
+            # Draw a simple database icon as a blue circle with lines
+            table_icon_color = QColor("#3498DB")
+            painter.setBrush(QBrush(table_icon_color))
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawEllipse(int(icon_x), int(icon_y), 12, 12)
+            
+            # Draw "table" lines inside the circle
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawLine(int(icon_x + 3), int(icon_y + 4), int(icon_x + 9), int(icon_y + 4))
+            painter.drawLine(int(icon_x + 3), int(icon_y + 6), int(icon_x + 9), int(icon_y + 6))
+            painter.drawLine(int(icon_x + 3), int(icon_y + 8), int(icon_x + 9), int(icon_y + 8))
+            
+            painter.end()
+            
+            # Set the drag pixmap
+            drag.setPixmap(pixmap)
+            
+            # Set hotspot to be at the top-left corner of the text
+            drag.setHotSpot(QPoint(padding, pixmap.height() // 2))
+            
+            # Execute drag operation - only allow copy action for multiple tables
+            drag.exec(Qt.DropAction.CopyAction)
+            return
+            
+        # Single item drag (original functionality)
         item = self.currentItem()
         if not item:
             return
