@@ -123,34 +123,62 @@ FROM test_v;
 - Type `table_name.` to see all columns for a specific table
 - After JOIN keyword, the system suggests relevant tables and join conditions
 
-## 📊 Column Profiler
+## 📊 Table Profiling
 
-The Column Profiler provides quick statistical insights into your table columns:
+SQLShell provides powerful table profiling tools to help you understand your data. These tools are accessible from the left-hand side table menu via right-click on any table:
 
+<div align="center">
 <img src="column_profiler.png" alt="Column Profiler" width="80%" height="auto">
+</div>
 
-### Using the Column Profiler
+### Table Profiling Options
 
-1. **Access the Profiler**
+Right-click on any table in the left panel to access these profiling tools:
+
+1. **Analyze Column Importance**
+   - Calculates entropy for each column to identify the most information-rich fields
+   - Visualizes column importance with color-coded bars
+   - Helps identify which columns are most useful for analysis and modeling
+
+2. **Profile Table Structure**
+   - Identifies candidate keys and functional dependencies
+   - Discovers potential primary keys and relationships between columns
+   - Suggests possible normalized table structures
+   - Helps understand table organization and optimize schema design
+
+3. **Analyze Column Distributions**
+   - Generates histograms, box plots, and other statistical visualizations
+   - Identifies the distribution pattern of each column (normal, uniform, etc.)
+   - Provides detailed statistics like min, max, mean, median, skewness
+   - Helps identify outliers and understand data patterns
+
+4. **Analyze Foreign Keys** (multi-table selection)
+   - Select multiple tables by holding Ctrl or Shift while clicking
+   - Right-click to access "Analyze Foreign Keys Between X Tables"
+   - Automatically discovers potential foreign key relationships between tables
+   - Identifies matching columns that could serve as join conditions
+   - Helps understand cross-table relationships in your data model
+
+### Using the Profilers
+
+1. **Access the Profilers**
    - Right-click on any table in the schema browser
-   - Select "Profile Table" from the context menu
+   - Select the desired profiling option from the context menu
+   - For foreign key analysis, select multiple tables first
 
-2. **View Column Statistics**
-   - Instantly see key metrics for each column:
-     - Data type
-     - Non-null count and percentage
-     - Unique values count
-     - Mean, median, min, and max values (for numeric columns)
-     - Most frequent values and their counts
-     - Distribution visualization
+2. **Interpret the Results**
+   - Each profiler provides interactive visualizations
+   - Hover over charts for detailed information
+   - Switch between different views using the tabs
+   - Sort and filter results to focus on specific columns
 
 3. **Benefits**
-   - Quickly understand data distribution
-   - Identify outliers and data quality issues
-   - Make informed decisions about query conditions
-   - Assess column cardinality for join operations
+   - Quickly understand data composition without writing queries
+   - Identify data quality issues and outliers
+   - Discover relationships between columns
+   - Make informed decisions about query optimization
 
-The Column Profiler is an invaluable tool for exploratory data analysis, helping you gain insights before writing complex queries.
+The table profiling tools are invaluable for exploratory data analysis, helping you gain insights before writing complex queries.
 
 ## 📋 Requirements
 
