@@ -3401,11 +3401,11 @@ LIMIT 10
             df = current_tab.current_df
             
             if df is not None and not df.empty:
-                # Sample the data if it's larger than 10,000 rows
+                # Sample the data if it's larger than 100 rows for ultra-fast performance
                 row_count = len(df)
-                if row_count > 10000:
-                    self.statusBar().showMessage(f'Sampling data (using 10,000 rows from {row_count} total)...')
-                    df = df.sample(n=10000, random_state=42)
+                if row_count > 100:
+                    self.statusBar().showMessage(f'Sampling data (using 100 rows from {row_count} total)...')
+                    df = df.sample(n=100, random_state=42)
                 
                 # Import the column profiler
                 from sqlshell.utils.profile_column import visualize_profile
@@ -3416,8 +3416,8 @@ LIMIT 10
                 
                 # We don't need to store a reference since the UI keeps itself alive
                 
-                if row_count > 10000:
-                    self.statusBar().showMessage(f'Column profile generated for "{column_name}" (sampled 10,000 rows from {row_count})')
+                if row_count > 100:
+                    self.statusBar().showMessage(f'Column profile generated for "{column_name}" (sampled 100 rows from {row_count})')
                 else:
                     self.statusBar().showMessage(f'Column profile generated for "{column_name}"')
             else:
