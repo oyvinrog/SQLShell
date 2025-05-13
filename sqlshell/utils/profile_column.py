@@ -885,9 +885,16 @@ def visualize_profile(df: pd.DataFrame, column: str = None) -> None:
         column: Optional target column to analyze immediately
     """
     try:
-        # For large datasets, sample up to 500 rows for better statistical significance
+        # Check if dataset is too small for meaningful analysis
         row_count = len(df)
-        if row_count > 500:  
+        if row_count <= 5:
+            print(f"WARNING: Dataset only has {row_count} rows. Feature importance analysis requires more data for meaningful results.")
+            if QApplication.instance():
+                QMessageBox.warning(None, "Insufficient Data", 
+                                 f"The dataset only contains {row_count} rows. Feature importance analysis requires more data for meaningful results.")
+        
+        # For large datasets, sample up to 500 rows for better statistical significance
+        elif row_count > 500:  
             print(f"Sampling 500 rows from dataset ({row_count:,} total rows)")
             df = df.sample(n=500, random_state=42)
         
