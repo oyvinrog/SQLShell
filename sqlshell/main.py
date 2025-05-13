@@ -3386,6 +3386,48 @@ LIMIT 10
             QMessageBox.critical(self, "Profile Error", f"Error analyzing distributions:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error analyzing distributions: {str(e)}')
 
+    def explain_column(self, column_name):
+        """Analyze a column to explain its relationship with other columns"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                return
+                
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Analyzing column "{column_name}"...')
+            
+            # Get the dataframe from the current tab
+            df = current_tab.current_df
+            
+            if df is not None and not df.empty:
+                # Sample the data if it's larger than 10,000 rows
+                row_count = len(df)
+                if row_count > 10000:
+                    self.statusBar().showMessage(f'Sampling data (using 10,000 rows from {row_count} total)...')
+                    df = df.sample(n=10000, random_state=42)
+                
+                # Import the column profiler
+                from sqlshell.utils.profile_column import visualize_profile
+                
+                # Create and show the visualization
+                self.statusBar().showMessage(f'Generating column profile for "{column_name}"...')
+                visualize_profile(df, column_name)
+                
+                # We don't need to store a reference since the UI keeps itself alive
+                
+                if row_count > 10000:
+                    self.statusBar().showMessage(f'Column profile generated for "{column_name}" (sampled 10,000 rows from {row_count})')
+                else:
+                    self.statusBar().showMessage(f'Column profile generated for "{column_name}"')
+            else:
+                QMessageBox.warning(self, "Empty Data", "No data available to analyze.")
+                self.statusBar().showMessage(f'No data to analyze')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"Error analyzing column:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error analyzing column: {str(e)}')
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='SQL Shell - SQL Query Tool')

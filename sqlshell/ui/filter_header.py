@@ -89,6 +89,11 @@ class FilterHeader(QHeaderView):
         sort_asc_action = context_menu.addAction("Sort Ascending")
         sort_desc_action = context_menu.addAction("Sort Descending")
         context_menu.addSeparator()
+        
+        # Add explain column action
+        explain_action = context_menu.addAction("Explain Column")
+        
+        context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
         
         # Add bar chart action if column is numeric
@@ -127,6 +132,15 @@ class FilterHeader(QHeaderView):
             self.show_filter_menu(logical_index)
         elif action == toggle_bar_action:
             self.toggle_bar_chart(logical_index)
+        elif action == explain_action:
+            # Call the explain_column method on the main window
+            if self.main_window and hasattr(self.main_window, "explain_column"):
+                # Get the column name from the table (if it has a current dataframe)
+                current_tab = self.main_window.get_current_tab()
+                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
+                    if logical_index < len(current_tab.current_df.columns):
+                        column_name = current_tab.current_df.columns[logical_index]
+                        self.main_window.explain_column(column_name)
 
     def set_main_window(self, window):
         """Set the reference to the main window"""
