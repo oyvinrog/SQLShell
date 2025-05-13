@@ -1,4 +1,6 @@
-# SQLShell
+# SQLShell - DEPRECATED README
+
+**NOTE: This README is deprecated. Please refer to the main README.md file in the root directory of the repository for the most up-to-date information.**
 
 A powerful SQL shell with GUI interface for data analysis. SQLShell provides an intuitive interface for working with various data formats (CSV, Excel, Parquet) using SQL queries powered by DuckDB.
 
@@ -12,6 +14,7 @@ A powerful SQL shell with GUI interface for data analysis. SQLShell provides an 
 - Table preview functionality
 - Built-in test data generation
 - Support for multiple concurrent table views
+- "Explain Column" feature for analyzing relationships between data columns
 
 ## Installation
 
@@ -45,6 +48,7 @@ This will open the GUI interface where you can:
 3. Execute queries using the "Execute" button or Ctrl+Enter
 4. View results in the table view below
 5. Load sample test data using the "Test" button
+6. Right-click on column headers in the results to access features like sorting, filtering, and the "Explain Column" analysis tool
 
 ## Requirements
 

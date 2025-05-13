@@ -21,6 +21,7 @@
 - **Test Data Generation** - Built-in sample data for testing and learning
 - **Multiple Views** - Support for multiple concurrent table views
 - **Productivity Tools** - Streamlined workflow with keyboard shortcuts (e.g., Ctrl+Enter for query execution)
+- **Explain Column** - Analyze relationships between data columns directly from query results
 
 ## 📦 Installation
 
@@ -89,6 +90,10 @@ pip install -e .
      - After FROM/JOIN: tables with join conditions
      - After WHERE: columns with appropriate operators
      - Inside functions: relevant column suggestions
+
+7. **Column Analysis**
+   - Right-click on column headers in the results pane
+   - Access features like sorting, filtering, and the "Explain Column" analysis tool
 
 ## 📝 Query Examples
 
@@ -179,6 +184,30 @@ Right-click on any table in the left panel to access these profiling tools:
    - Make informed decisions about query optimization
 
 The table profiling tools are invaluable for exploratory data analysis, helping you gain insights before writing complex queries.
+
+## 📊 Column Analysis
+
+SQLShell provides powerful tools to analyze individual columns directly from your query results:
+
+### Explain Column Feature
+
+The "Explain Column" feature helps you understand the relationships between columns in your query results:
+
+1. **How to Access**:
+   - Right-click on any column header in the query results table
+   - Select "Explain Column" from the context menu
+
+2. **What It Does**:
+   - Analyzes the selected column's relationship with other columns in the result set
+   - Identifies correlations and dependencies between columns
+   - Provides visualizations to help understand the column's importance and distribution
+
+3. **Benefits**:
+   - Quickly identify which columns are most related to your target column
+   - Discover hidden patterns and relationships in your data
+   - Make data-driven decisions without writing complex analytical queries
+
+This feature is particularly useful for exploratory data analysis, helping you understand your data structure and relationships on the fly.
 
 ## 📋 Requirements
 
