@@ -629,6 +629,12 @@ class ColumnProfilerApp(QMainWindow):
         self.importance_table.cellDoubleClicked.connect(self.show_relationship_visualization)
         results_splitter.addWidget(self.importance_table)
         
+        # Add instruction label for double-click functionality
+        instruction_label = QLabel("Double-click on any feature to view detailed relationship visualization with the target column")
+        instruction_label.setStyleSheet("color: #666; font-style: italic;")
+        instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(instruction_label)
+        
         # Create matplotlib canvas for the chart
         self.chart_view = MatplotlibCanvas(width=8, height=5, dpi=100)
         results_splitter.addWidget(self.chart_view)
