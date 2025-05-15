@@ -2,11 +2,11 @@
 
 <div align="center">
 
-<img src="sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
+<img src="https://github.com/oyvinrog/SQLShell/raw/main/sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
 
 **A powerful SQL shell with GUI interface for data analysis**
 
-<img src="sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
+<img src="https://github.com/oyvinrog/SQLShell/raw/main/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
 </div>
 
@@ -133,7 +133,7 @@ FROM test_v;
 SQLShell provides powerful table profiling tools to help you understand your data. These tools are accessible from the left-hand side table menu via right-click on any table:
 
 <div align="center">
-<img src="column_profiler.png" alt="Column Profiler" width="80%" height="auto">
+<img src="https://github.com/oyvinrog/SQLShell/raw/main/column_profiler.png" alt="Column Profiler" width="80%" height="auto">
 </div>
 
 ### Table Profiling Options
@@ -206,6 +206,27 @@ The "Explain Column" feature helps you understand the relationships between colu
    - Quickly identify which columns are most related to your target column
    - Discover hidden patterns and relationships in your data
    - Make data-driven decisions without writing complex analytical queries
+
+### Multivariate Analysis Feature
+
+The Column Profiler now offers in-depth multivariate analysis to explore relationships between columns:
+
+1. **How to Access**:
+   - In the Column Profiler, double-click on any feature in the importance table
+   - A detailed visualization window will appear showing the relationship between the selected feature and the target column
+
+2. **Smart Visualizations**:
+   - Automatically selects the most appropriate visualization based on data types:
+     - **Numeric vs. Numeric**: Scatter plot with regression line
+     - **Categorical vs. Numeric**: Bar chart showing average values
+     - **Numeric vs. Categorical**: Box plot showing distribution
+     - **Categorical vs. Categorical**: Heatmap showing relationship strength
+
+3. **Benefits**:
+   - Gain deeper insights into how features relate to your target variable
+   - Understand which features have strong predictive relationships
+   - Identify patterns and outliers in multivariate relationships
+   - Make better decisions about feature selection for analysis and modeling
 
 This feature is particularly useful for exploratory data analysis, helping you understand your data structure and relationships on the fly.
 
