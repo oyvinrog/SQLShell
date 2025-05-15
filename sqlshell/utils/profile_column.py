@@ -14,7 +14,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTableWidget, QTableWidgetItem, 
                              QVBoxLayout, QHBoxLayout, QLabel, QWidget, QComboBox, 
                              QPushButton, QSplitter, QHeaderView, QFrame, QProgressBar,
-                             QMessageBox)
+                             QMessageBox, QDialog)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPalette, QColor, QBrush, QPainter, QPen
 
@@ -23,6 +23,7 @@ import matplotlib
 matplotlib.use('QtAgg')
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+import seaborn as sns
 
 # Create a cache directory in user's home directory
 CACHE_DIR = os.path.join(Path.home(), '.sqlshell_cache')
@@ -545,7 +546,7 @@ class ExplainerThread(QThread):
             
             # Hide the progress label after 2 seconds
             QTimer.singleShot(2000, self.progress_label.hide)
-
+            
 # Custom matplotlib canvas for embedding in Qt
 class MatplotlibCanvas(FigureCanvasQTAgg):
     def __init__(self, width=5, height=4, dpi=100):
@@ -625,6 +626,7 @@ class ColumnProfilerApp(QMainWindow):
         self.importance_table.setColumnCount(2)
         self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance"])
         self.importance_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.importance_table.cellDoubleClicked.connect(self.show_relationship_visualization)
         results_splitter.addWidget(self.importance_table)
         
         # Create matplotlib canvas for the chart
@@ -875,6 +877,75 @@ class ColumnProfilerApp(QMainWindow):
             
             # Hide the progress label after 2 seconds
             QTimer.singleShot(2000, self.progress_label.hide)
+            
+    def show_relationship_visualization(self, row, column):
+        """Show visualization of relationship between selected feature and target column"""
+        if self.importance_df is None or row >= len(self.importance_df):
+            return
+            
+        # Get the feature name and target column
+        feature = self.importance_df.iloc[row]['feature']
+        target = self.column_selector.currentText()
+        
+        # Create a dialog to show the visualization
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Relationship: {feature} vs {target}")
+        dialog.resize(800, 600)
+        
+        # Create layout
+        layout = QVBoxLayout(dialog)
+        
+        # Create canvas for the plot
+        canvas = MatplotlibCanvas(width=8, height=6, dpi=100)
+        layout.addWidget(canvas)
+        
+        # Determine the data types
+        feature_is_numeric = pd.api.types.is_numeric_dtype(self.df[feature])
+        target_is_numeric = pd.api.types.is_numeric_dtype(self.df[target])
+        
+        # Clear the figure
+        canvas.axes.clear()
+        
+        # Create appropriate visualization based on data types
+        if feature_is_numeric and target_is_numeric:
+            # Scatter plot for numeric vs numeric
+            sns.scatterplot(x=feature, y=target, data=self.df, ax=canvas.axes)
+            # Add regression line
+            sns.regplot(x=feature, y=target, data=self.df, ax=canvas.axes, 
+                        scatter=False, line_kws={"color": "red"})
+            canvas.axes.set_title(f"Scatter Plot: {feature} vs {target}")
+            
+        elif feature_is_numeric and not target_is_numeric:
+            # Box plot for numeric vs categorical
+            sns.boxplot(x=target, y=feature, data=self.df, ax=canvas.axes)
+            canvas.axes.set_title(f"Box Plot: {feature} by {target}")
+            
+        elif not feature_is_numeric and target_is_numeric:
+            # Bar plot for categorical vs numeric
+            sns.barplot(x=feature, y=target, data=self.df, ax=canvas.axes)
+            canvas.axes.set_title(f"Bar Plot: Average {target} by {feature}")
+            # Rotate x-axis labels if there are many categories
+            if self.df[feature].nunique() > 5:
+                canvas.axes.set_xticklabels(canvas.axes.get_xticklabels(), rotation=45, ha='right')
+            
+        else:
+            # Heatmap for categorical vs categorical
+            # Create a crosstab of the two categorical variables
+            crosstab = pd.crosstab(self.df[feature], self.df[target], normalize='index')
+            sns.heatmap(crosstab, annot=True, cmap="YlGnBu", ax=canvas.axes)
+            canvas.axes.set_title(f"Heatmap: {feature} vs {target}")
+        
+        # Adjust layout and draw
+        canvas.figure.tight_layout()
+        canvas.draw()
+        
+        # Add a close button
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # Show the dialog
+        dialog.exec()
 
 def visualize_profile(df: pd.DataFrame, column: str = None) -> None:
     """
@@ -931,6 +1002,9 @@ def visualize_profile(df: pd.DataFrame, column: str = None) -> None:
         window = ColumnProfilerApp(df)
         window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # Ensure cleanup on close
         window.show()
+        
+        # Add tooltip to explain double-click functionality
+        window.importance_table.setToolTip("Double-click on a feature to visualize its relationship with the target column")
         
         # If a specific column is provided, analyze it immediately
         if column is not None and column in df.columns:
