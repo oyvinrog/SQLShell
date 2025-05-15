@@ -273,27 +273,58 @@ class DatabaseManager:
                     # Check if it's a large file
                     file_size = os.path.getsize(file_path) / (1024 * 1024)  # Size in MB
                     
+                    # Try multiple encodings if needed
+                    encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'ISO-8859-1']
+                    
                     if file_size > 50:  # If file is larger than 50MB
-                        # Read the first chunk to get column types
-                        df_preview = pd.read_csv(file_path, nrows=1000)
-                        
-                        # Use optimized dtypes for better memory usage
-                        dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
-                        
-                        # Read again with chunk processing, combining up to 100k rows
-                        chunks = []
-                        for chunk in pd.read_csv(file_path, dtype=dtypes, chunksize=10000):
-                            chunks.append(chunk)
-                            if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
+                        # Try each encoding until one works
+                        for encoding in encodings_to_try:
+                            try:
+                                # Read the first chunk to get column types
+                                df_preview = pd.read_csv(file_path, nrows=1000, encoding=encoding)
+                                
+                                # Use optimized dtypes for better memory usage
+                                dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
+                                
+                                # Read again with chunk processing, combining up to 100k rows
+                                chunks = []
+                                for chunk in pd.read_csv(file_path, dtype=dtypes, chunksize=10000, encoding=encoding):
+                                    chunks.append(chunk)
+                                    if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
+                                        break
+                                
+                                df = pd.concat(chunks, ignore_index=True)
                                 break
-                        
-                        df = pd.concat(chunks, ignore_index=True)
+                            except UnicodeDecodeError:
+                                # If this encoding fails, try the next one
+                                continue
+                            except Exception as e:
+                                # For other errors, raise immediately
+                                raise e
+                        else:
+                            # If we get here, all encodings failed
+                            raise ValueError("Failed to decode CSV file with any of the attempted encodings")
                     else:
-                        # For smaller files, read everything at once
-                        df = pd.read_csv(file_path)
-                except Exception:
-                    # Fallback to standard reading method
-                    df = pd.read_csv(file_path)
+                        # For smaller files, read everything at once, trying different encodings
+                        for encoding in encodings_to_try:
+                            try:
+                                df = pd.read_csv(file_path, encoding=encoding)
+                                break
+                            except UnicodeDecodeError:
+                                # If this encoding fails, try the next one
+                                continue
+                            except Exception as e:
+                                # For other errors, raise immediately
+                                raise e
+                        else:
+                            # If we get here, all encodings failed
+                            raise ValueError("Failed to decode CSV file with any of the attempted encodings")
+                except Exception as e:
+                    # Log the error for debugging
+                    import traceback
+                    print(f"Error loading CSV file: {str(e)}")
+                    print(traceback.format_exc())
+                    raise ValueError(f"Error loading CSV file: {str(e)}")
             elif file_path.endswith('.parquet'):
                 df = pd.read_parquet(file_path)
             else:
@@ -449,7 +480,21 @@ class DatabaseManager:
             elif file_path.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file_path)
             elif file_path.endswith('.csv'):
-                df = pd.read_csv(file_path)
+                # Try multiple encodings for CSV files
+                encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'ISO-8859-1']
+                for encoding in encodings_to_try:
+                    try:
+                        df = pd.read_csv(file_path, encoding=encoding)
+                        break  # If successful, break the loop
+                    except UnicodeDecodeError:
+                        # If this encoding fails, try the next one
+                        continue
+                    except Exception as e:
+                        # For other errors, raise immediately
+                        raise e
+                else:
+                    # If all encodings fail, raise an error
+                    raise ValueError("Failed to decode CSV file with any of the attempted encodings")
             elif file_path.endswith('.parquet'):
                 df = pd.read_parquet(file_path)
             else:
