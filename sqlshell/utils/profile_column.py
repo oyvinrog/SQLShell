@@ -23,6 +23,7 @@ matplotlib.use('QtAgg')
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 import seaborn as sns
+import matplotlib.pyplot as plt
 
 # Create a cache directory in user's home directory
 CACHE_DIR = os.path.join(Path.home(), '.sqlshell_cache')
@@ -427,13 +428,28 @@ class ExplainerThread(QThread):
         self.chart_view.axes.clear()
         
         # Limit to top 20 features for better visualization
-        plot_df = self.importance_df.head(20)
+        plot_df = self.importance_df.head(20).copy()
+        
+        # Truncate long feature names for better display
+        max_feature_length = 30
+        plot_df['display_feature'] = plot_df['feature'].apply(
+            lambda x: (str(x)[:max_feature_length] + '...') if len(str(x)) > max_feature_length else str(x)
+        )
+        
+        # Reverse order for better display (highest at top)
+        plot_df = plot_df.iloc[::-1].reset_index(drop=True)
+        
+        # Create a colormap for better visualization
+        cmap = plt.cm.Blues
+        colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
         
         # Plot with custom colors
         bars = self.chart_view.axes.barh(
-            plot_df['feature'], 
+            plot_df['display_feature'], 
             plot_df['importance_value'],
-            color='skyblue'
+            color=colors,
+            height=0.7,  # Thinner bars for more spacing
+            alpha=0.8
         )
         
         # Add values at the end of bars
@@ -443,11 +459,30 @@ class ExplainerThread(QThread):
                 width * 1.05, 
                 bar.get_y() + bar.get_height()/2, 
                 f'{width:.2f}', 
-                va='center'
+                va='center',
+                fontsize=9,
+                fontweight='bold'
             )
-            
+        
+        # Add grid for better readability
+        self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
+        
+        # Remove unnecessary spines
+        for spine in ['top', 'right']:
+            self.chart_view.axes.spines[spine].set_visible(False)
+        
+        # Make labels more readable
+        self.chart_view.axes.tick_params(axis='y', labelsize=9)
+        
+        # Set title and labels
         self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
         self.chart_view.axes.set_xlabel('Importance Value')
+        
+        # Adjust figure size based on number of features
+        feature_count = len(plot_df)
+        self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
+        
+        # Adjust layout and draw
         self.chart_view.figure.tight_layout()
         self.chart_view.draw()
         
@@ -546,6 +581,269 @@ class ExplainerThread(QThread):
             # Hide the progress label after 2 seconds
             QTimer.singleShot(2000, self.progress_label.hide)
             
+    def show_relationship_visualization(self, row, column):
+        """Show visualization of relationship between selected feature and target column"""
+        if self.importance_df is None or row >= len(self.importance_df):
+            return
+            
+        # Get the feature name and target column
+        feature = self.importance_df.iloc[row]['feature']
+        target = self.column_selector.currentText()
+        
+        # Create a dialog to show the visualization
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Relationship: {feature} vs {target}")
+        dialog.resize(900, 700)
+        
+        # Create layout
+        layout = QVBoxLayout(dialog)
+        
+        # Create canvas for the plot
+        canvas = MatplotlibCanvas(width=8, height=6, dpi=100)
+        layout.addWidget(canvas)
+        
+        # Determine the data types
+        feature_is_numeric = pd.api.types.is_numeric_dtype(self.df[feature])
+        target_is_numeric = pd.api.types.is_numeric_dtype(self.df[target])
+        
+        # Get unique counts to determine if we have high cardinality
+        feature_unique_count = self.df[feature].nunique()
+        target_unique_count = self.df[target].nunique()
+        
+        # Define high cardinality threshold
+        high_cardinality_threshold = 10
+        
+        # Clear the figure
+        canvas.axes.clear()
+        
+        # Create a working copy of the dataframe
+        working_df = self.df.copy()
+        
+        # Prepare data for high cardinality columns
+        if not feature_is_numeric and feature_unique_count > high_cardinality_threshold:
+            # Get the top N categories by frequency
+            top_categories = self.df[feature].value_counts().nlargest(high_cardinality_threshold).index.tolist()
+            # Create "Other" category for remaining values
+            working_df[feature] = working_df[feature].apply(lambda x: x if x in top_categories else 'Other')
+            
+        if not target_is_numeric and target_unique_count > high_cardinality_threshold:
+            top_categories = self.df[target].value_counts().nlargest(high_cardinality_threshold).index.tolist()
+            working_df[target] = working_df[target].apply(lambda x: x if x in top_categories else 'Other')
+        
+        # Create appropriate visualization based on data types and cardinality
+        if feature_is_numeric and target_is_numeric:
+            # Scatter plot for numeric vs numeric
+            # Use hexbin for large datasets to avoid overplotting
+            if len(working_df) > 100:
+                canvas.axes.hexbin(
+                    working_df[feature], 
+                    working_df[target], 
+                    gridsize=25, 
+                    cmap='Blues',
+                    mincnt=1
+                )
+                canvas.axes.set_title(f"Hexbin Density Plot: {feature} vs {target}")
+                canvas.axes.set_xlabel(feature)
+                canvas.axes.set_ylabel(target)
+                # Add a colorbar
+                cbar = canvas.figure.colorbar(canvas.axes.collections[0], ax=canvas.axes)
+                cbar.set_label('Count')
+            else:
+                # For smaller datasets, use a scatter plot with transparency
+                sns.scatterplot(
+                    x=feature, 
+                    y=target, 
+                    data=working_df, 
+                    ax=canvas.axes,
+                    alpha=0.6
+                )
+                # Add regression line
+                sns.regplot(
+                    x=feature, 
+                    y=target, 
+                    data=working_df, 
+                    ax=canvas.axes, 
+                    scatter=False, 
+                    line_kws={"color": "red"}
+                )
+                canvas.axes.set_title(f"Scatter Plot: {feature} vs {target}")
+            
+        elif feature_is_numeric and not target_is_numeric:
+            # Box plot for numeric vs categorical
+            if target_unique_count <= high_cardinality_threshold * 2:
+                # Standard boxplot for reasonable number of categories
+                order = working_df[target].value_counts().nlargest(high_cardinality_threshold * 2).index
+                sns.boxplot(
+                    x=target, 
+                    y=feature, 
+                    data=working_df, 
+                    ax=canvas.axes, 
+                    order=order
+                )
+                canvas.axes.set_title(f"Box Plot: {feature} by {target}")
+                # Rotate x-axis labels for better readability
+                canvas.axes.set_xticklabels(
+                    canvas.axes.get_xticklabels(), 
+                    rotation=45, 
+                    ha='right'
+                )
+            else:
+                # For very high cardinality, use a violin plot with limited categories
+                order = working_df[target].value_counts().nlargest(high_cardinality_threshold).index
+                working_df_filtered = working_df[working_df[target].isin(order)]
+                sns.violinplot(
+                    x=target, 
+                    y=feature, 
+                    data=working_df_filtered, 
+                    ax=canvas.axes,
+                    inner='quartile',
+                    cut=0
+                )
+                canvas.axes.set_title(f"Violin Plot: {feature} by Top {len(order)} {target} Categories")
+                canvas.axes.set_xticklabels(
+                    canvas.axes.get_xticklabels(), 
+                    rotation=45, 
+                    ha='right'
+                )
+            
+        elif not feature_is_numeric and target_is_numeric:
+            # Bar plot for categorical vs numeric
+            if feature_unique_count <= high_cardinality_threshold * 2:
+                # Use standard barplot for reasonable number of categories
+                order = working_df[feature].value_counts().nlargest(high_cardinality_threshold * 2).index
+                sns.barplot(
+                    x=feature, 
+                    y=target, 
+                    data=working_df, 
+                    ax=canvas.axes,
+                    order=order,
+                    estimator=np.mean,
+                    errorbar=('ci', 95),
+                    capsize=0.2
+                )
+                canvas.axes.set_title(f"Bar Plot: Average {target} by {feature}")
+                
+                # Add value labels on top of bars
+                for p in canvas.axes.patches:
+                    canvas.axes.annotate(
+                        f'{p.get_height():.1f}', 
+                        (p.get_x() + p.get_width() / 2., p.get_height()), 
+                        ha='center', 
+                        va='bottom', 
+                        fontsize=8, 
+                        rotation=0
+                    )
+                
+                # Rotate x-axis labels if needed
+                if feature_unique_count > 5:
+                    canvas.axes.set_xticklabels(
+                        canvas.axes.get_xticklabels(), 
+                        rotation=45, 
+                        ha='right'
+                    )
+            else:
+                # For high cardinality, use a horizontal bar plot with top N categories
+                top_n = 15  # Show top 15 categories
+                # Calculate mean of target for each feature category
+                grouped = working_df.groupby(feature)[target].agg(['mean', 'count', 'std']).reset_index()
+                # Sort by mean and take top categories
+                top_groups = grouped.nlargest(top_n, 'mean')
+                
+                # Sort by mean value for better visualization
+                sns.barplot(
+                    y=feature, 
+                    x='mean', 
+                    data=top_groups, 
+                    ax=canvas.axes,
+                    orient='h'
+                )
+                canvas.axes.set_title(f"Top {top_n} Categories by Average {target}")
+                canvas.axes.set_xlabel(f"Average {target}")
+                
+                # Add count annotations
+                for i, row in enumerate(top_groups.itertuples()):
+                    canvas.axes.text(
+                        row.mean + 0.1, 
+                        i, 
+                        f'n={row.count}', 
+                        va='center',
+                        fontsize=8
+                    )
+            
+        else:
+            # Both feature and target are categorical
+            if feature_unique_count <= high_cardinality_threshold and target_unique_count <= high_cardinality_threshold:
+                # Heatmap for categorical vs categorical with manageable cardinality
+                crosstab = pd.crosstab(
+                    working_df[feature], 
+                    working_df[target],
+                    normalize='index'
+                )
+                
+                # Create heatmap with improved readability
+                sns.heatmap(
+                    crosstab, 
+                    annot=True, 
+                    cmap="YlGnBu", 
+                    ax=canvas.axes,
+                    fmt='.2f',
+                    linewidths=0.5,
+                    annot_kws={"size": 9 if crosstab.size < 30 else 7}
+                )
+                canvas.axes.set_title(f"Heatmap: {feature} vs {target} (proportions)")
+            else:
+                # For high cardinality in both, show a count plot of top categories
+                feature_top = working_df[feature].value_counts().nlargest(8).index
+                target_top = working_df[target].value_counts().nlargest(5).index
+                
+                # Filter data to only include top categories
+                filtered_df = working_df[
+                    working_df[feature].isin(feature_top) & 
+                    working_df[target].isin(target_top)
+                ]
+                
+                # Create a grouped count plot
+                sns.countplot(
+                    x=feature,
+                    hue=target,
+                    data=filtered_df,
+                    ax=canvas.axes
+                )
+                canvas.axes.set_title(f"Count Plot: Top {len(feature_top)} {feature} by Top {len(target_top)} {target}")
+                
+                # Rotate x-axis labels
+                canvas.axes.set_xticklabels(
+                    canvas.axes.get_xticklabels(), 
+                    rotation=45, 
+                    ha='right'
+                )
+                
+                # Move legend to a better position
+                canvas.axes.legend(title=target, bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        # Add informational text about data reduction if applicable
+        if (not feature_is_numeric and feature_unique_count > high_cardinality_threshold) or \
+           (not target_is_numeric and target_unique_count > high_cardinality_threshold):
+            canvas.figure.text(
+                0.5, 0.01, 
+                f"Note: Visualization simplified to show top categories only. Original data has {feature_unique_count} unique {feature} values and {target_unique_count} unique {target} values.",
+                ha='center', 
+                fontsize=8, 
+                style='italic'
+            )
+        
+        # Adjust layout and draw
+        canvas.figure.tight_layout()
+        canvas.draw()
+        
+        # Add a close button
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # Show the dialog
+        dialog.exec()
+
 # Custom matplotlib canvas for embedding in Qt
 class MatplotlibCanvas(FigureCanvasQTAgg):
     def __init__(self, width=5, height=4, dpi=100):
@@ -758,19 +1056,34 @@ class ColumnProfilerApp(QMainWindow):
             
         self.current_row = end_row
         QApplication.processEvents()  # Allow UI to update
-        
+    
     def render_chart(self):
         # Create horizontal bar chart
         self.chart_view.axes.clear()
         
         # Limit to top 20 features for better visualization
-        plot_df = self.importance_df.head(20)
+        plot_df = self.importance_df.head(20).copy()
+        
+        # Truncate long feature names for better display
+        max_feature_length = 30
+        plot_df['display_feature'] = plot_df['feature'].apply(
+            lambda x: (str(x)[:max_feature_length] + '...') if len(str(x)) > max_feature_length else str(x)
+        )
+        
+        # Reverse order for better display (highest at top)
+        plot_df = plot_df.iloc[::-1].reset_index(drop=True)
+        
+        # Create a colormap for better visualization
+        cmap = plt.cm.Blues
+        colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
         
         # Plot with custom colors
         bars = self.chart_view.axes.barh(
-            plot_df['feature'], 
+            plot_df['display_feature'], 
             plot_df['importance_value'],
-            color='skyblue'
+            color=colors,
+            height=0.7,  # Thinner bars for more spacing
+            alpha=0.8
         )
         
         # Add values at the end of bars
@@ -780,14 +1093,33 @@ class ColumnProfilerApp(QMainWindow):
                 width * 1.05, 
                 bar.get_y() + bar.get_height()/2, 
                 f'{width:.2f}', 
-                va='center'
+                va='center',
+                fontsize=9,
+                fontweight='bold'
             )
-            
+        
+        # Add grid for better readability
+        self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
+        
+        # Remove unnecessary spines
+        for spine in ['top', 'right']:
+            self.chart_view.axes.spines[spine].set_visible(False)
+        
+        # Make labels more readable
+        self.chart_view.axes.tick_params(axis='y', labelsize=9)
+        
+        # Set title and labels
         self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
         self.chart_view.axes.set_xlabel('Importance Value')
+        
+        # Adjust figure size based on number of features
+        feature_count = len(plot_df)
+        self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
+        
+        # Adjust layout and draw
         self.chart_view.figure.tight_layout()
         self.chart_view.draw()
-        
+    
     def handle_error(self, error_message):
         """Handle errors during analysis"""
         # Hide progress indicators
@@ -817,7 +1149,7 @@ class ColumnProfilerApp(QMainWindow):
                                wrap=True)
         self.chart_view.axes.set_axis_off()
         self.chart_view.draw()
-        
+    
     def closeEvent(self, event):
         """Clean up when the window is closed"""
         # Stop any running timer
@@ -895,7 +1227,7 @@ class ColumnProfilerApp(QMainWindow):
         # Create a dialog to show the visualization
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Relationship: {feature} vs {target}")
-        dialog.resize(800, 600)
+        dialog.resize(900, 700)
         
         # Create layout
         layout = QVBoxLayout(dialog)
@@ -908,37 +1240,231 @@ class ColumnProfilerApp(QMainWindow):
         feature_is_numeric = pd.api.types.is_numeric_dtype(self.df[feature])
         target_is_numeric = pd.api.types.is_numeric_dtype(self.df[target])
         
+        # Get unique counts to determine if we have high cardinality
+        feature_unique_count = self.df[feature].nunique()
+        target_unique_count = self.df[target].nunique()
+        
+        # Define high cardinality threshold
+        high_cardinality_threshold = 10
+        
         # Clear the figure
         canvas.axes.clear()
         
-        # Create appropriate visualization based on data types
+        # Create a working copy of the dataframe
+        working_df = self.df.copy()
+        
+        # Prepare data for high cardinality columns
+        if not feature_is_numeric and feature_unique_count > high_cardinality_threshold:
+            # Get the top N categories by frequency
+            top_categories = self.df[feature].value_counts().nlargest(high_cardinality_threshold).index.tolist()
+            # Create "Other" category for remaining values
+            working_df[feature] = working_df[feature].apply(lambda x: x if x in top_categories else 'Other')
+            
+        if not target_is_numeric and target_unique_count > high_cardinality_threshold:
+            top_categories = self.df[target].value_counts().nlargest(high_cardinality_threshold).index.tolist()
+            working_df[target] = working_df[target].apply(lambda x: x if x in top_categories else 'Other')
+        
+        # Create appropriate visualization based on data types and cardinality
         if feature_is_numeric and target_is_numeric:
             # Scatter plot for numeric vs numeric
-            sns.scatterplot(x=feature, y=target, data=self.df, ax=canvas.axes)
-            # Add regression line
-            sns.regplot(x=feature, y=target, data=self.df, ax=canvas.axes, 
-                        scatter=False, line_kws={"color": "red"})
-            canvas.axes.set_title(f"Scatter Plot: {feature} vs {target}")
+            # Use hexbin for large datasets to avoid overplotting
+            if len(working_df) > 100:
+                canvas.axes.hexbin(
+                    working_df[feature], 
+                    working_df[target], 
+                    gridsize=25, 
+                    cmap='Blues',
+                    mincnt=1
+                )
+                canvas.axes.set_title(f"Hexbin Density Plot: {feature} vs {target}")
+                canvas.axes.set_xlabel(feature)
+                canvas.axes.set_ylabel(target)
+                # Add a colorbar
+                cbar = canvas.figure.colorbar(canvas.axes.collections[0], ax=canvas.axes)
+                cbar.set_label('Count')
+            else:
+                # For smaller datasets, use a scatter plot with transparency
+                sns.scatterplot(
+                    x=feature, 
+                    y=target, 
+                    data=working_df, 
+                    ax=canvas.axes,
+                    alpha=0.6
+                )
+                # Add regression line
+                sns.regplot(
+                    x=feature, 
+                    y=target, 
+                    data=working_df, 
+                    ax=canvas.axes, 
+                    scatter=False, 
+                    line_kws={"color": "red"}
+                )
+                canvas.axes.set_title(f"Scatter Plot: {feature} vs {target}")
             
         elif feature_is_numeric and not target_is_numeric:
             # Box plot for numeric vs categorical
-            sns.boxplot(x=target, y=feature, data=self.df, ax=canvas.axes)
-            canvas.axes.set_title(f"Box Plot: {feature} by {target}")
+            if target_unique_count <= high_cardinality_threshold * 2:
+                # Standard boxplot for reasonable number of categories
+                order = working_df[target].value_counts().nlargest(high_cardinality_threshold * 2).index
+                sns.boxplot(
+                    x=target, 
+                    y=feature, 
+                    data=working_df, 
+                    ax=canvas.axes, 
+                    order=order
+                )
+                canvas.axes.set_title(f"Box Plot: {feature} by {target}")
+                # Rotate x-axis labels for better readability
+                canvas.axes.set_xticklabels(
+                    canvas.axes.get_xticklabels(), 
+                    rotation=45, 
+                    ha='right'
+                )
+            else:
+                # For very high cardinality, use a violin plot with limited categories
+                order = working_df[target].value_counts().nlargest(high_cardinality_threshold).index
+                working_df_filtered = working_df[working_df[target].isin(order)]
+                sns.violinplot(
+                    x=target, 
+                    y=feature, 
+                    data=working_df_filtered, 
+                    ax=canvas.axes,
+                    inner='quartile',
+                    cut=0
+                )
+                canvas.axes.set_title(f"Violin Plot: {feature} by Top {len(order)} {target} Categories")
+                canvas.axes.set_xticklabels(
+                    canvas.axes.get_xticklabels(), 
+                    rotation=45, 
+                    ha='right'
+                )
             
         elif not feature_is_numeric and target_is_numeric:
             # Bar plot for categorical vs numeric
-            sns.barplot(x=feature, y=target, data=self.df, ax=canvas.axes)
-            canvas.axes.set_title(f"Bar Plot: Average {target} by {feature}")
-            # Rotate x-axis labels if there are many categories
-            if self.df[feature].nunique() > 5:
-                canvas.axes.set_xticklabels(canvas.axes.get_xticklabels(), rotation=45, ha='right')
+            if feature_unique_count <= high_cardinality_threshold * 2:
+                # Use standard barplot for reasonable number of categories
+                order = working_df[feature].value_counts().nlargest(high_cardinality_threshold * 2).index
+                sns.barplot(
+                    x=feature, 
+                    y=target, 
+                    data=working_df, 
+                    ax=canvas.axes,
+                    order=order,
+                    estimator=np.mean,
+                    errorbar=('ci', 95),
+                    capsize=0.2
+                )
+                canvas.axes.set_title(f"Bar Plot: Average {target} by {feature}")
+                
+                # Add value labels on top of bars
+                for p in canvas.axes.patches:
+                    canvas.axes.annotate(
+                        f'{p.get_height():.1f}', 
+                        (p.get_x() + p.get_width() / 2., p.get_height()), 
+                        ha='center', 
+                        va='bottom', 
+                        fontsize=8, 
+                        rotation=0
+                    )
+                
+                # Rotate x-axis labels if needed
+                if feature_unique_count > 5:
+                    canvas.axes.set_xticklabels(
+                        canvas.axes.get_xticklabels(), 
+                        rotation=45, 
+                        ha='right'
+                    )
+            else:
+                # For high cardinality, use a horizontal bar plot with top N categories
+                top_n = 15  # Show top 15 categories
+                # Calculate mean of target for each feature category
+                grouped = working_df.groupby(feature)[target].agg(['mean', 'count', 'std']).reset_index()
+                # Sort by mean and take top categories
+                top_groups = grouped.nlargest(top_n, 'mean')
+                
+                # Sort by mean value for better visualization
+                sns.barplot(
+                    y=feature, 
+                    x='mean', 
+                    data=top_groups, 
+                    ax=canvas.axes,
+                    orient='h'
+                )
+                canvas.axes.set_title(f"Top {top_n} Categories by Average {target}")
+                canvas.axes.set_xlabel(f"Average {target}")
+                
+                # Add count annotations
+                for i, row in enumerate(top_groups.itertuples()):
+                    canvas.axes.text(
+                        row.mean + 0.1, 
+                        i, 
+                        f'n={row.count}', 
+                        va='center',
+                        fontsize=8
+                    )
             
         else:
-            # Heatmap for categorical vs categorical
-            # Create a crosstab of the two categorical variables
-            crosstab = pd.crosstab(self.df[feature], self.df[target], normalize='index')
-            sns.heatmap(crosstab, annot=True, cmap="YlGnBu", ax=canvas.axes)
-            canvas.axes.set_title(f"Heatmap: {feature} vs {target}")
+            # Both feature and target are categorical
+            if feature_unique_count <= high_cardinality_threshold and target_unique_count <= high_cardinality_threshold:
+                # Heatmap for categorical vs categorical with manageable cardinality
+                crosstab = pd.crosstab(
+                    working_df[feature], 
+                    working_df[target],
+                    normalize='index'
+                )
+                
+                # Create heatmap with improved readability
+                sns.heatmap(
+                    crosstab, 
+                    annot=True, 
+                    cmap="YlGnBu", 
+                    ax=canvas.axes,
+                    fmt='.2f',
+                    linewidths=0.5,
+                    annot_kws={"size": 9 if crosstab.size < 30 else 7}
+                )
+                canvas.axes.set_title(f"Heatmap: {feature} vs {target} (proportions)")
+            else:
+                # For high cardinality in both, show a count plot of top categories
+                feature_top = working_df[feature].value_counts().nlargest(8).index
+                target_top = working_df[target].value_counts().nlargest(5).index
+                
+                # Filter data to only include top categories
+                filtered_df = working_df[
+                    working_df[feature].isin(feature_top) & 
+                    working_df[target].isin(target_top)
+                ]
+                
+                # Create a grouped count plot
+                sns.countplot(
+                    x=feature,
+                    hue=target,
+                    data=filtered_df,
+                    ax=canvas.axes
+                )
+                canvas.axes.set_title(f"Count Plot: Top {len(feature_top)} {feature} by Top {len(target_top)} {target}")
+                
+                # Rotate x-axis labels
+                canvas.axes.set_xticklabels(
+                    canvas.axes.get_xticklabels(), 
+                    rotation=45, 
+                    ha='right'
+                )
+                
+                # Move legend to a better position
+                canvas.axes.legend(title=target, bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        # Add informational text about data reduction if applicable
+        if (not feature_is_numeric and feature_unique_count > high_cardinality_threshold) or \
+           (not target_is_numeric and target_unique_count > high_cardinality_threshold):
+            canvas.figure.text(
+                0.5, 0.01, 
+                f"Note: Visualization simplified to show top categories only. Original data has {feature_unique_count} unique {feature} values and {target_unique_count} unique {target} values.",
+                ha='center', 
+                fontsize=8, 
+                style='italic'
+            )
         
         # Adjust layout and draw
         canvas.figure.tight_layout()
