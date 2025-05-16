@@ -1,4 +1,3 @@
-import shap
 import pandas as pd
 import xgboost as xgb
 import numpy as np
@@ -244,7 +243,7 @@ class ExplainerThread(QThread):
             if self._is_canceled:
                 return
                 
-            # Skip SHAP and use model feature importance directly for simplicity and reliability
+            # Get feature importance directly from XGBoost
             self.progress.emit(80, "Calculating feature importance...")
             
             try:
@@ -252,14 +251,14 @@ class ExplainerThread(QThread):
                 importance = model.feature_importances_
                 
                 # Create and sort the importance dataframe
-                shap_importance = pd.DataFrame({
+                feature_importance = pd.DataFrame({
                     'feature': X.columns,
-                    'mean_abs_shap': importance
-                }).sort_values(by='mean_abs_shap', ascending=False)
+                    'importance_value': importance
+                }).sort_values(by='importance_value', ascending=False)
                 
                 # Cache the results for future use
                 self.progress.emit(95, "Caching results for future use...")
-                cache_results(self.df, self.column, shap_importance)
+                cache_results(self.df, self.column, feature_importance)
                 
                 # Clean up after computation
                 del df, X, y, X_train, X_test, y_train, y_test, model
@@ -271,7 +270,7 @@ class ExplainerThread(QThread):
                     
                 # Emit the result
                 self.progress.emit(100, "Analysis complete")
-                self.result.emit(shap_importance)
+                self.result.emit(feature_importance)
                 return
                 
             except Exception as e:
@@ -281,14 +280,14 @@ class ExplainerThread(QThread):
                 
                 # Last resort: create equal importance for all features
                 importance_values = np.ones(len(X.columns)) / len(X.columns)
-                shap_importance = pd.DataFrame({
+                feature_importance = pd.DataFrame({
                     'feature': X.columns,
-                    'mean_abs_shap': importance_values
-                }).sort_values(by='mean_abs_shap', ascending=False)
+                    'importance_value': importance_values
+                }).sort_values(by='importance_value', ascending=False)
                 
                 # Cache the results
                 try:
-                    cache_results(self.df, self.column, shap_importance)
+                    cache_results(self.df, self.column, feature_importance)
                 except:
                     pass  # Ignore cache errors
                 
@@ -301,7 +300,7 @@ class ExplainerThread(QThread):
                 
                 # Emit the result
                 self.progress.emit(100, "Analysis complete (with default values)")
-                self.result.emit(shap_importance)
+                self.result.emit(feature_importance)
                 return
 
         except Exception as e:
@@ -416,9 +415,9 @@ class ExplainerThread(QThread):
         end_row = min(self.current_row + batch_size, len(self.importance_df))
         for row in range(self.current_row, end_row):
             feature = self.importance_df.iloc[row]['feature']
-            mean_abs_shap = self.importance_df.iloc[row]['mean_abs_shap']
+            importance_value = self.importance_df.iloc[row]['importance_value']
             self.importance_table.setItem(row, 0, QTableWidgetItem(feature))
-            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(mean_abs_shap, 4))))
+            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
             
         self.current_row = end_row
         QApplication.processEvents()  # Allow UI to update
@@ -433,7 +432,7 @@ class ExplainerThread(QThread):
         # Plot with custom colors
         bars = self.chart_view.axes.barh(
             plot_df['feature'], 
-            plot_df['mean_abs_shap'],
+            plot_df['importance_value'],
             color='skyblue'
         )
         
@@ -448,7 +447,7 @@ class ExplainerThread(QThread):
             )
             
         self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
-        self.chart_view.axes.set_xlabel('Mean Absolute SHAP Value')
+        self.chart_view.axes.set_xlabel('Importance Value')
         self.chart_view.figure.tight_layout()
         self.chart_view.draw()
         
@@ -753,9 +752,9 @@ class ColumnProfilerApp(QMainWindow):
         end_row = min(self.current_row + batch_size, len(self.importance_df))
         for row in range(self.current_row, end_row):
             feature = self.importance_df.iloc[row]['feature']
-            mean_abs_shap = self.importance_df.iloc[row]['mean_abs_shap']
+            importance_value = self.importance_df.iloc[row]['importance_value']
             self.importance_table.setItem(row, 0, QTableWidgetItem(feature))
-            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(mean_abs_shap, 4))))
+            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
             
         self.current_row = end_row
         QApplication.processEvents()  # Allow UI to update
@@ -770,7 +769,7 @@ class ColumnProfilerApp(QMainWindow):
         # Plot with custom colors
         bars = self.chart_view.axes.barh(
             plot_df['feature'], 
-            plot_df['mean_abs_shap'],
+            plot_df['importance_value'],
             color='skyblue'
         )
         
@@ -785,7 +784,7 @@ class ColumnProfilerApp(QMainWindow):
             )
             
         self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
-        self.chart_view.axes.set_xlabel('Mean Absolute SHAP Value')
+        self.chart_view.axes.set_xlabel('Importance Value')
         self.chart_view.figure.tight_layout()
         self.chart_view.draw()
         

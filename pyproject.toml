@@ -33,7 +33,6 @@ dependencies = [
     "xlrd>=2.0.1",
     "deltalake",
     "Pillow>=10.0.0",
-    "shap",
     "xgboost",
     "scikit-learn",
     "matplotlib>=3.10.0",
