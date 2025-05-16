@@ -1061,11 +1061,11 @@ def test_profile():
     """
     Test the profile and visualization functions with sample data.
     """
-    # Create a sample DataFrame
+    # Create a sample DataFrame with 40 columns
     np.random.seed(42)
     n = 1000
     
-    # Generate sample data with known relationships
+    # Generate core sample data with known relationships
     age = np.random.normal(35, 10, n).astype(int)
     experience = age - np.random.randint(18, 25, n)  # experience correlates with age
     experience = np.maximum(0, experience)  # no negative experience
@@ -1081,16 +1081,86 @@ def test_profile():
     performance += 0.01 * experience  # experience slightly affects performance
     performance = (performance - performance.min()) / (performance.max() - performance.min()) * 5  # scale to 0-5
     
-    # Create the DataFrame
-    df = pd.DataFrame({
+    # Create the base DataFrame
+    data = {
         'Age': age,
         'Experience': experience,
         'Department': departments,
         'Education': education,
         'Performance': performance,
         'Salary': salary
-    })
+    }
     
+    # Generate additional numeric columns
+    for i in range(1, 15):
+        # Create some columns with relationship to salary
+        if i <= 5:
+            data[f'Metric_{i}'] = salary * (0.01 * i) + np.random.normal(0, 5000, n)
+        # Create columns with relationship to age
+        elif i <= 10:
+            data[f'Metric_{i}'] = age * (i-5) + np.random.normal(0, 10, n)
+        # Create random columns
+        else:
+            data[f'Metric_{i}'] = np.random.normal(100, 50, n)
+    
+    # Generate additional categorical columns
+    categories = [
+        ['A', 'B', 'C', 'D'],
+        ['Low', 'Medium', 'High'],
+        ['North', 'South', 'East', 'West'],
+        ['Type1', 'Type2', 'Type3'],
+        ['Yes', 'No', 'Maybe'],
+        ['Red', 'Green', 'Blue', 'Yellow'],
+        ['Small', 'Medium', 'Large']
+    ]
+    
+    for i in range(1, 10):
+        # Pick a category list
+        cat_list = categories[i % len(categories)]
+        # Generate random categorical column
+        data[f'Category_{i}'] = np.random.choice(cat_list, n)
+    
+    # Generate date and time related columns
+    base_date = np.datetime64('2020-01-01')
+    
+    # Instead of datetime objects, convert to days since base date (numeric values)
+    hire_days = np.array([365 * (35 - a) + np.random.randint(0, 30) for a in age])
+    data['Hire_Days_Ago'] = hire_days
+    
+    promotion_days = np.array([np.random.randint(0, 1000) for _ in range(n)])
+    data['Last_Promotion_Days_Ago'] = promotion_days
+    
+    review_days = np.array([np.random.randint(1000, 1200) for _ in range(n)])
+    data['Next_Review_In_Days'] = review_days
+    
+    # For reference, also store the actual dates as strings instead of datetime64
+    data['Hire_Date_Str'] = [str(base_date + np.timedelta64(int(days), 'D')) for days in hire_days]
+    data['Last_Promotion_Date_Str'] = [str(base_date + np.timedelta64(int(days), 'D')) for days in promotion_days]
+    data['Review_Date_Str'] = [str(base_date + np.timedelta64(int(days), 'D')) for days in review_days]
+    
+    # Binary columns
+    data['IsManager'] = np.random.choice([0, 1], n, p=[0.8, 0.2])
+    data['RemoteWorker'] = np.random.choice([0, 1], n)
+    data['HasHealthInsurance'] = np.random.choice([0, 1], n, p=[0.1, 0.9])
+    data['HasRetirementPlan'] = np.random.choice([0, 1], n, p=[0.15, 0.85])
+    
+    # Columns with missing values
+    data['OptionalMetric_1'] = np.random.normal(50, 10, n)
+    data['OptionalMetric_1'][np.random.choice([True, False], n, p=[0.2, 0.8])] = np.nan
+    
+    data['OptionalMetric_2'] = np.random.normal(100, 20, n)
+    data['OptionalMetric_2'][np.random.choice([True, False], n, p=[0.3, 0.7])] = np.nan
+    
+    data['OptionalCategory'] = np.random.choice(['Option1', 'Option2', 'Option3', None], n, p=[0.3, 0.3, 0.3, 0.1])
+    
+    # High cardinality column (like an ID)
+    data['ID'] = [f"ID_{i:06d}" for i in range(n)]
+    
+    # Create the DataFrame with 40 columns
+    df = pd.DataFrame(data)
+    
+    print(f"Created sample DataFrame with {len(df.columns)} columns and {len(df)} rows")
+    print("Columns:", ', '.join(df.columns))
     print("Launching PyQt6 Column Profiler application...")
     visualize_profile(df, 'Salary')  # Start with Salary analysis
 
