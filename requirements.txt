@@ -12,3 +12,4 @@ scipy>=1.15.0  # For statistical distributions and analysis
 matplotlib>=3.10.0  # For data visualization 
 xgboost
 scikit-learn
+seaborn>=0.13.0  # For enhanced statistical visualizations in column profiler
