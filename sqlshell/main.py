@@ -2727,6 +2727,20 @@ LIMIT 10
             self.showMaximized()
             self.was_maximized = True
             
+    def get_selected_table(self):
+        """Get the name of the currently selected table in the tables list"""
+        if not hasattr(self, 'tables_list'):
+            return None
+            
+        selected_items = self.tables_list.selectedItems()
+        # Filter out folders and use only single selections
+        table_items = [item for item in selected_items if not self.tables_list.is_folder_item(item)]
+        
+        if len(table_items) == 1:  # Only use if exactly one table is selected
+            return self.tables_list.get_table_name_from_item(table_items[0])
+        
+        return None
+            
     def change_zoom(self, factor):
         """Change the zoom level of the application by adjusting font sizes"""
         try:

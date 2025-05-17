@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QToolButton, QMenu)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
+import re
 
 from sqlshell.editor import SQLEditor
 from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
@@ -125,6 +126,12 @@ class QueryTab(QWidget):
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.verticalHeader().setVisible(True)
         
+        # Connect double-click signal to handle column selection
+        self.results_table.cellDoubleClicked.connect(self.handle_cell_double_click)
+        
+        # Connect header click signal to handle column header selection
+        self.results_table.horizontalHeader().sectionClicked.connect(self.handle_header_click)
+        
         results_layout.addWidget(self.results_table)
         
         # Add widgets to splitter
@@ -198,4 +205,328 @@ class QueryTab(QWidget):
                     return True
                     
         # Default - let the event propagate normally
-        return super().eventFilter(obj, event) 
+        return super().eventFilter(obj, event)
+
+    def format_sql(self):
+        """Format the SQL query for better readability"""
+        from sqlshell.utils.sql_formatter import format_sql
+        
+        # Get current text
+        current_text = self.query_edit.toPlainText()
+        if not current_text.strip():
+            return
+            
+        try:
+            # Format the SQL
+            formatted_sql = format_sql(current_text)
+            
+            # Replace the text
+            self.query_edit.setPlainText(formatted_sql)
+            self.parent.statusBar().showMessage('SQL formatted successfully')
+        except Exception as e:
+            self.parent.statusBar().showMessage(f'Error formatting SQL: {str(e)}')
+    
+    def show_header_context_menu(self, position):
+        """Show context menu for header columns"""
+        # Get the column index
+        idx = self.results_table.horizontalHeader().logicalIndexAt(position)
+        if idx < 0:
+            return
+            
+        # Create context menu
+        menu = QMenu(self)
+        header = self.results_table.horizontalHeader()
+        
+        # Get column name
+        col_name = self.results_table.horizontalHeaderItem(idx).text()
+        
+        # Add actions
+        copy_col_name_action = menu.addAction(f"Copy '{col_name}'")
+        menu.addSeparator()
+        
+        # Check if we have a FilterHeader
+        if isinstance(header, FilterHeader):
+            # Check if this column has a bar chart
+            has_bar = idx in header.columns_with_bars
+            
+            # Add toggle bar chart action
+            if not has_bar:
+                bar_action = menu.addAction("Add Bar Chart")
+            else:
+                bar_action = menu.addAction("Remove Bar Chart")
+        
+            # Sort options
+            menu.addSeparator()
+        
+        sort_asc_action = menu.addAction("Sort Ascending")
+        sort_desc_action = menu.addAction("Sort Descending")
+        
+        # Filter options if we have data
+        if self.results_table.rowCount() > 0:
+            menu.addSeparator()
+            sel_distinct_action = menu.addAction(f"SELECT DISTINCT {col_name}")
+            count_distinct_action = menu.addAction(f"COUNT DISTINCT {col_name}")
+            group_by_action = menu.addAction(f"GROUP BY {col_name}")
+            
+        # SQL generation submenu
+        menu.addSeparator()
+        sql_menu = menu.addMenu("Generate SQL")
+        select_col_action = sql_menu.addAction(f"SELECT {col_name}")
+        filter_col_action = sql_menu.addAction(f"WHERE {col_name} = ?")
+        explain_action = menu.addAction(f"Explain Column")
+        
+        # Execute the menu
+        action = menu.exec(header.mapToGlobal(position))
+        
+        # Handle actions
+        if action == copy_col_name_action:
+            QApplication.clipboard().setText(col_name)
+            self.parent.statusBar().showMessage(f"Copied '{col_name}' to clipboard")
+        
+        elif action == explain_action:
+            # Call the explain column method on the parent
+            if hasattr(self.parent, 'explain_column'):
+                self.parent.explain_column(col_name)
+        
+        elif action == sort_asc_action:
+            self.results_table.sortItems(idx, Qt.SortOrder.AscendingOrder)
+            self.parent.statusBar().showMessage(f"Sorted by '{col_name}' (ascending)")
+            
+        elif action == sort_desc_action:
+            self.results_table.sortItems(idx, Qt.SortOrder.DescendingOrder)
+            self.parent.statusBar().showMessage(f"Sorted by '{col_name}' (descending)")
+            
+        elif isinstance(header, FilterHeader) and action == bar_action:
+            # Toggle bar chart
+            header.toggle_bar_chart(idx)
+            if idx in header.columns_with_bars:
+                self.parent.statusBar().showMessage(f"Added bar chart for '{col_name}'")
+            else:
+                self.parent.statusBar().showMessage(f"Removed bar chart for '{col_name}'")
+                
+        elif 'sel_distinct_action' in locals() and action == sel_distinct_action:
+            new_query = f"SELECT DISTINCT {col_name}\nFROM "
+            if self.current_df is not None and hasattr(self.current_df, '_query_source'):
+                table_name = getattr(self.current_df, '_query_source')
+                new_query += f"{table_name}\n"
+            else:
+                new_query += "[table_name]\n"
+            new_query += "ORDER BY 1"
+            self.set_query_text(new_query)
+            self.parent.statusBar().showMessage(f"Created SELECT DISTINCT query for '{col_name}'")
+            
+        elif 'count_distinct_action' in locals() and action == count_distinct_action:
+            new_query = f"SELECT COUNT(DISTINCT {col_name}) AS distinct_{col_name}\nFROM "
+            if self.current_df is not None and hasattr(self.current_df, '_query_source'):
+                table_name = getattr(self.current_df, '_query_source')
+                new_query += f"{table_name}"
+            else:
+                new_query += "[table_name]"
+            self.set_query_text(new_query)
+            self.parent.statusBar().showMessage(f"Created COUNT DISTINCT query for '{col_name}'")
+            
+        elif 'group_by_action' in locals() and action == group_by_action:
+            new_query = f"SELECT {col_name}, COUNT(*) AS count\nFROM "
+            if self.current_df is not None and hasattr(self.current_df, '_query_source'):
+                table_name = getattr(self.current_df, '_query_source')
+                new_query += f"{table_name}"
+            else:
+                new_query += "[table_name]"
+            new_query += f"\nGROUP BY {col_name}\nORDER BY count DESC"
+            self.set_query_text(new_query)
+            self.parent.statusBar().showMessage(f"Created GROUP BY query for '{col_name}'")
+            
+        elif action == select_col_action:
+            new_query = f"SELECT {col_name}\nFROM "
+            if self.current_df is not None and hasattr(self.current_df, '_query_source'):
+                table_name = getattr(self.current_df, '_query_source')
+                new_query += f"{table_name}"
+            else:
+                new_query += "[table_name]"
+            self.set_query_text(new_query)
+            self.parent.statusBar().showMessage(f"Created SELECT query for '{col_name}'")
+            
+        elif action == filter_col_action:
+            current_text = self.get_query_text()
+            if current_text and "WHERE" in current_text.upper():
+                # Add as AND condition
+                lines = current_text.splitlines()
+                for i, line in enumerate(lines):
+                    if "WHERE" in line.upper() and "ORDER BY" not in line.upper() and "GROUP BY" not in line.upper():
+                        lines[i] = f"{line} AND {col_name} = ?"
+                        break
+                self.set_query_text("\n".join(lines))
+            else:
+                # Create new query with WHERE clause
+                new_query = f"SELECT *\nFROM "
+                if self.current_df is not None and hasattr(self.current_df, '_query_source'):
+                    table_name = getattr(self.current_df, '_query_source')
+                    new_query += f"{table_name}"
+                else:
+                    new_query += "[table_name]"
+                new_query += f"\nWHERE {col_name} = ?"
+                self.set_query_text(new_query)
+            self.parent.statusBar().showMessage(f"Added filter condition for '{col_name}'")
+
+    def handle_cell_double_click(self, row, column):
+        """Handle double-click on a cell to generate or append a SELECT query with the clicked column"""
+        # Get column name
+        col_name = self.results_table.horizontalHeaderItem(column).text()
+        
+        # Get current query text
+        current_text = self.get_query_text().strip()
+        
+        # Get cursor position
+        cursor = self.query_edit.textCursor()
+        cursor_position = cursor.position()
+        
+        # Check if we already have an existing query
+        if current_text:
+            # If there's existing text, try to insert at cursor position
+            if cursor_position > 0:
+                # Insert the column name at the cursor position
+                cursor.insertText(col_name)
+                self.query_edit.setTextCursor(cursor)
+                self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
+                return
+                
+            # If cursor is at start, check if we have a SELECT query to modify
+            if current_text.upper().startswith("SELECT"):
+                # Try to find the SELECT clause
+                select_match = re.match(r'(?i)SELECT\s+(.*?)(?:\sFROM\s|$)', current_text)
+                if select_match:
+                    select_clause = select_match.group(1).strip()
+                    
+                    # If it's "SELECT *", replace it with the column name
+                    if select_clause == "*":
+                        modified_text = current_text.replace("SELECT *", f"SELECT {col_name}")
+                        self.set_query_text(modified_text)
+                    # Otherwise append the column if it's not already there
+                    elif col_name not in select_clause:
+                        modified_text = current_text.replace(select_clause, f"{select_clause}, {col_name}")
+                        self.set_query_text(modified_text)
+                    
+                    self.parent.statusBar().showMessage(f"Added '{col_name}' to SELECT clause")
+                    return
+            
+            # If we can't modify an existing SELECT clause, append to the end
+            # Find the last non-empty line
+            lines = current_text.split('\n')
+            non_empty_lines = [line for line in lines if line.strip()]
+            
+            if non_empty_lines:
+                # Go to the end of the document
+                cursor.movePosition(cursor.MoveOperation.End)
+                # Insert a new line if needed
+                if not current_text.endswith('\n'):
+                    cursor.insertText('\n')
+                # Insert a simple column reference
+                cursor.insertText(f"{col_name}")
+                self.query_edit.setTextCursor(cursor)
+                self.parent.statusBar().showMessage(f"Appended '{col_name}' to query")
+                return
+        
+        # If we don't have an existing query or couldn't modify it, create a new one
+        table_name = self._get_table_name(current_text)
+        new_query = f"SELECT {col_name}\nFROM {table_name}"
+        self.set_query_text(new_query)
+        self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+
+    def handle_header_click(self, logicalIndex):
+        """Handle header click to generate or append a SELECT query with the clicked column"""
+        # Get column name
+        col_name = self.results_table.horizontalHeaderItem(logicalIndex).text()
+        
+        # Get current query text
+        current_text = self.get_query_text().strip()
+        
+        # Get cursor position
+        cursor = self.query_edit.textCursor()
+        cursor_position = cursor.position()
+        
+        # Check if we already have an existing query
+        if current_text:
+            # If there's existing text, try to insert at cursor position
+            if cursor_position > 0:
+                # Insert the column name at the cursor position
+                cursor.insertText(col_name)
+                self.query_edit.setTextCursor(cursor)
+                self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
+                return
+                
+            # If cursor is at start, check if we have a SELECT query to modify
+            if current_text.upper().startswith("SELECT"):
+                # Try to find the SELECT clause
+                select_match = re.match(r'(?i)SELECT\s+(.*?)(?:\sFROM\s|$)', current_text)
+                if select_match:
+                    select_clause = select_match.group(1).strip()
+                    
+                    # If it's "SELECT *", replace it with the column name
+                    if select_clause == "*":
+                        modified_text = current_text.replace("SELECT *", f"SELECT {col_name}")
+                        self.set_query_text(modified_text)
+                    # Otherwise append the column if it's not already there
+                    elif col_name not in select_clause:
+                        modified_text = current_text.replace(select_clause, f"{select_clause}, {col_name}")
+                        self.set_query_text(modified_text)
+                    
+                    self.parent.statusBar().showMessage(f"Added '{col_name}' to SELECT clause")
+                    return
+            
+            # If we can't modify an existing SELECT clause, append to the end
+            # Find the last non-empty line
+            lines = current_text.split('\n')
+            non_empty_lines = [line for line in lines if line.strip()]
+            
+            if non_empty_lines:
+                # Go to the end of the document
+                cursor.movePosition(cursor.MoveOperation.End)
+                # Insert a new line if needed
+                if not current_text.endswith('\n'):
+                    cursor.insertText('\n')
+                # Insert a simple column reference
+                cursor.insertText(f"{col_name}")
+                self.query_edit.setTextCursor(cursor)
+                self.parent.statusBar().showMessage(f"Appended '{col_name}' to query")
+                return
+        
+        # If we don't have an existing query or couldn't modify it, create a new one
+        table_name = self._get_table_name(current_text)
+        new_query = f"SELECT {col_name}\nFROM {table_name}"
+        self.set_query_text(new_query)
+        self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+        
+    def _get_table_name(self, current_text):
+        """Extract table name from current query or DataFrame, with fallbacks"""
+        # First, try to get the currently selected table in the UI
+        if self.parent and hasattr(self.parent, 'get_selected_table'):
+            selected_table = self.parent.get_selected_table()
+            if selected_table:
+                return selected_table
+        
+        # Try to extract table name from the current DataFrame
+        if self.current_df is not None and hasattr(self.current_df, '_query_source'):
+            table_name = getattr(self.current_df, '_query_source')
+            if table_name:
+                return table_name
+        
+        # Try to extract the table name from the current query
+        if current_text:
+            # Look for FROM clause
+            from_match = re.search(r'(?i)FROM\s+([a-zA-Z0-9_."]+(?:\s*,\s*[a-zA-Z0-9_."]+)*)', current_text)
+            if from_match:
+                # Get the last table in the FROM clause (could be multiple tables joined)
+                tables = from_match.group(1).split(',')
+                last_table = tables[-1].strip()
+                
+                # Remove any alias
+                last_table = re.sub(r'(?i)\s+as\s+\w+$', '', last_table)
+                last_table = re.sub(r'\s+\w+$', '', last_table)
+                
+                # Remove any quotes
+                last_table = last_table.strip('"\'`[]')
+                
+                return last_table
+        
+        # If all else fails, return placeholder
+        return "[table_name]" 
