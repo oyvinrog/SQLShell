@@ -384,8 +384,27 @@ class QueryTab(QWidget):
         if current_text:
             # If there's existing text, try to insert at cursor position
             if cursor_position > 0:
-                # Insert the column name at the cursor position
-                cursor.insertText(col_name)
+                # Check if we need to add a comma before the column name
+                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
+                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
+                
+                # Add comma if needed (we're in a list of columns)
+                needs_comma = (not text_before_cursor.strip().endswith(',') and 
+                              not text_before_cursor.strip().endswith('(') and
+                              not text_before_cursor.strip().endswith('SELECT') and
+                              not re.search(r'\bFROM\s*$', text_before_cursor) and
+                              not re.search(r'\bWHERE\s*$', text_before_cursor) and
+                              not re.search(r'\bGROUP\s+BY\s*$', text_before_cursor) and
+                              not re.search(r'\bORDER\s+BY\s*$', text_before_cursor) and
+                              not re.search(r'\bHAVING\s*$', text_before_cursor) and
+                              not text_after_cursor.strip().startswith(','))
+                
+                # Insert with comma if needed
+                if needs_comma:
+                    cursor.insertText(f", {col_name}")
+                else:
+                    cursor.insertText(col_name)
+                    
                 self.query_edit.setTextCursor(cursor)
                 self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
                 return
@@ -448,8 +467,27 @@ class QueryTab(QWidget):
         if current_text:
             # If there's existing text, try to insert at cursor position
             if cursor_position > 0:
-                # Insert the column name at the cursor position
-                cursor.insertText(col_name)
+                # Check if we need to add a comma before the column name
+                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
+                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
+                
+                # Add comma if needed (we're in a list of columns)
+                needs_comma = (not text_before_cursor.strip().endswith(',') and 
+                              not text_before_cursor.strip().endswith('(') and
+                              not text_before_cursor.strip().endswith('SELECT') and
+                              not re.search(r'\bFROM\s*$', text_before_cursor) and
+                              not re.search(r'\bWHERE\s*$', text_before_cursor) and
+                              not re.search(r'\bGROUP\s+BY\s*$', text_before_cursor) and
+                              not re.search(r'\bORDER\s+BY\s*$', text_before_cursor) and
+                              not re.search(r'\bHAVING\s*$', text_before_cursor) and
+                              not text_after_cursor.strip().startswith(','))
+                
+                # Insert with comma if needed
+                if needs_comma:
+                    cursor.insertText(f", {col_name}")
+                else:
+                    cursor.insertText(col_name)
+                    
                 self.query_edit.setTextCursor(cursor)
                 self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
                 return
