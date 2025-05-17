@@ -240,6 +240,11 @@ class QueryTab(QWidget):
         # Get column name
         col_name = self.results_table.horizontalHeaderItem(idx).text()
         
+        # Check if the column name needs quoting (contains spaces or special characters)
+        quoted_col_name = col_name
+        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
+            quoted_col_name = f'"{col_name}"'
+        
         # Add actions
         copy_col_name_action = menu.addAction(f"Copy '{col_name}'")
         menu.addSeparator()
@@ -264,15 +269,15 @@ class QueryTab(QWidget):
         # Filter options if we have data
         if self.results_table.rowCount() > 0:
             menu.addSeparator()
-            sel_distinct_action = menu.addAction(f"SELECT DISTINCT {col_name}")
-            count_distinct_action = menu.addAction(f"COUNT DISTINCT {col_name}")
-            group_by_action = menu.addAction(f"GROUP BY {col_name}")
+            sel_distinct_action = menu.addAction(f"SELECT DISTINCT {quoted_col_name}")
+            count_distinct_action = menu.addAction(f"COUNT DISTINCT {quoted_col_name}")
+            group_by_action = menu.addAction(f"GROUP BY {quoted_col_name}")
             
         # SQL generation submenu
         menu.addSeparator()
         sql_menu = menu.addMenu("Generate SQL")
-        select_col_action = sql_menu.addAction(f"SELECT {col_name}")
-        filter_col_action = sql_menu.addAction(f"WHERE {col_name} = ?")
+        select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
+        filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction(f"Explain Column")
         
         # Execute the menu
@@ -305,7 +310,7 @@ class QueryTab(QWidget):
                 self.parent.statusBar().showMessage(f"Removed bar chart for '{col_name}'")
                 
         elif 'sel_distinct_action' in locals() and action == sel_distinct_action:
-            new_query = f"SELECT DISTINCT {col_name}\nFROM "
+            new_query = f"SELECT DISTINCT {quoted_col_name}\nFROM "
             if self.current_df is not None and hasattr(self.current_df, '_query_source'):
                 table_name = getattr(self.current_df, '_query_source')
                 new_query += f"{table_name}\n"
@@ -316,7 +321,7 @@ class QueryTab(QWidget):
             self.parent.statusBar().showMessage(f"Created SELECT DISTINCT query for '{col_name}'")
             
         elif 'count_distinct_action' in locals() and action == count_distinct_action:
-            new_query = f"SELECT COUNT(DISTINCT {col_name}) AS distinct_{col_name}\nFROM "
+            new_query = f"SELECT COUNT(DISTINCT {quoted_col_name}) AS distinct_{col_name.replace(' ', '_')}\nFROM "
             if self.current_df is not None and hasattr(self.current_df, '_query_source'):
                 table_name = getattr(self.current_df, '_query_source')
                 new_query += f"{table_name}"
@@ -326,18 +331,18 @@ class QueryTab(QWidget):
             self.parent.statusBar().showMessage(f"Created COUNT DISTINCT query for '{col_name}'")
             
         elif 'group_by_action' in locals() and action == group_by_action:
-            new_query = f"SELECT {col_name}, COUNT(*) AS count\nFROM "
+            new_query = f"SELECT {quoted_col_name}, COUNT(*) AS count\nFROM "
             if self.current_df is not None and hasattr(self.current_df, '_query_source'):
                 table_name = getattr(self.current_df, '_query_source')
                 new_query += f"{table_name}"
             else:
                 new_query += "[table_name]"
-            new_query += f"\nGROUP BY {col_name}\nORDER BY count DESC"
+            new_query += f"\nGROUP BY {quoted_col_name}\nORDER BY count DESC"
             self.set_query_text(new_query)
             self.parent.statusBar().showMessage(f"Created GROUP BY query for '{col_name}'")
             
         elif action == select_col_action:
-            new_query = f"SELECT {col_name}\nFROM "
+            new_query = f"SELECT {quoted_col_name}\nFROM "
             if self.current_df is not None and hasattr(self.current_df, '_query_source'):
                 table_name = getattr(self.current_df, '_query_source')
                 new_query += f"{table_name}"
@@ -353,7 +358,7 @@ class QueryTab(QWidget):
                 lines = current_text.splitlines()
                 for i, line in enumerate(lines):
                     if "WHERE" in line.upper() and "ORDER BY" not in line.upper() and "GROUP BY" not in line.upper():
-                        lines[i] = f"{line} AND {col_name} = ?"
+                        lines[i] = f"{line} AND {quoted_col_name} = ?"
                         break
                 self.set_query_text("\n".join(lines))
             else:
@@ -364,7 +369,7 @@ class QueryTab(QWidget):
                     new_query += f"{table_name}"
                 else:
                     new_query += "[table_name]"
-                new_query += f"\nWHERE {col_name} = ?"
+                new_query += f"\nWHERE {quoted_col_name} = ?"
                 self.set_query_text(new_query)
             self.parent.statusBar().showMessage(f"Added filter condition for '{col_name}'")
 
@@ -372,6 +377,10 @@ class QueryTab(QWidget):
         """Handle double-click on a cell to generate or append a SELECT query with the clicked column"""
         # Get column name
         col_name = self.results_table.horizontalHeaderItem(column).text()
+        
+        # Check if the column name needs quoting (contains spaces or special characters)
+        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
+            col_name = f'"{col_name}"'
         
         # Get current query text
         current_text = self.get_query_text().strip()
@@ -455,6 +464,10 @@ class QueryTab(QWidget):
         """Handle header click to generate or append a SELECT query with the clicked column"""
         # Get column name
         col_name = self.results_table.horizontalHeaderItem(logicalIndex).text()
+        
+        # Check if the column name needs quoting (contains spaces or special characters)
+        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
+            col_name = f'"{col_name}"'
         
         # Get current query text
         current_text = self.get_query_text().strip()
