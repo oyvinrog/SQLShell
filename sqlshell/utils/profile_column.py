@@ -128,9 +128,17 @@ class ExplainerThread(QThread):
             # No cache found, proceed with computation
             self.progress.emit(5, "Computing new analysis...")
             
+            # Validate that the target column exists in the dataframe
+            if self.column not in self.df.columns:
+                raise ValueError(f"Target column '{self.column}' not found in the dataframe")
+                
             # Create a copy to avoid modifying the original dataframe
             df = self.df.copy()
             
+            # Verify we have data to work with
+            if len(df) == 0:
+                raise ValueError("No data available for analysis (empty dataframe)")
+                
             # Sample up to 500 rows for better statistical significance while maintaining speed
             if len(df) > 500:
                 sample_size = 500  # Increased sample size for better analysis
@@ -304,12 +312,34 @@ class ExplainerThread(QThread):
                 self.result.emit(feature_importance)
                 return
 
+        except IndexError as e:
+            # Handle index errors with more detail
+            import traceback
+            import inspect
+            trace = traceback.format_exc()
+            
+            # Get more detailed information
+            frame = inspect.trace()[-1]
+            frame_info = inspect.getframeinfo(frame[0])
+            filename = frame_info.filename
+            lineno = frame_info.lineno
+            function = frame_info.function
+            code_context = frame_info.code_context[0].strip() if frame_info.code_context else "Unknown code context"
+            
+            # Format a more detailed error message
+            detail_msg = f"IndexError: {str(e)}\nLocation: {filename}:{lineno} in function '{function}'\nCode: {code_context}\n\n{trace}"
+            print(detail_msg)  # Print to console for debugging
+            
+            if not self._is_canceled:
+                self.error.emit(f"Index error at line {lineno} in {function}:\n{str(e)}\nCode: {code_context}")
+        
         except Exception as e:
             if not self._is_canceled:  # Only emit error if not canceled
                 import traceback
+                trace = traceback.format_exc()
                 print(f"Error in ExplainerThread: {str(e)}")
-                print(traceback.format_exc())  # Print full stack trace to help debug
-                self.error.emit(str(e))
+                print(trace)  # Print full stack trace to help debug
+                self.error.emit(f"{str(e)}\n\nTrace: {trace}")
 
     def analyze_column(self):
         if self.df is None or self.column_selector.currentText() == "":
@@ -406,85 +436,208 @@ class ExplainerThread(QThread):
         self.render_timer.start(10)  # Update every 10ms
         
     def render_next_batch(self, batch_size):
-        if self.current_row >= len(self.importance_df):
-            # All rows rendered, now render the chart and stop the timer
-            self.render_chart()
-            self.render_timer.stop()
-            return
+        try:
+            if self.current_row >= len(self.importance_df):
+                # All rows rendered, now render the chart and stop the timer
+                self.render_chart()
+                self.render_timer.stop()
+                return
             
-        # Render a batch of rows
-        end_row = min(self.current_row + batch_size, len(self.importance_df))
-        for row in range(self.current_row, end_row):
-            feature = self.importance_df.iloc[row]['feature']
-            importance_value = self.importance_df.iloc[row]['importance_value']
-            self.importance_table.setItem(row, 0, QTableWidgetItem(feature))
-            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+            # Render a batch of rows
+            end_row = min(self.current_row + batch_size, len(self.importance_df))
+            for row in range(self.current_row, end_row):
+                try:
+                    # Check if row exists in dataframe to prevent index errors
+                    if row < len(self.importance_df):
+                        feature = self.importance_df.iloc[row]['feature']
+                        importance_value = self.importance_df.iloc[row]['importance_value']
+                        self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
+                        self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+                    else:
+                        # Handle out of range index
+                        print(f"Warning: Row {row} is out of range (max: {len(self.importance_df)-1})")
+                        self.importance_table.setItem(row, 0, QTableWidgetItem("Error"))
+                        self.importance_table.setItem(row, 1, QTableWidgetItem("Out of range"))
+                except (IndexError, KeyError) as e:
+                    # Enhanced error reporting for index and key errors
+                    import traceback
+                    trace = traceback.format_exc()
+                    error_msg = f"Error rendering row {row}: {e.__class__.__name__}: {e}\n{trace}"
+                    print(error_msg)
+                    
+                    # Handle missing data in the dataframe gracefully
+                    self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
+                    self.importance_table.setItem(row, 1, QTableWidgetItem(f"{str(e)[:20]}"))
+                except Exception as e:
+                    # Catch any other exceptions
+                    print(f"Unexpected error rendering row {row}: {e.__class__.__name__}: {e}")
+                    self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
+                    self.importance_table.setItem(row, 1, QTableWidgetItem("See console for details"))
+                
+            self.current_row = end_row
+            QApplication.processEvents()  # Allow UI to update
+        except Exception as e:
+            # Catch any exceptions in the rendering loop itself
+            import traceback
+            trace = traceback.format_exc()
+            error_msg = f"Error in render_next_batch: {e.__class__.__name__}: {e}\n{trace}"
+            print(error_msg)
             
-        self.current_row = end_row
-        QApplication.processEvents()  # Allow UI to update
+            # Try to stop the timer to prevent further errors
+            try:
+                if self.render_timer and self.render_timer.isActive():
+                    self.render_timer.stop()
+            except:
+                pass
+            
+            # Show error
+            QMessageBox.critical(self, "Rendering Error", 
+                               f"Error rendering results: {e.__class__.__name__}: {e}")
         
     def render_chart(self):
         # Create horizontal bar chart
-        self.chart_view.axes.clear()
-        
-        # Limit to top 20 features for better visualization
-        plot_df = self.importance_df.head(20).copy()
-        
-        # Truncate long feature names for better display
-        max_feature_length = 30
-        plot_df['display_feature'] = plot_df['feature'].apply(
-            lambda x: (str(x)[:max_feature_length] + '...') if len(str(x)) > max_feature_length else str(x)
-        )
-        
-        # Reverse order for better display (highest at top)
-        plot_df = plot_df.iloc[::-1].reset_index(drop=True)
-        
-        # Create a colormap for better visualization
-        cmap = plt.cm.Blues
-        colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
-        
-        # Plot with custom colors
-        bars = self.chart_view.axes.barh(
-            plot_df['display_feature'], 
-            plot_df['importance_value'],
-            color=colors,
-            height=0.7,  # Thinner bars for more spacing
-            alpha=0.8
-        )
-        
-        # Add values at the end of bars
-        for bar in bars:
-            width = bar.get_width()
-            self.chart_view.axes.text(
-                width * 1.05, 
-                bar.get_y() + bar.get_height()/2, 
-                f'{width:.2f}', 
-                va='center',
-                fontsize=9,
-                fontweight='bold'
+        try:
+            if self.importance_df is None or len(self.importance_df) == 0:
+                # No data to render
+                self.chart_view.axes.clear()
+                self.chart_view.axes.text(0.5, 0.5, "No data available for chart", 
+                                      ha='center', va='center', fontsize=12, color='gray')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+                return
+                
+            self.chart_view.axes.clear()
+            
+            # Limit to top 20 features for better visualization
+            plot_df = self.importance_df.head(20).copy()
+            
+            # Verify we have data before proceeding
+            if len(plot_df) == 0:
+                self.chart_view.axes.text(0.5, 0.5, "No features found with importance values", 
+                                      ha='center', va='center', fontsize=12, color='gray')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+                return
+            
+            # Check required columns exist
+            required_columns = ['feature', 'importance_value']
+            missing_columns = [col for col in required_columns if col not in plot_df.columns]
+            if missing_columns:
+                error_msg = f"Missing required columns: {', '.join(missing_columns)}"
+                self.chart_view.axes.text(0.5, 0.5, error_msg, 
+                                      ha='center', va='center', fontsize=12, color='red')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+                print(f"Chart rendering error: {error_msg}")
+                return
+            
+            # Truncate long feature names for better display
+            max_feature_length = 30
+            plot_df['display_feature'] = plot_df['feature'].apply(
+                lambda x: (str(x)[:max_feature_length] + '...') if len(str(x)) > max_feature_length else str(x)
             )
-        
-        # Add grid for better readability
-        self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
-        
-        # Remove unnecessary spines
-        for spine in ['top', 'right']:
-            self.chart_view.axes.spines[spine].set_visible(False)
-        
-        # Make labels more readable
-        self.chart_view.axes.tick_params(axis='y', labelsize=9)
-        
-        # Set title and labels
-        self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
-        self.chart_view.axes.set_xlabel('Importance Value')
-        
-        # Adjust figure size based on number of features
-        feature_count = len(plot_df)
-        self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
-        
-        # Adjust layout and draw
-        self.chart_view.figure.tight_layout()
-        self.chart_view.draw()
+            
+            # Reverse order for better display (highest at top)
+            plot_df = plot_df.iloc[::-1].reset_index(drop=True)
+            
+            # Create a colormap for better visualization
+            cmap = plt.cm.Blues
+            colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
+            
+            # Plot with custom colors
+            bars = self.chart_view.axes.barh(
+                plot_df['display_feature'], 
+                plot_df['importance_value'],
+                color=colors,
+                height=0.7,  # Thinner bars for more spacing
+                alpha=0.8
+            )
+            
+            # Add values at the end of bars
+            for bar in bars:
+                width = bar.get_width()
+                self.chart_view.axes.text(
+                    width * 1.05, 
+                    bar.get_y() + bar.get_height()/2, 
+                    f'{width:.2f}', 
+                    va='center',
+                    fontsize=9,
+                    fontweight='bold'
+                )
+            
+            # Add grid for better readability
+            self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
+            
+            # Remove unnecessary spines
+            for spine in ['top', 'right']:
+                self.chart_view.axes.spines[spine].set_visible(False)
+            
+            # Make labels more readable
+            self.chart_view.axes.tick_params(axis='y', labelsize=9)
+            
+            # Set title and labels
+            self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
+            self.chart_view.axes.set_xlabel('Importance Value')
+            
+            # Adjust figure size based on number of features
+            feature_count = len(plot_df)
+            self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
+            
+            # Adjust layout and draw
+            self.chart_view.figure.tight_layout()
+            self.chart_view.draw()
+        except IndexError as e:
+            # Special handling for index errors with detailed information
+            import traceback
+            import inspect
+            
+            # Get stack trace information
+            trace = traceback.format_exc()
+            
+            # Try to get line and context information
+            try:
+                frame = inspect.trace()[-1]
+                frame_info = inspect.getframeinfo(frame[0])
+                filename = frame_info.filename
+                lineno = frame_info.lineno
+                function = frame_info.function
+                code_context = frame_info.code_context[0].strip() if frame_info.code_context else "Unknown code context"
+                
+                # Detailed error message
+                detail_msg = f"IndexError at line {lineno} in {function}: {str(e)}\nCode: {code_context}"
+                print(f"Chart rendering error: {detail_msg}\n{trace}")
+                
+                # Display error in chart
+                self.chart_view.axes.clear()
+                self.chart_view.axes.text(0.5, 0.5, 
+                                     f"Index Error in chart rendering:\n{str(e)}\nAt line {lineno}: {code_context}", 
+                                     ha='center', va='center', fontsize=12, color='red',
+                                     wrap=True)
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+            except Exception as inner_e:
+                # Fallback if the detailed error reporting fails
+                print(f"Error getting detailed error info: {inner_e}")
+                print(f"Original error: {e}\n{trace}")
+                
+                self.chart_view.axes.clear()
+                self.chart_view.axes.text(0.5, 0.5, f"Index Error: {str(e)}", 
+                                     ha='center', va='center', fontsize=12, color='red')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+        except Exception as e:
+            # Recover gracefully from any chart rendering errors with detailed information
+            import traceback
+            trace = traceback.format_exc()
+            error_msg = f"Error rendering chart: {e.__class__.__name__}: {str(e)}"
+            print(f"{error_msg}\n{trace}")
+            
+            self.chart_view.axes.clear()
+            self.chart_view.axes.text(0.5, 0.5, error_msg, 
+                                  ha='center', va='center', fontsize=12, color='red',
+                                  wrap=True)
+            self.chart_view.axes.set_axis_off()
+            self.chart_view.draw()
         
     def handle_error(self, error_message):
         """Handle errors during analysis"""
@@ -499,23 +652,29 @@ class ExplainerThread(QThread):
         # Print error to console for debugging
         print(f"Error in column profiler: {error_message}")
         
-        # Show error message
-        QMessageBox.critical(self, "Error", f"An error occurred during analysis:\n\n{error_message}")
+        # Show error message with more details
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("Error")
+        msg_box.setText("An error occurred during analysis")
+        msg_box.setDetailedText(error_message)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()
         
         # Show a message in the UI as well
         self.importance_table.setRowCount(1)
         self.importance_table.setColumnCount(1)
-        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message}"))
+        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split('\n')[0]}"))
         self.importance_table.resizeColumnsToContents()
         
         # Update the chart to show error
         self.chart_view.axes.clear()
-        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message}", 
+        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message.split('\n')[0]}", 
                                ha='center', va='center', fontsize=12, color='red',
                                wrap=True)
         self.chart_view.axes.set_axis_off()
         self.chart_view.draw()
-        
+    
     def closeEvent(self, event):
         """Clean up when the window is closed"""
         # Stop any running timer
@@ -583,12 +742,27 @@ class ExplainerThread(QThread):
             
     def show_relationship_visualization(self, row, column):
         """Show visualization of relationship between selected feature and target column"""
-        if self.importance_df is None or row >= len(self.importance_df):
+        if self.importance_df is None or row < 0 or row >= len(self.importance_df):
             return
             
         # Get the feature name and target column
-        feature = self.importance_df.iloc[row]['feature']
-        target = self.column_selector.currentText()
+        try:
+            feature = self.importance_df.iloc[row]['feature']
+            target = self.column_selector.currentText()
+            
+            # Verify both columns exist in the dataframe
+            if feature not in self.df.columns:
+                QMessageBox.warning(self, "Column Not Found", 
+                                   f"Feature column '{feature}' not found in the dataframe")
+                return
+                
+            if target not in self.df.columns:
+                QMessageBox.warning(self, "Column Not Found",
+                                   f"Target column '{target}' not found in the dataframe")
+                return
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error getting column data: {str(e)}")
+            return
         
         # Create a dialog to show the visualization
         dialog = QDialog(self)
@@ -1040,86 +1214,209 @@ class ColumnProfilerApp(QMainWindow):
         self.render_timer.start(10)  # Update every 10ms
         
     def render_next_batch(self, batch_size):
-        if self.current_row >= len(self.importance_df):
-            # All rows rendered, now render the chart and stop the timer
-            self.render_chart()
-            self.render_timer.stop()
-            return
+        try:
+            if self.current_row >= len(self.importance_df):
+                # All rows rendered, now render the chart and stop the timer
+                self.render_chart()
+                self.render_timer.stop()
+                return
             
-        # Render a batch of rows
-        end_row = min(self.current_row + batch_size, len(self.importance_df))
-        for row in range(self.current_row, end_row):
-            feature = self.importance_df.iloc[row]['feature']
-            importance_value = self.importance_df.iloc[row]['importance_value']
-            self.importance_table.setItem(row, 0, QTableWidgetItem(feature))
-            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+            # Render a batch of rows
+            end_row = min(self.current_row + batch_size, len(self.importance_df))
+            for row in range(self.current_row, end_row):
+                try:
+                    # Check if row exists in dataframe to prevent index errors
+                    if row < len(self.importance_df):
+                        feature = self.importance_df.iloc[row]['feature']
+                        importance_value = self.importance_df.iloc[row]['importance_value']
+                        self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
+                        self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+                    else:
+                        # Handle out of range index
+                        print(f"Warning: Row {row} is out of range (max: {len(self.importance_df)-1})")
+                        self.importance_table.setItem(row, 0, QTableWidgetItem("Error"))
+                        self.importance_table.setItem(row, 1, QTableWidgetItem("Out of range"))
+                except (IndexError, KeyError) as e:
+                    # Enhanced error reporting for index and key errors
+                    import traceback
+                    trace = traceback.format_exc()
+                    error_msg = f"Error rendering row {row}: {e.__class__.__name__}: {e}\n{trace}"
+                    print(error_msg)
+                    
+                    # Handle missing data in the dataframe gracefully
+                    self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
+                    self.importance_table.setItem(row, 1, QTableWidgetItem(f"{str(e)[:20]}"))
+                except Exception as e:
+                    # Catch any other exceptions
+                    print(f"Unexpected error rendering row {row}: {e.__class__.__name__}: {e}")
+                    self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
+                    self.importance_table.setItem(row, 1, QTableWidgetItem("See console for details"))
+                
+            self.current_row = end_row
+            QApplication.processEvents()  # Allow UI to update
+        except Exception as e:
+            # Catch any exceptions in the rendering loop itself
+            import traceback
+            trace = traceback.format_exc()
+            error_msg = f"Error in render_next_batch: {e.__class__.__name__}: {e}\n{trace}"
+            print(error_msg)
             
-        self.current_row = end_row
-        QApplication.processEvents()  # Allow UI to update
-    
+            # Try to stop the timer to prevent further errors
+            try:
+                if self.render_timer and self.render_timer.isActive():
+                    self.render_timer.stop()
+            except:
+                pass
+            
+            # Show error
+            QMessageBox.critical(self, "Rendering Error", 
+                               f"Error rendering results: {e.__class__.__name__}: {e}")
+        
     def render_chart(self):
         # Create horizontal bar chart
-        self.chart_view.axes.clear()
-        
-        # Limit to top 20 features for better visualization
-        plot_df = self.importance_df.head(20).copy()
-        
-        # Truncate long feature names for better display
-        max_feature_length = 30
-        plot_df['display_feature'] = plot_df['feature'].apply(
-            lambda x: (str(x)[:max_feature_length] + '...') if len(str(x)) > max_feature_length else str(x)
-        )
-        
-        # Reverse order for better display (highest at top)
-        plot_df = plot_df.iloc[::-1].reset_index(drop=True)
-        
-        # Create a colormap for better visualization
-        cmap = plt.cm.Blues
-        colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
-        
-        # Plot with custom colors
-        bars = self.chart_view.axes.barh(
-            plot_df['display_feature'], 
-            plot_df['importance_value'],
-            color=colors,
-            height=0.7,  # Thinner bars for more spacing
-            alpha=0.8
-        )
-        
-        # Add values at the end of bars
-        for bar in bars:
-            width = bar.get_width()
-            self.chart_view.axes.text(
-                width * 1.05, 
-                bar.get_y() + bar.get_height()/2, 
-                f'{width:.2f}', 
-                va='center',
-                fontsize=9,
-                fontweight='bold'
+        try:
+            if self.importance_df is None or len(self.importance_df) == 0:
+                # No data to render
+                self.chart_view.axes.clear()
+                self.chart_view.axes.text(0.5, 0.5, "No data available for chart", 
+                                      ha='center', va='center', fontsize=12, color='gray')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+                return
+                
+            self.chart_view.axes.clear()
+            
+            # Limit to top 20 features for better visualization
+            plot_df = self.importance_df.head(20).copy()
+            
+            # Verify we have data before proceeding
+            if len(plot_df) == 0:
+                self.chart_view.axes.text(0.5, 0.5, "No features found with importance values", 
+                                      ha='center', va='center', fontsize=12, color='gray')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+                return
+            
+            # Check required columns exist
+            required_columns = ['feature', 'importance_value']
+            missing_columns = [col for col in required_columns if col not in plot_df.columns]
+            if missing_columns:
+                error_msg = f"Missing required columns: {', '.join(missing_columns)}"
+                self.chart_view.axes.text(0.5, 0.5, error_msg, 
+                                      ha='center', va='center', fontsize=12, color='red')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+                print(f"Chart rendering error: {error_msg}")
+                return
+            
+            # Truncate long feature names for better display
+            max_feature_length = 30
+            plot_df['display_feature'] = plot_df['feature'].apply(
+                lambda x: (str(x)[:max_feature_length] + '...') if len(str(x)) > max_feature_length else str(x)
             )
+            
+            # Reverse order for better display (highest at top)
+            plot_df = plot_df.iloc[::-1].reset_index(drop=True)
+            
+            # Create a colormap for better visualization
+            cmap = plt.cm.Blues
+            colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
+            
+            # Plot with custom colors
+            bars = self.chart_view.axes.barh(
+                plot_df['display_feature'], 
+                plot_df['importance_value'],
+                color=colors,
+                height=0.7,  # Thinner bars for more spacing
+                alpha=0.8
+            )
+            
+            # Add values at the end of bars
+            for bar in bars:
+                width = bar.get_width()
+                self.chart_view.axes.text(
+                    width * 1.05, 
+                    bar.get_y() + bar.get_height()/2, 
+                    f'{width:.2f}', 
+                    va='center',
+                    fontsize=9,
+                    fontweight='bold'
+                )
+            
+            # Add grid for better readability
+            self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
+            
+            # Remove unnecessary spines
+            for spine in ['top', 'right']:
+                self.chart_view.axes.spines[spine].set_visible(False)
+            
+            # Make labels more readable
+            self.chart_view.axes.tick_params(axis='y', labelsize=9)
+            
+            # Set title and labels
+            self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
+            self.chart_view.axes.set_xlabel('Importance Value')
+            
+            # Adjust figure size based on number of features
+            feature_count = len(plot_df)
+            self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
+            
+            # Adjust layout and draw
+            self.chart_view.figure.tight_layout()
+            self.chart_view.draw()
+        except IndexError as e:
+            # Special handling for index errors with detailed information
+            import traceback
+            import inspect
+            
+            # Get stack trace information
+            trace = traceback.format_exc()
+            
+            # Try to get line and context information
+            try:
+                frame = inspect.trace()[-1]
+                frame_info = inspect.getframeinfo(frame[0])
+                filename = frame_info.filename
+                lineno = frame_info.lineno
+                function = frame_info.function
+                code_context = frame_info.code_context[0].strip() if frame_info.code_context else "Unknown code context"
+                
+                # Detailed error message
+                detail_msg = f"IndexError at line {lineno} in {function}: {str(e)}\nCode: {code_context}"
+                print(f"Chart rendering error: {detail_msg}\n{trace}")
+                
+                # Display error in chart
+                self.chart_view.axes.clear()
+                self.chart_view.axes.text(0.5, 0.5, 
+                                     f"Index Error in chart rendering:\n{str(e)}\nAt line {lineno}: {code_context}", 
+                                     ha='center', va='center', fontsize=12, color='red',
+                                     wrap=True)
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+            except Exception as inner_e:
+                # Fallback if the detailed error reporting fails
+                print(f"Error getting detailed error info: {inner_e}")
+                print(f"Original error: {e}\n{trace}")
+                
+                self.chart_view.axes.clear()
+                self.chart_view.axes.text(0.5, 0.5, f"Index Error: {str(e)}", 
+                                     ha='center', va='center', fontsize=12, color='red')
+                self.chart_view.axes.set_axis_off()
+                self.chart_view.draw()
+        except Exception as e:
+            # Recover gracefully from any chart rendering errors with detailed information
+            import traceback
+            trace = traceback.format_exc()
+            error_msg = f"Error rendering chart: {e.__class__.__name__}: {str(e)}"
+            print(f"{error_msg}\n{trace}")
+            
+            self.chart_view.axes.clear()
+            self.chart_view.axes.text(0.5, 0.5, error_msg, 
+                                  ha='center', va='center', fontsize=12, color='red',
+                                  wrap=True)
+            self.chart_view.axes.set_axis_off()
+            self.chart_view.draw()
         
-        # Add grid for better readability
-        self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
-        
-        # Remove unnecessary spines
-        for spine in ['top', 'right']:
-            self.chart_view.axes.spines[spine].set_visible(False)
-        
-        # Make labels more readable
-        self.chart_view.axes.tick_params(axis='y', labelsize=9)
-        
-        # Set title and labels
-        self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
-        self.chart_view.axes.set_xlabel('Importance Value')
-        
-        # Adjust figure size based on number of features
-        feature_count = len(plot_df)
-        self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
-        
-        # Adjust layout and draw
-        self.chart_view.figure.tight_layout()
-        self.chart_view.draw()
-    
     def handle_error(self, error_message):
         """Handle errors during analysis"""
         # Hide progress indicators
@@ -1133,18 +1430,24 @@ class ColumnProfilerApp(QMainWindow):
         # Print error to console for debugging
         print(f"Error in column profiler: {error_message}")
         
-        # Show error message
-        QMessageBox.critical(self, "Error", f"An error occurred during analysis:\n\n{error_message}")
+        # Show error message with more details
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("Error")
+        msg_box.setText("An error occurred during analysis")
+        msg_box.setDetailedText(error_message)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()
         
         # Show a message in the UI as well
         self.importance_table.setRowCount(1)
         self.importance_table.setColumnCount(1)
-        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message}"))
+        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split('\n')[0]}"))
         self.importance_table.resizeColumnsToContents()
         
         # Update the chart to show error
         self.chart_view.axes.clear()
-        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message}", 
+        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message.split('\n')[0]}", 
                                ha='center', va='center', fontsize=12, color='red',
                                wrap=True)
         self.chart_view.axes.set_axis_off()
@@ -1217,12 +1520,27 @@ class ColumnProfilerApp(QMainWindow):
             
     def show_relationship_visualization(self, row, column):
         """Show visualization of relationship between selected feature and target column"""
-        if self.importance_df is None or row >= len(self.importance_df):
+        if self.importance_df is None or row < 0 or row >= len(self.importance_df):
             return
             
         # Get the feature name and target column
-        feature = self.importance_df.iloc[row]['feature']
-        target = self.column_selector.currentText()
+        try:
+            feature = self.importance_df.iloc[row]['feature']
+            target = self.column_selector.currentText()
+            
+            # Verify both columns exist in the dataframe
+            if feature not in self.df.columns:
+                QMessageBox.warning(self, "Column Not Found", 
+                                   f"Feature column '{feature}' not found in the dataframe")
+                return
+                
+            if target not in self.df.columns:
+                QMessageBox.warning(self, "Column Not Found",
+                                   f"Target column '{target}' not found in the dataframe")
+                return
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error getting column data: {str(e)}")
+            return
         
         # Create a dialog to show the visualization
         dialog = QDialog(self)
@@ -1487,6 +1805,18 @@ def visualize_profile(df: pd.DataFrame, column: str = None) -> None:
         column: Optional target column to analyze immediately
     """
     try:
+        # Verify df is a valid DataFrame
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("Input must be a pandas DataFrame")
+            
+        # Verify df has data
+        if len(df) == 0:
+            raise ValueError("DataFrame is empty, cannot analyze")
+            
+        # Verify columns exist
+        if column is not None and column not in df.columns:
+            raise ValueError(f"Column '{column}' not found in the DataFrame")
+            
         # Check if dataset is too small for meaningful analysis
         row_count = len(df)
         if row_count <= 5:
