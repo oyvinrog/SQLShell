@@ -1263,6 +1263,7 @@ LIMIT 10
         # Add menu actions
         select_from_action = context_menu.addAction("Select from")
         add_to_editor_action = context_menu.addAction("Just add to editor")
+        select_from_new_tab_action = context_menu.addAction("Select From in New Tab")
         
         # Add entropy profiler action
         context_menu.addSeparator()
@@ -1327,6 +1328,11 @@ LIMIT 10
             cursor = current_tab.query_edit.textCursor()
             cursor.insertText(table_name)
             current_tab.query_edit.setFocus()
+        elif action == select_from_new_tab_action:
+            # Create a new tab with "SELECT * FROM table_name"
+            new_tab = self.add_tab(f"Query {table_name}")
+            new_tab.set_query_text(f"SELECT * FROM {table_name}")
+            new_tab.query_edit.setFocus()
         elif action == reload_action:
             self.reload_selected_table(table_name)
         elif action == analyze_entropy_action:
