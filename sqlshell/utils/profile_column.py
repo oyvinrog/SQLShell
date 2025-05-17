@@ -124,6 +124,10 @@ class ExplainerThread(QThread):
             # Check if canceled
             if self._is_canceled:
                 return
+
+            # Early check for empty dataframe or no columns
+            if self.df.empty or len(self.df.columns) == 0:
+                raise ValueError("The dataframe is empty or has no columns for analysis")
                 
             # No cache found, proceed with computation
             self.progress.emit(5, "Computing new analysis...")
@@ -158,17 +162,35 @@ class ExplainerThread(QThread):
                 if col == self.column:  # Don't drop target column
                     continue
                 try:
-                    # Drop if more than 95% unique values (likely ID column)
-                    if df[col].nunique() / len(df) > 0.95:
+                    # Only drop columns with extremely high uniqueness (99% instead of 95%)
+                    # This ensures we keep more features for analysis
+                    if df[col].nunique() / len(df) > 0.99 and len(df) > 100:
                         cols_to_drop.append(col)
-                    # Drop if more than 50% missing values
-                    elif df[col].isna().mean() > 0.5:
+                    # Only drop columns with very high missing values (80% instead of 50%)
+                    elif df[col].isna().mean() > 0.8:
                         cols_to_drop.append(col)
                 except:
                     # If we can't analyze the column, drop it
                     cols_to_drop.append(col)
             
-            # Drop identified columns
+            # Drop identified columns, but ensure we keep at least some features
+            remaining_cols = [col for col in df.columns if col != self.column and col not in cols_to_drop]
+            
+            # If dropping would leave us with no features, keep at least 3 columns (or all if less than 3)
+            if len(remaining_cols) == 0 and len(cols_to_drop) > 0:
+                # Sort dropped columns by uniqueness (keep those with lower uniqueness)
+                col_uniqueness = {}
+                for col in cols_to_drop:
+                    try:
+                        col_uniqueness[col] = df[col].nunique() / len(df)
+                    except:
+                        col_uniqueness[col] = 1.0  # Assume high uniqueness for problematic columns
+                
+                # Sort by uniqueness and keep the least unique columns
+                cols_to_keep = sorted(col_uniqueness.items(), key=lambda x: x[1])[:min(3, len(cols_to_drop))]
+                cols_to_drop = [col for col in cols_to_drop if col not in [c[0] for c in cols_to_keep]]
+                print(f"Keeping {len(cols_to_keep)} columns to ensure analysis can proceed")
+            
             if cols_to_drop:
                 self.progress.emit(20, f"Removing {len(cols_to_drop)} low-information columns...")
                 df = df.drop(columns=cols_to_drop)
@@ -185,18 +207,31 @@ class ExplainerThread(QThread):
             # Handle high-cardinality categorical features
             self.progress.emit(30, "Encoding categorical features...")
             # Use a simpler approach - just one-hot encode columns with few unique values
-            # and drop high-cardinality columns completely for speed
+            # and encode (don't drop) high-cardinality columns for speed
             categorical_cols = X.select_dtypes(include='object').columns
-            high_cardinality_threshold = 10  # Lower threshold to drop more columns
+            high_cardinality_threshold = 20  # Higher threshold to keep more columns
+            
+            # Keep track of how many columns we've processed
+            columns_processed = 0
+            columns_kept = 0
             
             for col in categorical_cols:
+                columns_processed += 1
                 unique_count = X[col].nunique()
+                # Always keep the column, but use different encoding strategies based on cardinality
                 if unique_count <= high_cardinality_threshold:
                     # Simple label encoding for low-cardinality features
                     X[col] = X[col].fillna('_MISSING_').astype('category').cat.codes
+                    columns_kept += 1
                 else:
-                    # Drop high-cardinality features to speed up analysis
-                    X = X.drop(columns=[col])
+                    # For high-cardinality features, still encode them but with a simpler approach
+                    # Use label encoding instead of dropping
+                    X[col] = X[col].fillna('_MISSING_').astype('category').cat.codes
+                    columns_kept += 1
+            
+            # Log how many columns were kept
+            if columns_processed > 0:
+                self.progress.emit(35, f"Encoded {columns_kept} categorical columns out of {columns_processed}")
             
             # Handle target column in a simpler, faster way
             if y.dtype == 'object':
@@ -208,6 +243,11 @@ class ExplainerThread(QThread):
 
             # Train/test split
             self.progress.emit(40, "Splitting data into train/test sets...")
+            
+            # Make sure we still have features to work with
+            if X.shape[1] == 0:
+                raise ValueError("No features remain after preprocessing. Try selecting a different target column.")
+                
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
             # Check if canceled
@@ -216,9 +256,21 @@ class ExplainerThread(QThread):
                 
             # Train a tree-based model
             self.progress.emit(50, "Training XGBoost model...")
+            
+            # Check the number of features left for analysis
+            feature_count = X_train.shape[1]
+            
+            # Adjust model complexity based on feature count
+            if feature_count < 3:
+                max_depth = 1  # Very simple trees for few features
+                n_estimators = 10  # Use more trees to compensate
+            else:
+                max_depth = 2  # Still shallow trees
+                n_estimators = 5  # Fewer trees for more features
+                
             model = xgb.XGBRegressor(
-                n_estimators=5,              # Absolute minimum number of trees
-                max_depth=2,                 # Very shallow trees
+                n_estimators=n_estimators,
+                max_depth=max_depth,
                 learning_rate=0.3,           # Higher learning rate to compensate for fewer trees
                 tree_method='hist',          # Fast histogram method
                 subsample=0.7,               # Use 70% of data per tree
@@ -237,16 +289,74 @@ class ExplainerThread(QThread):
             try:
                 model.fit(X_train, y_train)
             except Exception as e:
+                # Log the error for debugging
+                print(f"Initial XGBoost fit failed: {str(e)}")
+                
                 # If we encounter an error, try with an even smaller and simpler model
                 self.progress.emit(55, "Adjusting model parameters due to computational constraints...")
-                model = xgb.XGBRegressor(
-                    n_estimators=5, 
-                    max_depth=2,
-                    subsample=0.5,
-                    colsample_bytree=0.5,
-                    n_jobs=1
-                )
-                model.fit(X_train, y_train)
+                try:
+                    # Try a simpler regressor with more conservative parameters
+                    model = xgb.XGBRegressor(
+                        n_estimators=3, 
+                        max_depth=1,
+                        subsample=0.5,
+                        colsample_bytree=0.5,
+                        n_jobs=1,
+                        verbosity=0
+                    )
+                    model.fit(X_train, y_train)
+                except Exception as inner_e:
+                    # If even the simpler model fails, resort to a fallback strategy
+                    print(f"Even simpler XGBoost failed: {str(inner_e)}")
+                    self.progress.emit(60, "Using fallback importance calculation method...")
+                    
+                    # Create a basic feature importance based on correlation with target
+                    # This is a simple fallback when model training fails
+                    importance = []
+                    for col in X.columns:
+                        try:
+                            if pd.api.types.is_numeric_dtype(X[col]):
+                                # For numeric columns use correlation
+                                corr = abs(X[col].corr(y))
+                                importance.append(0.5 + corr/2 if not pd.isna(corr) else 0.5)
+                            else:
+                                # For categorical, assign default importance
+                                importance.append(0.5)
+                        except:
+                            # If correlation fails, use default
+                            importance.append(0.5)
+                    
+                    # Normalize to sum to 1
+                    importance = np.array(importance)
+                    if sum(importance) > 0:
+                        importance = importance / sum(importance)
+                    else:
+                        # Equal importance if everything fails
+                        importance = np.ones(len(X.columns)) / len(X.columns)
+                    
+                    # Skip the model-based code path since we calculated importances manually
+                    self.progress.emit(80, "Creating importance results...")
+                    feature_importance = pd.DataFrame({
+                        'feature': X.columns,
+                        'importance_value': importance
+                    }).sort_values(by='importance_value', ascending=False)
+                    
+                    # Cache the results for future use
+                    self.progress.emit(95, "Caching results for future use...")
+                    cache_results(self.df, self.column, feature_importance)
+                    
+                    # Clean up after computation
+                    del df, X, y, X_train, X_test, y_train, y_test
+                    gc.collect()
+                    
+                    # Check if canceled
+                    if self._is_canceled:
+                        return
+                        
+                    # Emit the result
+                    self.progress.emit(100, "Analysis complete (fallback method)")
+                    self.result.emit(feature_importance)
+                    return
 
             # Check if canceled
             if self._is_canceled:
@@ -256,8 +366,19 @@ class ExplainerThread(QThread):
             self.progress.emit(80, "Calculating feature importance...")
             
             try:
+                # Check if we have features to analyze
+                if X.shape[1] == 0:
+                    raise ValueError("No features available for importance analysis")
+                
                 # Get feature importance directly from XGBoost
                 importance = model.feature_importances_
+                
+                # Verify importance values are valid
+                if np.isnan(importance).any() or np.isinf(importance).any():
+                    # Handle NaN or Inf values
+                    print("Warning: Invalid importance values detected, using fallback method")
+                    # Replace with equal importance
+                    importance = np.ones(len(X.columns)) / len(X.columns)
                 
                 # Create and sort the importance dataframe
                 feature_importance = pd.DataFrame({
@@ -287,11 +408,69 @@ class ExplainerThread(QThread):
                 import traceback
                 traceback.print_exc()
                 
-                # Last resort: create equal importance for all features
-                importance_values = np.ones(len(X.columns)) / len(X.columns)
+                # Create fallback importance values when model-based approach fails
+                self.progress.emit(85, "Using alternative importance calculation method...")
+                
+                try:
+                    # Try correlation-based approach first
+                    importance = []
+                    has_valid_correlations = False
+                    
+                    for col in X.columns:
+                        try:
+                            if pd.api.types.is_numeric_dtype(X[col]) and pd.api.types.is_numeric_dtype(y):
+                                # For numeric columns vs numeric target, use correlation
+                                corr = abs(X[col].corr(y))
+                                if not pd.isna(corr):
+                                    importance.append(corr)
+                                    has_valid_correlations = True
+                                else:
+                                    importance.append(0.1)  # Default for failed correlation
+                            else:
+                                # For non-numeric, use a chi-squared test or default value
+                                importance.append(0.1)
+                        except:
+                            # Default value for any error
+                            importance.append(0.1)
+                    
+                    # Normalize importance values
+                    importance = np.array(importance)
+                    if has_valid_correlations and sum(importance) > 0:
+                        # If we have valid correlations, use them normalized
+                        importance = importance / max(sum(importance), 0.001)
+                    else:
+                        # Otherwise use frequency-based heuristic
+                        print("Using frequency-based feature importance as fallback")
+                        # Count unique values as a proxy for importance
+                        importance = []
+                        total_rows = len(X)
+                        
+                        for col in X.columns:
+                            try:
+                                # More unique values could indicate more information content
+                                # But we invert the ratio so columns with fewer unique values
+                                # (more predictive) get higher importance
+                                uniqueness = X[col].nunique() / total_rows
+                                # Invert and scale between 0.1 and 1.0
+                                val = 1.0 - (0.9 * uniqueness)
+                                importance.append(max(0.1, min(1.0, val)))
+                            except:
+                                importance.append(0.1)  # Default value
+                                
+                        # Normalize
+                        importance = np.array(importance)
+                        importance = importance / max(sum(importance), 0.001)
+                
+                except Exception as fallback_error:
+                    # Last resort: create equal importance for all features
+                    print(f"Fallback error: {fallback_error}, using equal importance")
+                    importance_values = np.ones(len(X.columns)) / max(len(X.columns), 1)
+                    importance = importance_values
+                
+                # Create dataframe with results
                 feature_importance = pd.DataFrame({
                     'feature': X.columns,
-                    'importance_value': importance_values
+                    'importance_value': importance
                 }).sort_values(by='importance_value', ascending=False)
                 
                 # Cache the results
@@ -308,7 +487,7 @@ class ExplainerThread(QThread):
                     pass
                 
                 # Emit the result
-                self.progress.emit(100, "Analysis complete (with default values)")
+                self.progress.emit(100, "Analysis complete (with fallback methods)")
                 self.result.emit(feature_importance)
                 return
 
