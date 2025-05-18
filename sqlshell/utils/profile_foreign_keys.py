@@ -1,9 +1,10 @@
 import sys
 import itertools
 import pandas as pd
-from typing import List, Dict, Tuple, Set
+from typing import List, Dict, Tuple, Set, Callable
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QMainWindow
+    QApplication, QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QMainWindow,
+    QPushButton, QHBoxLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt
 
@@ -217,7 +218,8 @@ def profile_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, mi
     return foreign_keys, inclusion_dependencies, integrity_results
 
 
-def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, min_match_ratio: float = 0.95):
+def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, min_match_ratio: float = 0.95, 
+                          on_generate_join: Callable = None, parent=None):
     """
     Create a visual representation of foreign key relationships between DataFrames.
     
@@ -225,6 +227,9 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
     - dfs: List of pandas DataFrames to analyze
     - df_names: Optional list of names for the DataFrames. If None, names will be generated.
     - min_match_ratio: Minimum ratio of matching values to consider a foreign key
+    - on_generate_join: Callback function that will be called when the Generate JOIN button is clicked.
+                        It receives a JOIN query string as its argument.
+    - parent: Parent widget for the QMainWindow. Typically the main application window.
     
     Returns:
     - QMainWindow: The visualization window
@@ -239,7 +244,7 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
     )
     
     # Create main window
-    window = QMainWindow()
+    window = QMainWindow(parent)
     window.setWindowTitle("Foreign Key Analysis")
     window.resize(900, 700)
     
@@ -268,6 +273,13 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
     # Create tabs
     tabs = QTabWidget()
     
+    # Define the "Add to editor" function to handle JOIN queries
+    def handle_join_query(query):
+        if on_generate_join:
+            on_generate_join(query)
+            QMessageBox.information(window, "JOIN Query Generated", 
+                                   f"The following query has been added to the editor:\n\n{query}")
+    
     # Tab for Foreign Keys
     fk_tab = QWidget()
     fk_layout = QVBoxLayout()
@@ -276,11 +288,15 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
     fk_header.setStyleSheet("font-weight: bold;")
     fk_layout.addWidget(fk_header)
     
-    fk_table = QTableWidget(len(foreign_keys), 5)
+    fk_table = QTableWidget(len(foreign_keys), 6)  # Added column for Generate JOIN button
     fk_table.setHorizontalHeaderLabels([
-        "Referenced Table", "Referenced Column", "Referencing Table", "Referencing Column", "Match Ratio"
+        "Referenced Table", "Referenced Column", "Referencing Table", "Referencing Column", "Match Ratio", "Action"
     ])
     fk_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+    
+    # Set minimum width for the Action column
+    fk_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+    fk_table.setColumnWidth(5, 140)  # Set a fixed width for action column
     
     for row, (pk_table, pk_col, fk_table_name, fk_col, match_ratio) in enumerate(foreign_keys):
         fk_table.setItem(row, 0, QTableWidgetItem(pk_table))
@@ -298,6 +314,27 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
             ratio_item.setForeground(Qt.GlobalColor.darkYellow)
         fk_table.setItem(row, 4, ratio_item)
         
+        # Add Generate JOIN hyperlink - optimized for better visibility
+        if on_generate_join is not None:
+            button_widget = QWidget()
+            button_layout = QHBoxLayout(button_widget)
+            button_layout.setContentsMargins(0, 0, 0, 0)  # Minimal margins
+            button_layout.setSpacing(0)  # No spacing
+            
+            # Create a styled hyperlink label
+            join_link = QLabel("<a href='#' style='color: #3498DB; font-weight: bold;'>Generate JOIN</a>")
+            join_link.setTextFormat(Qt.TextFormat.RichText)
+            join_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+            join_link.setCursor(Qt.CursorShape.PointingHandCursor)
+            join_link.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
+            join_query = f"SELECT * FROM {fk_table_name} JOIN {pk_table} ON {fk_table_name}.{fk_col} = {pk_table}.{pk_col}"
+            
+            # Connect linkActivated signal to handle the JOIN query
+            join_link.linkActivated.connect(lambda link, q=join_query: handle_join_query(q))
+            
+            button_layout.addWidget(join_link)
+            fk_table.setCellWidget(row, 5, button_widget)
+        
     fk_layout.addWidget(fk_table)
     fk_tab.setLayout(fk_layout)
     tabs.addTab(fk_tab, "Foreign Keys")
@@ -310,11 +347,15 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
     id_header.setStyleSheet("font-weight: bold;")
     id_layout.addWidget(id_header)
     
-    id_table = QTableWidget(len(inclusion_dependencies), 5)
+    id_table = QTableWidget(len(inclusion_dependencies), 6)  # Added column for Generate JOIN button
     id_table.setHorizontalHeaderLabels([
-        "Referenced Table", "Referenced Column", "Referencing Table", "Referencing Column", "Match Ratio"
+        "Referenced Table", "Referenced Column", "Referencing Table", "Referencing Column", "Match Ratio", "Action"
     ])
     id_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+    
+    # Set minimum width for the Action column
+    id_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+    id_table.setColumnWidth(5, 140)  # Set a fixed width for action column
     
     for row, (table1, col1, table2, col2, match_ratio) in enumerate(inclusion_dependencies):
         id_table.setItem(row, 0, QTableWidgetItem(table1))
@@ -331,6 +372,27 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
         else:
             ratio_item.setForeground(Qt.GlobalColor.darkYellow)
         id_table.setItem(row, 4, ratio_item)
+        
+        # Add Generate JOIN hyperlink - optimized for better visibility
+        if on_generate_join is not None:
+            button_widget = QWidget()
+            button_layout = QHBoxLayout(button_widget)
+            button_layout.setContentsMargins(0, 0, 0, 0)  # Minimal margins
+            button_layout.setSpacing(0)  # No spacing
+            
+            # Create a styled hyperlink label
+            join_link = QLabel("<a href='#' style='color: #3498DB; font-weight: bold;'>Generate JOIN</a>")
+            join_link.setTextFormat(Qt.TextFormat.RichText)
+            join_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+            join_link.setCursor(Qt.CursorShape.PointingHandCursor)
+            join_link.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
+            join_query = f"SELECT * FROM {table2} JOIN {table1} ON {table2}.{col2} = {table1}.{col1}"
+            
+            # Connect linkActivated signal to handle the JOIN query
+            join_link.linkActivated.connect(lambda link, q=join_query: handle_join_query(q))
+            
+            button_layout.addWidget(join_link)
+            id_table.setCellWidget(row, 5, button_widget)
         
     id_layout.addWidget(id_table)
     id_tab.setLayout(id_layout)
@@ -352,11 +414,15 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
     ri_layout.addWidget(ri_description)
     
     # Create table for referential integrity
-    ri_table = QTableWidget(len(integrity_results), 5)
+    ri_table = QTableWidget(len(integrity_results), 6)  # Added column for Generate JOIN button
     ri_table.setHorizontalHeaderLabels([
-        "Relationship", "Violations", "Total FK Values", "Violation %", "Example Violations"
+        "Relationship", "Violations", "Total FK Values", "Violation %", "Example Violations", "Action"
     ])
     ri_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+    
+    # Set minimum width for the Action column
+    ri_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
+    ri_table.setColumnWidth(5, 140)  # Set a fixed width for action column
     
     row = 0
     for key, stats in integrity_results.items():
@@ -382,6 +448,27 @@ def visualize_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str] = None, 
         if stats['violation_count'] > len(stats['violations']):
             examples += f" (and {stats['violation_count'] - len(stats['violations'])} more)"
         ri_table.setItem(row, 4, QTableWidgetItem(examples))
+        
+        # Add Generate JOIN hyperlink - optimized for better visibility
+        if on_generate_join is not None:
+            button_widget = QWidget()
+            button_layout = QHBoxLayout(button_widget)
+            button_layout.setContentsMargins(0, 0, 0, 0)  # Minimal margins
+            button_layout.setSpacing(0)  # No spacing
+            
+            # Create a styled hyperlink label
+            join_link = QLabel("<a href='#' style='color: #3498DB; font-weight: bold;'>Generate JOIN</a>")
+            join_link.setTextFormat(Qt.TextFormat.RichText)
+            join_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+            join_link.setCursor(Qt.CursorShape.PointingHandCursor)
+            join_link.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the text
+            join_query = f"SELECT * FROM {fk_table} LEFT JOIN {pk_table} ON {fk_table}.{fk_col} = {pk_table}.{pk_col}"
+            
+            # Connect linkActivated signal to handle the JOIN query
+            join_link.linkActivated.connect(lambda link, q=join_query: handle_join_query(q))
+            
+            button_layout.addWidget(join_link)
+            ri_table.setCellWidget(row, 5, button_widget)
         
         row += 1
         
@@ -442,12 +529,17 @@ def test_profile_foreign_keys():
     # Add some non-existent customer IDs
     orders_df.loc[95:99, "customer_id"] = [25, 26, 27, 28, 29]
     
+    # Define a callback function to handle JOIN generation
+    def handle_join_query(query):
+        print(f"Generated JOIN query: {query}")
+        # In a real application, this would insert the query into the query editor
+    
     # Create and show visualization
     dfs = [customers_df, products_df, orders_df, order_details_df]
     df_names = ["Customers", "Products", "Orders", "OrderDetails"]
     
     app = QApplication(sys.argv)
-    window = visualize_foreign_keys(dfs, df_names, min_match_ratio=0.9)
+    window = visualize_foreign_keys(dfs, df_names, min_match_ratio=0.9, on_generate_join=handle_join_query)
     sys.exit(app.exec())
 
 # Only run the test function when script is executed directly

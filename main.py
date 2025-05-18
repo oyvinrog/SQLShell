@@ -1454,9 +1454,28 @@ LIMIT 10
             # Import the foreign key analyzer
             from sqlshell.utils.profile_foreign_keys import visualize_foreign_keys
             
+            # Define callback to handle generated JOIN queries
+            def on_generate_join(query):
+                current_tab = self.get_current_query_tab()
+                if current_tab:
+                    # Add the generated query to the editor
+                    current_text = current_tab.query_edit.toPlainText()
+                    # Add a new line if there's already content
+                    if current_text and not current_text.endswith("\n"):
+                        current_tab.query_edit.setPlainText(current_text + "\n" + query)
+                    else:
+                        current_tab.query_edit.setPlainText(current_text + query)
+                    # Set focus to the query editor
+                    current_tab.query_edit.setFocus()
+            
             # Create and show the visualization
             self.statusBar().showMessage(f'Analyzing foreign key relationships between {len(dfs)} tables...')
-            vis = visualize_foreign_keys(dfs, table_names)
+            vis = visualize_foreign_keys(
+                dfs, 
+                table_names, 
+                on_generate_join=on_generate_join,
+                parent=self
+            )
             
             # Store a reference to prevent garbage collection
             self._fk_analysis_window = vis
@@ -3433,6 +3452,13 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Analysis Error", f"Error analyzing column:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error analyzing column: {str(e)}')
+
+    def get_current_query_tab(self):
+        """Get the currently active tab if it's a query tab (has query_edit attribute)"""
+        current_tab = self.get_current_tab()
+        if current_tab and hasattr(current_tab, 'query_edit'):
+            return current_tab
+        return None
 
 def main():
     # Parse command line arguments
