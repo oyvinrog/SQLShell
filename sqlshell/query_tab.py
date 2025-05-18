@@ -472,40 +472,9 @@ class QueryTab(QWidget):
         # Get current query text
         current_text = self.get_query_text().strip()
         
-        # Get cursor position
-        cursor = self.query_edit.textCursor()
-        cursor_position = cursor.position()
-        
         # Check if we already have an existing query
         if current_text:
-            # If there's existing text, try to insert at cursor position
-            if cursor_position > 0:
-                # Check if we need to add a comma before the column name
-                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
-                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
-                
-                # Add comma if needed (we're in a list of columns)
-                needs_comma = (not text_before_cursor.strip().endswith(',') and 
-                              not text_before_cursor.strip().endswith('(') and
-                              not text_before_cursor.strip().endswith('SELECT') and
-                              not re.search(r'\bFROM\s*$', text_before_cursor) and
-                              not re.search(r'\bWHERE\s*$', text_before_cursor) and
-                              not re.search(r'\bGROUP\s+BY\s*$', text_before_cursor) and
-                              not re.search(r'\bORDER\s+BY\s*$', text_before_cursor) and
-                              not re.search(r'\bHAVING\s*$', text_before_cursor) and
-                              not text_after_cursor.strip().startswith(','))
-                
-                # Insert with comma if needed
-                if needs_comma:
-                    cursor.insertText(f", {col_name}")
-                else:
-                    cursor.insertText(col_name)
-                    
-                self.query_edit.setTextCursor(cursor)
-                self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
-                return
-                
-            # If cursor is at start, check if we have a SELECT query to modify
+            # If we have a SELECT query, modify it to include the column
             if current_text.upper().startswith("SELECT"):
                 # Try to find the SELECT clause
                 select_match = re.match(r'(?i)SELECT\s+(.*?)(?:\sFROM\s|$)', current_text)
@@ -524,24 +493,45 @@ class QueryTab(QWidget):
                     self.parent.statusBar().showMessage(f"Added '{col_name}' to SELECT clause")
                     return
             
-            # If we can't modify an existing SELECT clause, append to the end
-            # Find the last non-empty line
-            lines = current_text.split('\n')
-            non_empty_lines = [line for line in lines if line.strip()]
+            # Get cursor position - we'll only use this if cursor is positioned between SELECT and FROM
+            cursor = self.query_edit.textCursor()
+            cursor_position = cursor.position()
             
-            if non_empty_lines:
-                # Go to the end of the document
-                cursor.movePosition(cursor.MoveOperation.End)
-                # Insert a new line if needed
-                if not current_text.endswith('\n'):
-                    cursor.insertText('\n')
-                # Insert a simple column reference
-                cursor.insertText(f"{col_name}")
-                self.query_edit.setTextCursor(cursor)
-                self.parent.statusBar().showMessage(f"Appended '{col_name}' to query")
-                return
+            if cursor_position > 0:
+                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
+                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
+                
+                # Check if cursor is positioned within a SELECT statement
+                has_select = re.search(r'(?i)SELECT', text_before_cursor)
+                from_after_cursor = re.search(r'(?i)FROM', text_after_cursor)
+                
+                if has_select and from_after_cursor:
+                    # We are between SELECT and FROM, insert column name here
+                    # Check if we need to add a comma before the column name
+                    needs_comma = (not text_before_cursor.strip().endswith(',') and 
+                                  not text_before_cursor.strip().endswith('(') and
+                                  not text_before_cursor.strip().endswith('SELECT') and
+                                  not re.search(r'\bFROM\s*$', text_before_cursor) and
+                                  not text_after_cursor.strip().startswith(','))
+                    
+                    # Insert with comma if needed
+                    if needs_comma:
+                        cursor.insertText(f", {col_name}")
+                    else:
+                        cursor.insertText(col_name)
+                        
+                    self.query_edit.setTextCursor(cursor)
+                    self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
+                    return
+            
+            # If all above checks failed, create a new query using the column name
+            table_name = self._get_table_name(current_text)
+            new_query = f"SELECT {col_name}\nFROM {table_name}"
+            self.set_query_text(new_query)
+            self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+            return
         
-        # If we don't have an existing query or couldn't modify it, create a new one
+        # If we don't have an existing query, create a new one
         table_name = self._get_table_name(current_text)
         new_query = f"SELECT {col_name}\nFROM {table_name}"
         self.set_query_text(new_query)
