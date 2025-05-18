@@ -407,7 +407,7 @@ class SQLShell(QMainWindow):
             self,
             "Open Data Files",
             "",
-            "Data Files (*.xlsx *.xls *.csv *.parquet);;Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;Parquet Files (*.parquet);;All Files (*)"
+            "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;Text Files (*.txt);;Parquet Files (*.parquet);;All Files (*)"
         )
         
         for file_name in file_names:
