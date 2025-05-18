@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QTableWidget, QTableWidg
                              QMessageBox, QDialog)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPalette, QColor, QBrush, QPainter, QPen
+from scipy.stats import chi2_contingency, pearsonr
 
 # Import matplotlib at the top level
 import matplotlib
@@ -93,6 +94,71 @@ class ExplainerThread(QThread):
         """Mark the thread as canceled"""
         self._is_canceled = True
         
+    def calculate_correlation(self, x, y):
+        """Calculate correlation between two variables, handling different data types.
+        Returns absolute correlation value between 0 and 1."""
+        try:
+            # Handle missing values
+            mask = ~(pd.isna(x) | pd.isna(y))
+            x_clean = x[mask]
+            y_clean = y[mask]
+            
+            # If too few data points, return default
+            if len(x_clean) < 5:
+                return 0.0
+                
+            # Check data types
+            x_is_numeric = pd.api.types.is_numeric_dtype(x_clean)
+            y_is_numeric = pd.api.types.is_numeric_dtype(y_clean)
+            
+            # Case 1: Both numeric - use Pearson correlation
+            if x_is_numeric and y_is_numeric:
+                corr, _ = pearsonr(x_clean, y_clean)
+                return abs(corr)
+            
+            # Case 2: Categorical vs Categorical - use Cramer's V
+            elif not x_is_numeric and not y_is_numeric:
+                # Convert to categorical codes
+                x_cat = pd.Categorical(x_clean).codes
+                y_cat = pd.Categorical(y_clean).codes
+                
+                # Create contingency table
+                contingency = pd.crosstab(x_cat, y_cat)
+                
+                # Calculate Cramer's V
+                chi2, _, _, _ = chi2_contingency(contingency)
+                n = contingency.sum().sum()
+                phi2 = chi2 / n
+                
+                # Get dimensions
+                r, k = contingency.shape
+                
+                # Calculate Cramer's V with correction for dimensions
+                cramers_v = np.sqrt(phi2 / min(k-1, r-1)) if min(k-1, r-1) > 0 else 0.0
+                return min(cramers_v, 1.0)  # Cap at 1.0
+            
+            # Case 3: Mixed types - convert to ranks or categories
+            else:
+                if x_is_numeric and not y_is_numeric:
+                    # Convert categorical y to codes
+                    y_encoded = pd.Categorical(y_clean).codes
+                    
+                    # Calculate correlation between x and encoded y
+                    # Using point-biserial correlation (special case of Pearson)
+                    corr, _ = pearsonr(x_clean, y_encoded)
+                    return abs(corr)
+                else:  # y is numeric, x is categorical
+                    # Convert categorical x to codes
+                    x_encoded = pd.Categorical(x_clean).codes
+                    
+                    # Calculate correlation
+                    corr, _ = pearsonr(x_encoded, y_clean)
+                    return abs(corr)
+        
+        except Exception as e:
+            print(f"Error calculating correlation: {e}")
+            return 0.0  # Return zero if correlation calculation fails
+
     def run(self):
         try:
             # Check if canceled
@@ -199,13 +265,30 @@ class ExplainerThread(QThread):
             if self.column not in df.columns:
                 raise ValueError(f"Target column '{self.column}' not found in dataframe after preprocessing")
             
+            # Calculate correlation coefficients first
+            self.progress.emit(25, "Calculating correlation measures...")
+            correlations = {}
+            
+            # Get all feature columns (excluding target)
+            feature_cols = [col for col in df.columns if col != self.column]
+            
+            # Calculate correlation for each feature
+            for col in feature_cols:
+                try:
+                    # Calculate correlation between each feature and target
+                    cor_val = self.calculate_correlation(df[col], df[self.column])
+                    correlations[col] = cor_val
+                except Exception as e:
+                    print(f"Error calculating correlation for {col}: {e}")
+                    correlations[col] = 0.0
+            
             # Separate features and target
-            self.progress.emit(25, "Preparing features and target...")
+            self.progress.emit(30, "Preparing features and target...")
             X = df.drop(columns=[self.column])
             y = df[self.column]
             
             # Handle high-cardinality categorical features
-            self.progress.emit(30, "Encoding categorical features...")
+            self.progress.emit(35, "Encoding categorical features...")
             # Use a simpler approach - just one-hot encode columns with few unique values
             # and encode (don't drop) high-cardinality columns for speed
             categorical_cols = X.select_dtypes(include='object').columns
@@ -231,7 +314,7 @@ class ExplainerThread(QThread):
             
             # Log how many columns were kept
             if columns_processed > 0:
-                self.progress.emit(35, f"Encoded {columns_kept} categorical columns out of {columns_processed}")
+                self.progress.emit(40, f"Encoded {columns_kept} categorical columns out of {columns_processed}")
             
             # Handle target column in a simpler, faster way
             if y.dtype == 'object':
@@ -242,7 +325,7 @@ class ExplainerThread(QThread):
                 y = y.fillna(y.mean() if pd.api.types.is_numeric_dtype(y) else y.mode()[0])
 
             # Train/test split
-            self.progress.emit(40, "Splitting data into train/test sets...")
+            self.progress.emit(45, "Splitting data into train/test sets...")
             
             # Make sure we still have features to work with
             if X.shape[1] == 0:
@@ -315,13 +398,11 @@ class ExplainerThread(QThread):
                     importance = []
                     for col in X.columns:
                         try:
-                            if pd.api.types.is_numeric_dtype(X[col]):
-                                # For numeric columns use correlation
-                                corr = abs(X[col].corr(y))
-                                importance.append(0.5 + corr/2 if not pd.isna(corr) else 0.5)
-                            else:
-                                # For categorical, assign default importance
-                                importance.append(0.5)
+                            # Use pre-calculated correlations for fallback importance
+                            corr_value = correlations.get(col, 0.5)
+                            # Scale correlation to make a reasonable importance value
+                            # Higher correlation = higher importance
+                            importance.append(0.5 + corr_value/2 if not pd.isna(corr_value) else 0.5)
                         except:
                             # If correlation fails, use default
                             importance.append(0.5)
@@ -338,7 +419,8 @@ class ExplainerThread(QThread):
                     self.progress.emit(80, "Creating importance results...")
                     feature_importance = pd.DataFrame({
                         'feature': X.columns,
-                        'importance_value': importance
+                        'importance_value': importance,
+                        'correlation': [correlations.get(col, 0.0) for col in X.columns]
                     }).sort_values(by='importance_value', ascending=False)
                     
                     # Cache the results for future use
@@ -363,7 +445,7 @@ class ExplainerThread(QThread):
                 return
                 
             # Get feature importance directly from XGBoost
-            self.progress.emit(80, "Calculating feature importance...")
+            self.progress.emit(80, "Calculating feature importance and correlations...")
             
             try:
                 # Check if we have features to analyze
@@ -380,10 +462,11 @@ class ExplainerThread(QThread):
                     # Replace with equal importance
                     importance = np.ones(len(X.columns)) / len(X.columns)
                 
-                # Create and sort the importance dataframe
+                # Create and sort the importance dataframe with correlations
                 feature_importance = pd.DataFrame({
                     'feature': X.columns,
-                    'importance_value': importance
+                    'importance_value': importance,
+                    'correlation': [correlations.get(col, 0.0) for col in X.columns]
                 }).sort_values(by='importance_value', ascending=False)
                 
                 # Cache the results for future use
@@ -418,17 +501,13 @@ class ExplainerThread(QThread):
                     
                     for col in X.columns:
                         try:
-                            if pd.api.types.is_numeric_dtype(X[col]) and pd.api.types.is_numeric_dtype(y):
-                                # For numeric columns vs numeric target, use correlation
-                                corr = abs(X[col].corr(y))
-                                if not pd.isna(corr):
-                                    importance.append(corr)
-                                    has_valid_correlations = True
-                                else:
-                                    importance.append(0.1)  # Default for failed correlation
+                            # Use pre-calculated correlations
+                            corr = correlations.get(col, 0.1)
+                            if not pd.isna(corr):
+                                importance.append(corr)
+                                has_valid_correlations = True
                             else:
-                                # For non-numeric, use a chi-squared test or default value
-                                importance.append(0.1)
+                                importance.append(0.1)  # Default for failed correlation
                         except:
                             # Default value for any error
                             importance.append(0.1)
@@ -467,10 +546,11 @@ class ExplainerThread(QThread):
                     importance_values = np.ones(len(X.columns)) / max(len(X.columns), 1)
                     importance = importance_values
                 
-                # Create dataframe with results
+                # Create dataframe with results, including correlations
                 feature_importance = pd.DataFrame({
                     'feature': X.columns,
-                    'importance_value': importance
+                    'importance_value': importance,
+                    'correlation': [correlations.get(col, 0.0) for col in X.columns]
                 }).sort_values(by='importance_value', ascending=False)
                 
                 # Cache the results
@@ -481,7 +561,7 @@ class ExplainerThread(QThread):
                 
                 # Clean up
                 try:
-                    del df, X, y, X_train, X_test, y_train, y_test, model
+                    del df, X, y, X_train, X_test, y_train, y_test
                     gc.collect()
                 except:
                     pass
@@ -604,7 +684,9 @@ class ExplainerThread(QThread):
         self.progress_label.hide()
         self.cancel_button.hide()
         
-        # Update importance table incrementally
+        # Update importance table to include correlation column
+        self.importance_table.setColumnCount(3)
+        self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
         self.importance_table.setRowCount(len(importance_df))
         
         # Using a timer for incremental updates
@@ -613,7 +695,7 @@ class ExplainerThread(QThread):
         self.render_timer = QTimer()
         self.render_timer.timeout.connect(lambda: self.render_next_batch(10))
         self.render_timer.start(10)  # Update every 10ms
-        
+
     def render_next_batch(self, batch_size):
         try:
             if self.current_row >= len(self.importance_df):
@@ -630,13 +712,22 @@ class ExplainerThread(QThread):
                     if row < len(self.importance_df):
                         feature = self.importance_df.iloc[row]['feature']
                         importance_value = self.importance_df.iloc[row]['importance_value']
-                        self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
-                        self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+                        
+                        # Add correlation if available
+                        correlation = self.importance_df.iloc[row].get('correlation', None)
+                        if correlation is not None:
+                            self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
+                            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+                            self.importance_table.setItem(row, 2, QTableWidgetItem(str(round(correlation, 4))))
+                        else:
+                            self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
+                            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
                     else:
                         # Handle out of range index
                         print(f"Warning: Row {row} is out of range (max: {len(self.importance_df)-1})")
                         self.importance_table.setItem(row, 0, QTableWidgetItem("Error"))
                         self.importance_table.setItem(row, 1, QTableWidgetItem("Out of range"))
+                        self.importance_table.setItem(row, 2, QTableWidgetItem("N/A"))
                 except (IndexError, KeyError) as e:
                     # Enhanced error reporting for index and key errors
                     import traceback
@@ -647,11 +738,13 @@ class ExplainerThread(QThread):
                     # Handle missing data in the dataframe gracefully
                     self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
                     self.importance_table.setItem(row, 1, QTableWidgetItem(f"{str(e)[:20]}"))
+                    self.importance_table.setItem(row, 2, QTableWidgetItem("Error"))
                 except Exception as e:
                     # Catch any other exceptions
                     print(f"Unexpected error rendering row {row}: {e.__class__.__name__}: {e}")
                     self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
                     self.importance_table.setItem(row, 1, QTableWidgetItem("See console for details"))
+                    self.importance_table.setItem(row, 2, QTableWidgetItem("Error"))
                 
             self.current_row = end_row
             QApplication.processEvents()  # Allow UI to update
@@ -687,8 +780,8 @@ class ExplainerThread(QThread):
                 
             self.chart_view.axes.clear()
             
-            # Limit to top 20 features for better visualization
-            plot_df = self.importance_df.head(20).copy()
+            # Get a sorted copy based on current sort key
+            plot_df = self.importance_df.sort_values(by=self.current_sort, ascending=False).head(20).copy()
             
             # Verify we have data before proceeding
             if len(plot_df) == 0:
@@ -719,12 +812,19 @@ class ExplainerThread(QThread):
             # Reverse order for better display (highest at top)
             plot_df = plot_df.iloc[::-1].reset_index(drop=True)
             
+            # Create a figure with two subplots side by side
+            self.chart_view.figure.clear()
+            gs = self.chart_view.figure.add_gridspec(1, 2, width_ratios=[3, 2])
+            
+            # First subplot for importance
+            ax1 = self.chart_view.figure.add_subplot(gs[0, 0])
+            
             # Create a colormap for better visualization
             cmap = plt.cm.Blues
             colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
             
             # Plot with custom colors
-            bars = self.chart_view.axes.barh(
+            bars = ax1.barh(
                 plot_df['display_feature'], 
                 plot_df['importance_value'],
                 color=colors,
@@ -735,7 +835,7 @@ class ExplainerThread(QThread):
             # Add values at the end of bars
             for bar in bars:
                 width = bar.get_width()
-                self.chart_view.axes.text(
+                ax1.text(
                     width * 1.05, 
                     bar.get_y() + bar.get_height()/2, 
                     f'{width:.2f}', 
@@ -745,26 +845,74 @@ class ExplainerThread(QThread):
                 )
             
             # Add grid for better readability
-            self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
+            ax1.grid(True, axis='x', linestyle='--', alpha=0.3)
             
             # Remove unnecessary spines
             for spine in ['top', 'right']:
-                self.chart_view.axes.spines[spine].set_visible(False)
+                ax1.spines[spine].set_visible(False)
             
             # Make labels more readable
-            self.chart_view.axes.tick_params(axis='y', labelsize=9)
+            ax1.tick_params(axis='y', labelsize=9)
             
             # Set title and labels
-            self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
-            self.chart_view.axes.set_xlabel('Importance Value')
+            ax1.set_title(f'Feature Importance for {self.column_selector.currentText()}')
+            ax1.set_xlabel('Importance Value')
+            
+            # Add a note about the sorting order
+            sort_label = "Sorted by: " + ("Importance" if self.current_sort == 'importance_value' else "Correlation")
+            
+            # Second subplot for correlation if available
+            if 'correlation' in plot_df.columns:
+                ax2 = self.chart_view.figure.add_subplot(gs[0, 1], sharey=ax1)
+                
+                # Create a colormap for correlation - use a different color
+                cmap_corr = plt.cm.Reds
+                colors_corr = cmap_corr(np.linspace(0.4, 0.8, len(plot_df)))
+                
+                # Plot correlation bars
+                corr_bars = ax2.barh(
+                    plot_df['display_feature'],
+                    plot_df['correlation'],
+                    color=colors_corr,
+                    height=0.7,
+                    alpha=0.8
+                )
+                
+                # Add values at the end of correlation bars
+                for bar in corr_bars:
+                    width = bar.get_width()
+                    ax2.text(
+                        width * 1.05,
+                        bar.get_y() + bar.get_height()/2,
+                        f'{width:.2f}',
+                        va='center',
+                        fontsize=9,
+                        fontweight='bold'
+                    )
+                
+                # Add grid and styling
+                ax2.grid(True, axis='x', linestyle='--', alpha=0.3)
+                ax2.set_title('Absolute Correlation')
+                ax2.set_xlabel('Correlation Value')
+                
+                # Hide y-axis labels since they're shared with the first plot
+                ax2.set_yticklabels([])
+                
+                # Remove unnecessary spines
+                for spine in ['top', 'right']:
+                    ax2.spines[spine].set_visible(False)
+            
+            # Add a note about the current sort order
+            self.chart_view.figure.text(0.5, 0.01, sort_label, ha='center', fontsize=9, style='italic')
             
             # Adjust figure size based on number of features
             feature_count = len(plot_df)
             self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
             
             # Adjust layout and draw
-            self.chart_view.figure.tight_layout()
+            self.chart_view.figure.tight_layout(rect=[0, 0.03, 1, 0.97])  # Make room for sort label
             self.chart_view.draw()
+            
         except IndexError as e:
             # Special handling for index errors with detailed information
             import traceback
@@ -842,8 +990,11 @@ class ExplainerThread(QThread):
         
         # Show a message in the UI as well
         self.importance_table.setRowCount(1)
-        self.importance_table.setColumnCount(1)
+        self.importance_table.setColumnCount(3)
+        self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
         self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split('\n')[0]}"))
+        self.importance_table.setItem(0, 1, QTableWidgetItem(""))
+        self.importance_table.setItem(0, 2, QTableWidgetItem(""))
         self.importance_table.resizeColumnsToContents()
         
         # Update the chart to show error
@@ -1196,13 +1347,37 @@ class ExplainerThread(QThread):
         
         # Show the dialog
         dialog.exec()
-
-# Custom matplotlib canvas for embedding in Qt
-class MatplotlibCanvas(FigureCanvasQTAgg):
-    def __init__(self, width=5, height=4, dpi=100):
-        self.figure = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = self.figure.add_subplot(111)
-        super().__init__(self.figure)
+        
+    def change_sort(self, sort_key):
+        """Change the sort order of the results"""
+        if self.importance_df is None:
+            return
+            
+        # Update button states
+        if sort_key == 'importance_value':
+            self.importance_sort_btn.setChecked(True)
+            self.correlation_sort_btn.setChecked(False)
+        else:
+            self.importance_sort_btn.setChecked(False)
+            self.correlation_sort_btn.setChecked(True)
+            
+        # Store the current sort key
+        self.current_sort = sort_key
+        
+        # Re-sort the dataframe
+        self.importance_df = self.importance_df.sort_values(by=sort_key, ascending=False)
+        
+        # Reset rendering of the table
+        self.importance_table.clearContents()
+        self.importance_table.setRowCount(len(self.importance_df))
+        self.current_row = 0
+        
+        # Start incremental rendering with the new sort order
+        if self.render_timer and self.render_timer.isActive():
+            self.render_timer.stop()
+        self.render_timer = QTimer()
+        self.render_timer.timeout.connect(lambda: self.render_next_batch(10))
+        self.render_timer.start(10)  # Update every 10ms
 
 # Main application class
 class ColumnProfilerApp(QMainWindow):
@@ -1225,6 +1400,9 @@ class ColumnProfilerApp(QMainWindow):
         self.importance_df = None
         self.current_row = 0
         self.render_timer = None
+        
+        # Current sort key
+        self.current_sort = 'importance_value'
         
         # Set window properties
         self.setWindowTitle("Column Profiler")
@@ -1268,13 +1446,38 @@ class ColumnProfilerApp(QMainWindow):
         # Add control panel to main layout
         main_layout.addWidget(control_panel)
         
+        # Add sorting control
+        sort_panel = QWidget()
+        sort_layout = QHBoxLayout(sort_panel)
+        sort_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Add sort label
+        sort_layout.addWidget(QLabel("Sort by:"))
+        
+        # Add sort buttons
+        self.importance_sort_btn = QPushButton("Importance")
+        self.importance_sort_btn.setCheckable(True)
+        self.importance_sort_btn.setChecked(True)  # Default sort
+        self.importance_sort_btn.clicked.connect(lambda: self.change_sort('importance_value'))
+        
+        self.correlation_sort_btn = QPushButton("Correlation")
+        self.correlation_sort_btn.setCheckable(True)
+        self.correlation_sort_btn.clicked.connect(lambda: self.change_sort('correlation'))
+        
+        sort_layout.addWidget(self.importance_sort_btn)
+        sort_layout.addWidget(self.correlation_sort_btn)
+        sort_layout.addStretch()
+        
+        # Add buttons to layout
+        main_layout.addWidget(sort_panel)
+        
         # Add a splitter for results area
         results_splitter = QSplitter(Qt.Orientation.Vertical)
         
         # Create table for showing importance values
         self.importance_table = QTableWidget()
-        self.importance_table.setColumnCount(2)
-        self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance"])
+        self.importance_table.setColumnCount(3)
+        self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
         self.importance_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.importance_table.cellDoubleClicked.connect(self.show_relationship_visualization)
         results_splitter.addWidget(self.importance_table)
@@ -1297,7 +1500,7 @@ class ColumnProfilerApp(QMainWindow):
         
         # Set the central widget
         self.setCentralWidget(central_widget)
-
+    
     def analyze_column(self):
         if self.df is None or self.column_selector.currentText() == "":
             return
@@ -1382,7 +1585,9 @@ class ColumnProfilerApp(QMainWindow):
         self.progress_label.hide()
         self.cancel_button.hide()
         
-        # Update importance table incrementally
+        # Update importance table to include correlation column
+        self.importance_table.setColumnCount(3)
+        self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
         self.importance_table.setRowCount(len(importance_df))
         
         # Using a timer for incremental updates
@@ -1391,7 +1596,7 @@ class ColumnProfilerApp(QMainWindow):
         self.render_timer = QTimer()
         self.render_timer.timeout.connect(lambda: self.render_next_batch(10))
         self.render_timer.start(10)  # Update every 10ms
-        
+
     def render_next_batch(self, batch_size):
         try:
             if self.current_row >= len(self.importance_df):
@@ -1408,13 +1613,22 @@ class ColumnProfilerApp(QMainWindow):
                     if row < len(self.importance_df):
                         feature = self.importance_df.iloc[row]['feature']
                         importance_value = self.importance_df.iloc[row]['importance_value']
-                        self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
-                        self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+                        
+                        # Add correlation if available
+                        correlation = self.importance_df.iloc[row].get('correlation', None)
+                        if correlation is not None:
+                            self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
+                            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
+                            self.importance_table.setItem(row, 2, QTableWidgetItem(str(round(correlation, 4))))
+                        else:
+                            self.importance_table.setItem(row, 0, QTableWidgetItem(str(feature)))
+                            self.importance_table.setItem(row, 1, QTableWidgetItem(str(round(importance_value, 4))))
                     else:
                         # Handle out of range index
                         print(f"Warning: Row {row} is out of range (max: {len(self.importance_df)-1})")
                         self.importance_table.setItem(row, 0, QTableWidgetItem("Error"))
                         self.importance_table.setItem(row, 1, QTableWidgetItem("Out of range"))
+                        self.importance_table.setItem(row, 2, QTableWidgetItem("N/A"))
                 except (IndexError, KeyError) as e:
                     # Enhanced error reporting for index and key errors
                     import traceback
@@ -1425,11 +1639,13 @@ class ColumnProfilerApp(QMainWindow):
                     # Handle missing data in the dataframe gracefully
                     self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
                     self.importance_table.setItem(row, 1, QTableWidgetItem(f"{str(e)[:20]}"))
+                    self.importance_table.setItem(row, 2, QTableWidgetItem("Error"))
                 except Exception as e:
                     # Catch any other exceptions
                     print(f"Unexpected error rendering row {row}: {e.__class__.__name__}: {e}")
                     self.importance_table.setItem(row, 0, QTableWidgetItem(f"Error: {e.__class__.__name__}"))
                     self.importance_table.setItem(row, 1, QTableWidgetItem("See console for details"))
+                    self.importance_table.setItem(row, 2, QTableWidgetItem("Error"))
                 
             self.current_row = end_row
             QApplication.processEvents()  # Allow UI to update
@@ -1465,8 +1681,8 @@ class ColumnProfilerApp(QMainWindow):
                 
             self.chart_view.axes.clear()
             
-            # Limit to top 20 features for better visualization
-            plot_df = self.importance_df.head(20).copy()
+            # Get a sorted copy based on current sort key
+            plot_df = self.importance_df.sort_values(by=self.current_sort, ascending=False).head(20).copy()
             
             # Verify we have data before proceeding
             if len(plot_df) == 0:
@@ -1497,12 +1713,19 @@ class ColumnProfilerApp(QMainWindow):
             # Reverse order for better display (highest at top)
             plot_df = plot_df.iloc[::-1].reset_index(drop=True)
             
+            # Create a figure with two subplots side by side
+            self.chart_view.figure.clear()
+            gs = self.chart_view.figure.add_gridspec(1, 2, width_ratios=[3, 2])
+            
+            # First subplot for importance
+            ax1 = self.chart_view.figure.add_subplot(gs[0, 0])
+            
             # Create a colormap for better visualization
             cmap = plt.cm.Blues
             colors = cmap(np.linspace(0.4, 0.8, len(plot_df)))
             
             # Plot with custom colors
-            bars = self.chart_view.axes.barh(
+            bars = ax1.barh(
                 plot_df['display_feature'], 
                 plot_df['importance_value'],
                 color=colors,
@@ -1513,7 +1736,7 @@ class ColumnProfilerApp(QMainWindow):
             # Add values at the end of bars
             for bar in bars:
                 width = bar.get_width()
-                self.chart_view.axes.text(
+                ax1.text(
                     width * 1.05, 
                     bar.get_y() + bar.get_height()/2, 
                     f'{width:.2f}', 
@@ -1523,26 +1746,74 @@ class ColumnProfilerApp(QMainWindow):
                 )
             
             # Add grid for better readability
-            self.chart_view.axes.grid(True, axis='x', linestyle='--', alpha=0.3)
+            ax1.grid(True, axis='x', linestyle='--', alpha=0.3)
             
             # Remove unnecessary spines
             for spine in ['top', 'right']:
-                self.chart_view.axes.spines[spine].set_visible(False)
+                ax1.spines[spine].set_visible(False)
             
             # Make labels more readable
-            self.chart_view.axes.tick_params(axis='y', labelsize=9)
+            ax1.tick_params(axis='y', labelsize=9)
             
             # Set title and labels
-            self.chart_view.axes.set_title(f'Feature Importance for Predicting {self.column_selector.currentText()}')
-            self.chart_view.axes.set_xlabel('Importance Value')
+            ax1.set_title(f'Feature Importance for {self.column_selector.currentText()}')
+            ax1.set_xlabel('Importance Value')
+            
+            # Add a note about the sorting order
+            sort_label = "Sorted by: " + ("Importance" if self.current_sort == 'importance_value' else "Correlation")
+            
+            # Second subplot for correlation if available
+            if 'correlation' in plot_df.columns:
+                ax2 = self.chart_view.figure.add_subplot(gs[0, 1], sharey=ax1)
+                
+                # Create a colormap for correlation - use a different color
+                cmap_corr = plt.cm.Reds
+                colors_corr = cmap_corr(np.linspace(0.4, 0.8, len(plot_df)))
+                
+                # Plot correlation bars
+                corr_bars = ax2.barh(
+                    plot_df['display_feature'],
+                    plot_df['correlation'],
+                    color=colors_corr,
+                    height=0.7,
+                    alpha=0.8
+                )
+                
+                # Add values at the end of correlation bars
+                for bar in corr_bars:
+                    width = bar.get_width()
+                    ax2.text(
+                        width * 1.05,
+                        bar.get_y() + bar.get_height()/2,
+                        f'{width:.2f}',
+                        va='center',
+                        fontsize=9,
+                        fontweight='bold'
+                    )
+                
+                # Add grid and styling
+                ax2.grid(True, axis='x', linestyle='--', alpha=0.3)
+                ax2.set_title('Absolute Correlation')
+                ax2.set_xlabel('Correlation Value')
+                
+                # Hide y-axis labels since they're shared with the first plot
+                ax2.set_yticklabels([])
+                
+                # Remove unnecessary spines
+                for spine in ['top', 'right']:
+                    ax2.spines[spine].set_visible(False)
+            
+            # Add a note about the current sort order
+            self.chart_view.figure.text(0.5, 0.01, sort_label, ha='center', fontsize=9, style='italic')
             
             # Adjust figure size based on number of features
             feature_count = len(plot_df)
             self.chart_view.figure.set_figheight(max(5, min(4 + feature_count * 0.3, 12)))
             
             # Adjust layout and draw
-            self.chart_view.figure.tight_layout()
+            self.chart_view.figure.tight_layout(rect=[0, 0.03, 1, 0.97])  # Make room for sort label
             self.chart_view.draw()
+            
         except IndexError as e:
             # Special handling for index errors with detailed information
             import traceback
@@ -1620,8 +1891,11 @@ class ColumnProfilerApp(QMainWindow):
         
         # Show a message in the UI as well
         self.importance_table.setRowCount(1)
-        self.importance_table.setColumnCount(1)
+        self.importance_table.setColumnCount(3)
+        self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
         self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split('\n')[0]}"))
+        self.importance_table.setItem(0, 1, QTableWidgetItem(""))
+        self.importance_table.setItem(0, 2, QTableWidgetItem(""))
         self.importance_table.resizeColumnsToContents()
         
         # Update the chart to show error
@@ -1974,6 +2248,44 @@ class ColumnProfilerApp(QMainWindow):
         
         # Show the dialog
         dialog.exec()
+        
+    def change_sort(self, sort_key):
+        """Change the sort order of the results"""
+        if self.importance_df is None:
+            return
+            
+        # Update button states
+        if sort_key == 'importance_value':
+            self.importance_sort_btn.setChecked(True)
+            self.correlation_sort_btn.setChecked(False)
+        else:
+            self.importance_sort_btn.setChecked(False)
+            self.correlation_sort_btn.setChecked(True)
+            
+        # Store the current sort key
+        self.current_sort = sort_key
+        
+        # Re-sort the dataframe
+        self.importance_df = self.importance_df.sort_values(by=sort_key, ascending=False)
+        
+        # Reset rendering of the table
+        self.importance_table.clearContents()
+        self.importance_table.setRowCount(len(self.importance_df))
+        self.current_row = 0
+        
+        # Start incremental rendering with the new sort order
+        if self.render_timer and self.render_timer.isActive():
+            self.render_timer.stop()
+        self.render_timer = QTimer()
+        self.render_timer.timeout.connect(lambda: self.render_next_batch(10))
+        self.render_timer.start(10)  # Update every 10ms
+
+# Custom matplotlib canvas for embedding in Qt
+class MatplotlibCanvas(FigureCanvasQTAgg):
+    def __init__(self, width=5, height=4, dpi=100):
+        self.figure = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = self.figure.add_subplot(111)
+        super().__init__(self.figure)
 
 def visualize_profile(df: pd.DataFrame, column: str = None) -> None:
     """
