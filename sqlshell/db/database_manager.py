@@ -219,7 +219,7 @@ class DatabaseManager:
         Load data from a file into the database.
         
         Args:
-            file_path: Path to the data file (Excel, CSV, Parquet, Delta)
+            file_path: Path to the data file (Excel, CSV, TXT, Parquet, Delta)
             
         Returns:
             Tuple of (table_name, DataFrame) for the loaded data
@@ -267,8 +267,8 @@ class DatabaseManager:
                 except Exception:
                     # Fallback to standard reading method
                     df = pd.read_excel(file_path)
-            elif file_path.endswith('.csv'):
-                # For CSV files, we can use chunking for large files
+            elif file_path.endswith(('.csv', '.txt')):
+                # For CSV and TXT files, detect separator and use chunking for large files
                 try:
                     # Check if it's a large file
                     file_size = os.path.getsize(file_path) / (1024 * 1024)  # Size in MB
@@ -276,59 +276,199 @@ class DatabaseManager:
                     # Try multiple encodings if needed
                     encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'ISO-8859-1']
                     
+                    # Detect the separator automatically
+                    def detect_separator(sample_data):
+                        # Common separators to check
+                        separators = [',', ';', '\t']
+                        separator_scores = {}
+
+                        # Split into lines and analyze
+                        lines = [line.strip() for line in sample_data.split('\n') if line.strip()]
+                        if not lines:
+                            return ','  # Default if no content
+
+                        # Check for quoted content with separators
+                        has_quotes = '"' in sample_data or "'" in sample_data
+                        
+                        # If we have quoted content, use a different approach
+                        if has_quotes:
+                            for sep in separators:
+                                # Look for patterns like "value";
+                                pattern_count = 0
+                                for line in lines:
+                                    # Count occurrences of quote + separator
+                                    double_quote_pattern = f'"{sep}'
+                                    single_quote_pattern = f"'{sep}"
+                                    pattern_count += line.count(double_quote_pattern) + line.count(single_quote_pattern)
+                                
+                                # If we found clear quote+separator patterns, this is likely our separator
+                                if pattern_count > 0:
+                                    separator_scores[sep] = pattern_count
+                        
+                        # Standard approach based on consistent column counts
+                        if not separator_scores:
+                            for sep in separators:
+                                # Count consistent occurrences across lines
+                                counts = [line.count(sep) for line in lines]
+                                if counts and all(c > 0 for c in counts):
+                                    # Calculate consistency score: higher if all counts are the same
+                                    consistency = 1.0 if all(c == counts[0] for c in counts) else 0.5
+                                    # Score is average count * consistency
+                                    separator_scores[sep] = sum(counts) / len(counts) * consistency
+                        
+                        # Choose the separator with the highest score
+                        if separator_scores:
+                            return max(separator_scores.items(), key=lambda x: x[1])[0]
+                        
+                        # Default to comma if we couldn't determine
+                        return ','
+                    
+                    # First, sample the file to detect separator
+                    with open(file_path, 'rb') as f:
+                        # Read first few KB to detect encoding and separator
+                        raw_sample = f.read(4096)
+                    
+                    # Try to decode with various encodings
+                    sample_text = None
+                    detected_encoding = None
+                    
+                    for encoding in encodings_to_try:
+                        try:
+                            sample_text = raw_sample.decode(encoding)
+                            detected_encoding = encoding
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    
+                    if not sample_text:
+                        raise ValueError("Could not decode file with any of the attempted encodings")
+                    
+                    # Detect separator from the sample
+                    separator = detect_separator(sample_text)
+                    
+                    # Determine quote character (default to double quote)
+                    quotechar = '"'
+                    if sample_text.count("'") > sample_text.count('"'):
+                        quotechar = "'"
+                    
                     if file_size > 50:  # If file is larger than 50MB
-                        # Try each encoding until one works
-                        for encoding in encodings_to_try:
+                        # Read the first chunk to get column types
+                        try:
+                            df_preview = pd.read_csv(
+                                file_path, 
+                                sep=separator,
+                                nrows=1000, 
+                                encoding=detected_encoding,
+                                engine='python' if separator != ',' else 'c',
+                                quotechar=quotechar,
+                                doublequote=True
+                            )
+                            
+                            # Use optimized dtypes for better memory usage
+                            dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
+                            
+                            # Read again with chunk processing, combining up to 100k rows
+                            chunks = []
+                            for chunk in pd.read_csv(
+                                file_path, 
+                                sep=separator,
+                                dtype=dtypes, 
+                                chunksize=10000, 
+                                encoding=detected_encoding,
+                                engine='python' if separator != ',' else 'c',
+                                quotechar=quotechar,
+                                doublequote=True
+                            ):
+                                chunks.append(chunk)
+                                if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
+                                    break
+                            
+                            df = pd.concat(chunks, ignore_index=True)
+                        except pd.errors.ParserError as e:
+                            # If parsing fails, try again with error recovery options
+                            print(f"Initial parsing failed: {str(e)}. Trying with error recovery options...")
+                            
+                            # Try with Python engine which is more flexible
                             try:
-                                # Read the first chunk to get column types
-                                df_preview = pd.read_csv(file_path, nrows=1000, encoding=encoding)
-                                
-                                # Use optimized dtypes for better memory usage
-                                dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
-                                
-                                # Read again with chunk processing, combining up to 100k rows
-                                chunks = []
-                                for chunk in pd.read_csv(file_path, dtype=dtypes, chunksize=10000, encoding=encoding):
-                                    chunks.append(chunk)
-                                    if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
-                                        break
-                                
-                                df = pd.concat(chunks, ignore_index=True)
-                                break
-                            except UnicodeDecodeError:
-                                # If this encoding fails, try the next one
-                                continue
-                            except Exception as e:
-                                # For other errors, raise immediately
-                                raise e
-                        else:
-                            # If we get here, all encodings failed
-                            raise ValueError("Failed to decode CSV file with any of the attempted encodings")
+                                # First try with pandas >= 1.3 parameters
+                                df = pd.read_csv(
+                                    file_path,
+                                    sep=separator,
+                                    encoding=detected_encoding,
+                                    engine='python',  # Always use python engine for error recovery
+                                    quotechar=quotechar,
+                                    doublequote=True,
+                                    on_bad_lines='warn',  # New parameter in pandas >= 1.3
+                                    na_values=[''],
+                                    keep_default_na=True
+                                )
+                            except TypeError:
+                                # Fall back to pandas < 1.3 parameters
+                                df = pd.read_csv(
+                                    file_path,
+                                    sep=separator,
+                                    encoding=detected_encoding,
+                                    engine='python',
+                                    quotechar=quotechar,
+                                    doublequote=True,
+                                    error_bad_lines=False,  # Old parameter
+                                    warn_bad_lines=True,    # Old parameter
+                                    na_values=[''],
+                                    keep_default_na=True
+                                )
                     else:
-                        # For smaller files, read everything at once, trying different encodings
-                        for encoding in encodings_to_try:
+                        # For smaller files, read everything at once
+                        try:
+                            df = pd.read_csv(
+                                file_path, 
+                                sep=separator,
+                                encoding=detected_encoding,
+                                engine='python' if separator != ',' else 'c',
+                                quotechar=quotechar,
+                                doublequote=True
+                            )
+                        except pd.errors.ParserError as e:
+                            # If parsing fails, try again with error recovery options
+                            print(f"Initial parsing failed: {str(e)}. Trying with error recovery options...")
+                            
+                            # Try with Python engine which is more flexible
                             try:
-                                df = pd.read_csv(file_path, encoding=encoding)
-                                break
-                            except UnicodeDecodeError:
-                                # If this encoding fails, try the next one
-                                continue
-                            except Exception as e:
-                                # For other errors, raise immediately
-                                raise e
-                        else:
-                            # If we get here, all encodings failed
-                            raise ValueError("Failed to decode CSV file with any of the attempted encodings")
+                                # First try with pandas >= 1.3 parameters
+                                df = pd.read_csv(
+                                    file_path,
+                                    sep=separator,
+                                    encoding=detected_encoding,
+                                    engine='python',  # Always use python engine for error recovery
+                                    quotechar=quotechar,
+                                    doublequote=True,
+                                    on_bad_lines='warn',  # New parameter in pandas >= 1.3
+                                    na_values=[''],
+                                    keep_default_na=True
+                                )
+                            except TypeError:
+                                # Fall back to pandas < 1.3 parameters
+                                df = pd.read_csv(
+                                    file_path,
+                                    sep=separator,
+                                    encoding=detected_encoding,
+                                    engine='python',
+                                    quotechar=quotechar,
+                                    doublequote=True,
+                                    error_bad_lines=False,  # Old parameter
+                                    warn_bad_lines=True,    # Old parameter
+                                    na_values=[''],
+                                    keep_default_na=True
+                                )
                 except Exception as e:
                     # Log the error for debugging
                     import traceback
-                    print(f"Error loading CSV file: {str(e)}")
+                    print(f"Error loading CSV/TXT file: {str(e)}")
                     print(traceback.format_exc())
-                    raise ValueError(f"Error loading CSV file: {str(e)}")
+                    raise ValueError(f"Error loading CSV/TXT file: {str(e)}")
             elif file_path.endswith('.parquet'):
                 df = pd.read_parquet(file_path)
             else:
-                raise ValueError("Unsupported file format")
+                raise ValueError("Unsupported file format. Supported formats: .xlsx, .xls, .csv, .txt, .parquet, and Delta tables.")
             
             # Generate table name from file name
             base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -479,22 +619,128 @@ class DatabaseManager:
                 df = delta_table.to_pandas()
             elif file_path.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file_path)
-            elif file_path.endswith('.csv'):
-                # Try multiple encodings for CSV files
+            elif file_path.endswith(('.csv', '.txt')):
+                # Try multiple encodings for CSV/TXT files
                 encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'ISO-8859-1']
+                
+                # Detect the separator automatically
+                def detect_separator(sample_data):
+                    # Common separators to check
+                    separators = [',', ';', '\t']
+                    separator_scores = {}
+
+                    # Split into lines and analyze
+                    lines = [line.strip() for line in sample_data.split('\n') if line.strip()]
+                    if not lines:
+                        return ','  # Default if no content
+
+                    # Check for quoted content with separators
+                    has_quotes = '"' in sample_data or "'" in sample_data
+                    
+                    # If we have quoted content, use a different approach
+                    if has_quotes:
+                        for sep in separators:
+                            # Look for patterns like "value";
+                            pattern_count = 0
+                            for line in lines:
+                                # Count occurrences of quote + separator
+                                double_quote_pattern = f'"{sep}'
+                                single_quote_pattern = f"'{sep}"
+                                pattern_count += line.count(double_quote_pattern) + line.count(single_quote_pattern)
+                            
+                            # If we found clear quote+separator patterns, this is likely our separator
+                            if pattern_count > 0:
+                                separator_scores[sep] = pattern_count
+                    
+                    # Standard approach based on consistent column counts
+                    if not separator_scores:
+                        for sep in separators:
+                            # Count consistent occurrences across lines
+                            counts = [line.count(sep) for line in lines]
+                            if counts and all(c > 0 for c in counts):
+                                # Calculate consistency score: higher if all counts are the same
+                                consistency = 1.0 if all(c == counts[0] for c in counts) else 0.5
+                                # Score is average count * consistency
+                                separator_scores[sep] = sum(counts) / len(counts) * consistency
+                    
+                    # Choose the separator with the highest score
+                    if separator_scores:
+                        return max(separator_scores.items(), key=lambda x: x[1])[0]
+                    
+                    # Default to comma if we couldn't determine
+                    return ','
+                
+                # First, sample the file to detect separator and encoding
+                with open(file_path, 'rb') as f:
+                    # Read first few KB to detect encoding and separator
+                    raw_sample = f.read(4096)
+                
+                # Try to decode with various encodings
+                sample_text = None
+                detected_encoding = None
+                
                 for encoding in encodings_to_try:
                     try:
-                        df = pd.read_csv(file_path, encoding=encoding)
-                        break  # If successful, break the loop
+                        sample_text = raw_sample.decode(encoding)
+                        detected_encoding = encoding
+                        break
                     except UnicodeDecodeError:
                         # If this encoding fails, try the next one
                         continue
-                    except Exception as e:
-                        # For other errors, raise immediately
-                        raise e
-                else:
-                    # If all encodings fail, raise an error
-                    raise ValueError("Failed to decode CSV file with any of the attempted encodings")
+                
+                if not sample_text:
+                    raise ValueError("Could not decode file with any of the attempted encodings")
+                
+                # Detect separator from the sample
+                separator = detect_separator(sample_text)
+                
+                # Determine quote character (default to double quote)
+                quotechar = '"'
+                if sample_text.count("'") > sample_text.count('"'):
+                    quotechar = "'"
+                
+                # Read with detected parameters
+                try:
+                    df = pd.read_csv(
+                        file_path, 
+                        sep=separator,
+                        encoding=detected_encoding,
+                        engine='python' if separator != ',' else 'c',
+                        quotechar=quotechar,
+                        doublequote=True
+                    )
+                except pd.errors.ParserError as e:
+                    # If parsing fails, try again with error recovery options
+                    print(f"Initial parsing failed on reload: {str(e)}. Trying with error recovery options...")
+                    
+                    # Try with Python engine which is more flexible
+                    try:
+                        # First try with pandas >= 1.3 parameters
+                        df = pd.read_csv(
+                            file_path,
+                            sep=separator,
+                            encoding=detected_encoding,
+                            engine='python',  # Always use python engine for error recovery
+                            quotechar=quotechar,
+                            doublequote=True,
+                            on_bad_lines='warn',  # New parameter in pandas >= 1.3
+                            na_values=[''],
+                            keep_default_na=True
+                        )
+                    except TypeError:
+                        # Fall back to pandas < 1.3 parameters
+                        df = pd.read_csv(
+                            file_path,
+                            sep=separator,
+                            encoding=detected_encoding,
+                            engine='python',
+                            quotechar=quotechar,
+                            doublequote=True,
+                            error_bad_lines=False,  # Old parameter
+                            warn_bad_lines=True,    # Old parameter
+                            na_values=[''],
+                            keep_default_na=True
+                        )
             elif file_path.endswith('.parquet'):
                 df = pd.read_parquet(file_path)
             else:
