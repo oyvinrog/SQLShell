@@ -636,6 +636,31 @@ class SQLShell(QMainWindow):
                 QMessageBox.warning(self, "Empty Query", "Please enter a SQL query to execute.")
                 return
 
+            # Check if the query references any tables that need to be loaded
+            referenced_tables = self.extract_table_names_from_query(query)
+            tables_to_load = [table for table in referenced_tables if table in self.tables_list.tables_needing_reload]
+            
+            # Load any tables that need to be loaded
+            if tables_to_load:
+                progress = QProgressDialog(f"Loading tables...", "Cancel", 0, len(tables_to_load), self)
+                progress.setWindowTitle("Loading Tables")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.show()
+                
+                for i, table_name in enumerate(tables_to_load):
+                    if progress.wasCanceled():
+                        self.statusBar().showMessage("Query canceled: table loading was interrupted")
+                        return
+                    
+                    progress.setLabelText(f"Loading table: {table_name}")
+                    progress.setValue(i)
+                    QApplication.processEvents()
+                    
+                    self.reload_selected_table(table_name)
+                
+                progress.setValue(len(tables_to_load))
+                progress.close()
+
             start_time = datetime.now()
             
             try:
@@ -672,6 +697,57 @@ class SQLShell(QMainWindow):
             QMessageBox.critical(self, "Unexpected Error",
                 f"An unexpected error occurred:\n\n{str(e)}")
             self.statusBar().showMessage("Query execution failed")
+            
+    def extract_table_names_from_query(self, query):
+        """Extract table names from a SQL query using basic regex patterns"""
+        import re
+        
+        # Convert to uppercase for easier pattern matching
+        query_upper = query.upper()
+        
+        # Strip comments to avoid matching patterns inside comments
+        query_upper = re.sub(r'--.*?$', '', query_upper, flags=re.MULTILINE)
+        query_upper = re.sub(r'/\*.*?\*/', '', query_upper, flags=re.DOTALL)
+        
+        # Common SQL patterns that reference tables
+        patterns = [
+            r'FROM\s+["\[]?(\w+)["\]]?',                         # FROM clause
+            r'JOIN\s+["\[]?(\w+)["\]]?',                         # JOIN clause
+            r'UPDATE\s+["\[]?(\w+)["\]]?',                       # UPDATE statement
+            r'INSERT\s+INTO\s+["\[]?(\w+)["\]]?',                # INSERT statement
+            r'DELETE\s+FROM\s+["\[]?(\w+)["\]]?',                # DELETE statement
+            r'CREATE\s+(?:TEMP|TEMPORARY)?\s*TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["\[]?(\w+)["\]]?', # CREATE TABLE
+            r'DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["\[]?(\w+)["\]]?',  # DROP TABLE
+            r'ALTER\s+TABLE\s+["\[]?(\w+)["\]]?',                # ALTER TABLE
+            r'WITH\s+(\w+)\s+AS',                                # Common Table Expressions
+            r'MERGE\s+INTO\s+["\[]?(\w+)["\]]?'                  # MERGE statement
+        ]
+        
+        tables = set()
+        for pattern in patterns:
+            matches = re.finditer(pattern, query_upper)
+            for match in matches:
+                # Get the table name from the matched group and strip any quotes
+                table_name = match.group(1).strip('"[]`\'')
+                
+                # Skip SQL keywords
+                if table_name in ('SELECT', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 
+                                 'UNION', 'INTERSECT', 'EXCEPT', 'WITH', 'AS', 'ON', 'USING'):
+                    continue
+                    
+                # Add to our set of tables
+                tables.add(table_name.lower())  # Convert to lowercase for case-insensitive comparison
+                
+        # Account for qualified table names (schema.table)
+        qualified_tables = set()
+        for table in tables:
+            if '.' in table:
+                qualified_tables.add(table.split('.')[-1])  # Add just the table part
+                
+        tables.update(qualified_tables)
+        
+        # Return all found table names in lowercase to match our table storage convention
+        return tables
 
     def _update_query_history(self, query):
         """Update query history and track term usage for improved autocompletion"""
