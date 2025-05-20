@@ -216,6 +216,39 @@ class SQLShell(QMainWindow):
         query_header.setObjectName("header_label")
         right_layout.addWidget(query_header)
         
+        # Create a drop area for tables above the tab widget
+        self.tab_drop_area = QFrame()
+        self.tab_drop_area.setFixedHeight(30)
+        self.tab_drop_area.setObjectName("tab_drop_area")
+        
+        # Add a label with hint text
+        drop_area_layout = QHBoxLayout(self.tab_drop_area)
+        drop_area_layout.setContentsMargins(10, 0, 10, 0)
+        self.drop_hint_label = QLabel("Drag tables here to create new query tabs")
+        self.drop_hint_label.setStyleSheet("color: #95a5a6; font-size: 11px;")
+        self.drop_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        drop_area_layout.addWidget(self.drop_hint_label)
+        
+        self.tab_drop_area.setStyleSheet("""
+            #tab_drop_area {
+                background-color: #f8f9fa;
+                border: 1px dashed #BDC3C7;
+                border-radius: 4px;
+                margin: 0 0 5px 0;
+            }
+            
+            #tab_drop_area:hover {
+                background-color: #E5F7FF;
+                border: 1px dashed #3498DB;
+            }
+        """)
+        self.tab_drop_area.setAcceptDrops(True)
+        self.tab_drop_area.dragEnterEvent = self.tab_area_drag_enter
+        self.tab_drop_area.dragMoveEvent = self.tab_area_drag_move
+        self.tab_drop_area.dragLeaveEvent = self.tab_area_drag_leave
+        self.tab_drop_area.dropEvent = self.tab_area_drop
+        right_layout.addWidget(self.tab_drop_area)
+        
         # Create tab widget for multiple queries
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
@@ -237,6 +270,100 @@ class SQLShell(QMainWindow):
         # Status bar
         self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab | Ctrl+Shift+O: Quick Access Files')
         
+    # Methods for handling drag and drop on the tab drop area
+    def tab_area_drag_enter(self, event):
+        """Handle drag enter events on the tab drop area"""
+        # Accept only if from the tables list
+        if event.source() == self.tables_list:
+            # Extract table name(s) from the mime data
+            mime_data = event.mimeData()
+            if mime_data.hasText():
+                table_names = mime_data.text().split(", ")
+                if len(table_names) == 1:
+                    self.drop_hint_label.setText(f"Release to create a new query tab for {table_names[0]}")
+                else:
+                    self.drop_hint_label.setText(f"Release to create {len(table_names)} new query tabs")
+                
+                self.drop_hint_label.setStyleSheet("color: #3498db; font-size: 11px; font-weight: bold;")
+            
+            # Highlight the drop area
+            self.tab_drop_area.setStyleSheet("""
+                #tab_drop_area {
+                    background-color: #E5F7FF;
+                    border: 2px dashed #3498DB;
+                    border-radius: 4px;
+                    margin: 0 0 5px 0;
+                }
+            """)
+            self.tab_drop_area.setFixedHeight(40)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def tab_area_drag_move(self, event):
+        """Handle drag move events on the tab drop area"""
+        # Continue accepting drag moves
+        if event.source() == self.tables_list:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def tab_area_drag_leave(self, event):
+        """Handle drag leave events on the tab drop area"""
+        # Reset the drop area
+        self.tab_drop_area.setStyleSheet("""
+            #tab_drop_area {
+                background-color: #f8f9fa;
+                border: 1px dashed #BDC3C7;
+                border-radius: 4px;
+                margin: 0 0 5px 0;
+            }
+        """)
+        self.drop_hint_label.setText("Drag tables here to create new query tabs")
+        self.drop_hint_label.setStyleSheet("color: #95a5a6; font-size: 11px;")
+        self.tab_drop_area.setFixedHeight(30)
+        # No need to call a parent method
+
+    def tab_area_drop(self, event):
+        """Handle drop events on the tab drop area"""
+        # Process the drop to create a new tab with SELECT query
+        if event.source() == self.tables_list:
+            mime_data = event.mimeData()
+            if mime_data.hasText():
+                table_names = mime_data.text().split(", ")
+                
+                for table_name in table_names:
+                    # Check if this table needs to be reloaded first
+                    if table_name in self.tables_list.tables_needing_reload:
+                        # Reload the table immediately without asking
+                        self.reload_selected_table(table_name)
+                    
+                    # Generate a title for the tab
+                    tab_title = f"Query {table_name}"
+                    # Create a new tab
+                    new_tab = self.add_tab(tab_title)
+                    # Set the SQL query
+                    new_tab.set_query_text(f"SELECT * FROM {table_name}")
+                
+                self.statusBar().showMessage(f"Created new tab{'s' if len(table_names) > 1 else ''} for {', '.join(table_names)}")
+                
+                # Reset the drop area appearance
+                self.tab_drop_area.setStyleSheet("""
+                    #tab_drop_area {
+                        background-color: #f8f9fa;
+                        border: 1px dashed #BDC3C7;
+                        border-radius: 4px;
+                        margin: 0 0 5px 0;
+                    }
+                """)
+                self.drop_hint_label.setText("Drag tables here to create new query tabs")
+                self.drop_hint_label.setStyleSheet("color: #95a5a6; font-size: 11px;")
+                self.tab_drop_area.setFixedHeight(30)
+                
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
     def create_tab_corner_widget(self):
         """Create a corner widget with a + button to add new tabs"""
         corner_widget = QWidget()
