@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 import re
+import pandas as pd
+import numpy as np
 
 from sqlshell.editor import SQLEditor
 from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
@@ -460,83 +462,121 @@ class QueryTab(QWidget):
         self.set_query_text(new_query)
         self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
 
-    def handle_header_click(self, logicalIndex):
-        """Handle header click to generate or append a SELECT query with the clicked column"""
-        # Get column name
-        col_name = self.results_table.horizontalHeaderItem(logicalIndex).text()
-        
-        # Check if the column name needs quoting (contains spaces or special characters)
-        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
-            col_name = f'"{col_name}"'
-        
-        # Get current query text
-        current_text = self.get_query_text().strip()
-        
-        # Check if we already have an existing query
-        if current_text:
-            # If we have a SELECT query, modify it to include the column
-            if current_text.upper().startswith("SELECT"):
-                # Try to find the SELECT clause
-                select_match = re.match(r'(?i)SELECT\s+(.*?)(?:\sFROM\s|$)', current_text)
-                if select_match:
-                    select_clause = select_match.group(1).strip()
-                    
-                    # If it's "SELECT *", replace it with the column name
-                    if select_clause == "*":
-                        modified_text = current_text.replace("SELECT *", f"SELECT {col_name}")
-                        self.set_query_text(modified_text)
-                    # Otherwise append the column if it's not already there
-                    elif col_name not in select_clause:
-                        modified_text = current_text.replace(select_clause, f"{select_clause}, {col_name}")
-                        self.set_query_text(modified_text)
-                    
-                    self.parent.statusBar().showMessage(f"Added '{col_name}' to SELECT clause")
-                    return
-            
-            # Get cursor position - we'll only use this if cursor is positioned between SELECT and FROM
-            cursor = self.query_edit.textCursor()
-            cursor_position = cursor.position()
-            
-            if cursor_position > 0:
-                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
-                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
-                
-                # Check if cursor is positioned within a SELECT statement
-                has_select = re.search(r'(?i)SELECT', text_before_cursor)
-                from_after_cursor = re.search(r'(?i)FROM', text_after_cursor)
-                
-                if has_select and from_after_cursor:
-                    # We are between SELECT and FROM, insert column name here
-                    # Check if we need to add a comma before the column name
-                    needs_comma = (not text_before_cursor.strip().endswith(',') and 
-                                  not text_before_cursor.strip().endswith('(') and
-                                  not text_before_cursor.strip().endswith('SELECT') and
-                                  not re.search(r'\bFROM\s*$', text_before_cursor) and
-                                  not text_after_cursor.strip().startswith(','))
-                    
-                    # Insert with comma if needed
-                    if needs_comma:
-                        cursor.insertText(f", {col_name}")
-                    else:
-                        cursor.insertText(col_name)
-                        
-                    self.query_edit.setTextCursor(cursor)
-                    self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
-                    return
-            
-            # If all above checks failed, create a new query using the column name
-            table_name = self._get_table_name(current_text)
-            new_query = f"SELECT {col_name}\nFROM {table_name}"
-            self.set_query_text(new_query)
-            self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+    def handle_header_click(self, idx):
+        """Handle a click on a column header"""
+        # Get the header
+        header = self.results_table.horizontalHeader()
+        if not header:
             return
+            
+        # Get the column name
+        if not hasattr(self, 'current_df') or self.current_df is None:
+            return
+            
+        if idx >= len(self.current_df.columns):
+            return
+            
+        # Get column name
+        col_name = self.current_df.columns[idx]
         
-        # If we don't have an existing query, create a new one
-        table_name = self._get_table_name(current_text)
-        new_query = f"SELECT {col_name}\nFROM {table_name}"
-        self.set_query_text(new_query)
-        self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+        # Check if column name needs quoting (contains spaces or special chars)
+        quoted_col_name = col_name
+        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
+            quoted_col_name = f'"{col_name}"'
         
+        # Get the position for the context menu (at the header cell)
+        position = header.mapToGlobal(header.rect().bottomLeft())
+        
+        # Create the context menu
+        menu = QMenu()
+        col_header_action = menu.addAction(f"Column: {col_name}")
+        col_header_action.setEnabled(False)
+        menu.addSeparator()
+        
+        # Add copy action
+        copy_col_name_action = menu.addAction("Copy Column Name")
+        
+        # Add sorting actions
+        sort_menu = menu.addMenu("Sort")
+        sort_asc_action = sort_menu.addAction("Sort Ascending")
+        sort_desc_action = sort_menu.addAction("Sort Descending")
+        
+        # Add bar chart toggle if numeric column
+        bar_action = None
+        if isinstance(header, FilterHeader):
+            is_numeric = False
+            try:
+                # Check if first non-null value is numeric
+                for i in range(min(100, len(self.current_df))):
+                    if pd.notna(self.current_df.iloc[i, idx]):
+                        val = self.current_df.iloc[i, idx]
+                        if isinstance(val, (int, float, np.number)):
+                            is_numeric = True
+                        break
+            except:
+                pass
+                
+            if is_numeric:
+                menu.addSeparator()
+                if idx in header.columns_with_bars:
+                    bar_action = menu.addAction("Remove Bar Chart")
+                else:
+                    bar_action = menu.addAction("Add Bar Chart")
+        
+        sql_menu = menu.addMenu("Generate SQL")
+        select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
+        filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
+        explain_action = menu.addAction(f"Explain Column")
+        encode_action = menu.addAction(f"Encode Text")
+        
+        # Execute the menu
+        action = menu.exec(position)
+        
+        # Handle actions
+        if action == copy_col_name_action:
+            QApplication.clipboard().setText(col_name)
+            self.parent.statusBar().showMessage(f"Copied '{col_name}' to clipboard")
+        
+        elif action == explain_action:
+            # Call the explain column method on the parent
+            if hasattr(self.parent, 'explain_column'):
+                self.parent.explain_column(col_name)
+        
+        elif action == encode_action:
+            # Call the encode text method on the parent
+            if hasattr(self.parent, 'encode_text'):
+                self.parent.encode_text(col_name)
+        
+        elif action == sort_asc_action:
+            self.results_table.sortItems(idx, Qt.SortOrder.AscendingOrder)
+            self.parent.statusBar().showMessage(f"Sorted by '{col_name}' (ascending)")
+            
+        elif action == sort_desc_action:
+            self.results_table.sortItems(idx, Qt.SortOrder.DescendingOrder)
+            self.parent.statusBar().showMessage(f"Sorted by '{col_name}' (descending)")
+            
+        elif isinstance(header, FilterHeader) and action == bar_action:
+            # Toggle bar chart
+            header.toggle_bar_chart(idx)
+            if idx in header.columns_with_bars:
+                self.parent.statusBar().showMessage(f"Added bar chart for '{col_name}'")
+            else:
+                self.parent.statusBar().showMessage(f"Removed bar chart for '{col_name}'")
+                
+        elif action == select_col_action:
+            # Insert SQL snippet at cursor position in query editor
+            if hasattr(self, 'query_edit'):
+                cursor = self.query_edit.textCursor()
+                cursor.insertText(f"SELECT {quoted_col_name}")
+                self.query_edit.setFocus()
+                
+        elif action == filter_col_action:
+            # Insert SQL snippet at cursor position in query editor
+            if hasattr(self, 'query_edit'):
+                cursor = self.query_edit.textCursor()
+                cursor.insertText(f"WHERE {quoted_col_name} = ")
+                self.query_edit.setFocus()
+
     def _get_table_name(self, current_text):
         """Extract table name from current query or DataFrame, with fallbacks"""
         # First, try to get the currently selected table in the UI

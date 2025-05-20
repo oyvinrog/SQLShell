@@ -229,6 +229,210 @@ def test_categorical_ohe():
     
     print("\nAll categorical tests passed successfully!")
 
+# Add visualization functionality
+from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
+                           QTableWidget, QTableWidgetItem, QLabel, QPushButton,
+                           QComboBox, QSplitter, QTabWidget, QScrollArea,
+                           QFrame, QSizePolicy, QButtonGroup, QRadioButton,
+                           QMessageBox, QHeaderView, QApplication)
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QFont
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
+class OneHotEncodingVisualization(QMainWindow):
+    def __init__(self, original_df, encoded_df, encoded_column):
+        super().__init__()
+        self.original_df = original_df
+        self.encoded_df = encoded_df
+        self.encoded_column = encoded_column
+        self.setWindowTitle(f"One-Hot Encoding Visualization - {encoded_column}")
+        self.setGeometry(100, 100, 1000, 800)
+        
+        # Main widget
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        
+        # Main layout
+        main_layout = QVBoxLayout(main_widget)
+        
+        # Title
+        title_label = QLabel(f"One-Hot Encoding Analysis: {encoded_column}")
+        title_font = QFont()
+        title_font.setBold(True)
+        title_font.setPointSize(14)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(title_label)
+        
+        # Description
+        description = "One-hot encoding transforms categorical data into a binary matrix format where each category becomes a separate binary column."
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        main_layout.addWidget(desc_label)
+        
+        # Splitter to divide the screen
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        main_layout.addWidget(splitter, 1)
+        
+        # Top widget: Data view
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        
+        # Create tab widget for different views
+        tab_widget = QTabWidget()
+        
+        # Tab 1: Original data
+        original_tab = QWidget()
+        original_layout = QVBoxLayout(original_tab)
+        original_table = self.create_table_from_df(self.original_df)
+        original_layout.addWidget(original_table)
+        tab_widget.addTab(original_tab, "Original Data")
+        
+        # Tab 2: Encoded data
+        encoded_tab = QWidget()
+        encoded_layout = QVBoxLayout(encoded_tab)
+        encoded_table = self.create_table_from_df(self.encoded_df)
+        encoded_layout.addWidget(encoded_table)
+        tab_widget.addTab(encoded_tab, "Encoded Data")
+        
+        top_layout.addWidget(tab_widget)
+        splitter.addWidget(top_widget)
+        
+        # Bottom widget: Visualizations
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        
+        # Visualization title
+        viz_title = QLabel("Visualization")
+        viz_title.setFont(title_font)
+        bottom_layout.addWidget(viz_title)
+        
+        # Create matplotlib figure
+        self.figure = plt.figure(figsize=(8, 6))
+        self.canvas = FigureCanvas(self.figure)
+        bottom_layout.addWidget(self.canvas)
+        
+        # Visualization type selector
+        viz_selector_layout = QHBoxLayout()
+        viz_selector_label = QLabel("Visualization Type:")
+        self.viz_selector = QComboBox()
+        self.viz_selector.addItems(["Value Counts", "Correlation Heatmap"])
+        self.viz_selector.currentIndexChanged.connect(self.update_visualization)
+        viz_selector_layout.addWidget(viz_selector_label)
+        viz_selector_layout.addWidget(self.viz_selector)
+        viz_selector_layout.addStretch(1)
+        bottom_layout.addLayout(viz_selector_layout)
+        
+        splitter.addWidget(bottom_widget)
+        
+        # Set initial splitter sizes
+        splitter.setSizes([300, 500])
+        
+        # Create initial visualization
+        self.update_visualization()
+    
+    def create_table_from_df(self, df):
+        """Create a table widget from a dataframe"""
+        table = QTableWidget()
+        table.setRowCount(min(100, len(df)))  # Limit to 100 rows for performance
+        table.setColumnCount(len(df.columns))
+        
+        # Set headers
+        table.setHorizontalHeaderLabels(df.columns)
+        
+        # Fill data
+        for row in range(min(100, len(df))):
+            for col, col_name in enumerate(df.columns):
+                value = str(df.iloc[row, col])
+                item = QTableWidgetItem(value)
+                table.setItem(row, col, item)
+        
+        # Optimize appearance
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        return table
+    
+    def update_visualization(self):
+        """Update the visualization based on the selected type"""
+        viz_type = self.viz_selector.currentText()
+        
+        # Clear previous plot
+        self.figure.clear()
+        
+        # Get the encoded columns (those starting with 'is_' or 'has_')
+        is_columns = [col for col in self.encoded_df.columns if col.startswith('is_')]
+        has_columns = [col for col in self.encoded_df.columns if col.startswith('has_')]
+        encoded_columns = is_columns + has_columns
+        
+        if viz_type == "Value Counts":
+            # Create value counts visualization
+            ax = self.figure.add_subplot(111)
+            
+            # Get value counts from original column
+            value_counts = self.original_df[self.encoded_column].value_counts()
+            
+            # Plot
+            if len(value_counts) > 15:
+                # For high cardinality, show top 15
+                value_counts.nlargest(15).plot(kind='barh', ax=ax)
+                ax.set_title(f"Top 15 Values in {self.encoded_column}")
+            else:
+                value_counts.plot(kind='barh', ax=ax)
+                ax.set_title(f"Value Counts in {self.encoded_column}")
+            
+            ax.set_xlabel("Count")
+            ax.set_ylabel(self.encoded_column)
+            
+        elif viz_type == "Correlation Heatmap":
+            # Create correlation heatmap for one-hot encoded columns
+            if len(encoded_columns) > 0:
+                ax = self.figure.add_subplot(111)
+                
+                # Get subset with just the encoded columns
+                encoded_subset = self.encoded_df[encoded_columns]
+                
+                # Calculate correlation matrix
+                corr_matrix = encoded_subset.corr()
+                
+                # Create heatmap
+                sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', linewidths=0.5, ax=ax)
+                ax.set_title(f"Correlation Between Encoded Features")
+            else:
+                # No encoded columns found
+                ax = self.figure.add_subplot(111)
+                ax.text(0.5, 0.5, "No encoded columns found", 
+                       horizontalalignment='center', verticalalignment='center',
+                       transform=ax.transAxes)
+                ax.axis('off')
+        
+        # Update the canvas
+        self.canvas.draw()
+
+def visualize_ohe(df, column):
+    """
+    Visualize the one-hot encoding of a column in a dataframe.
+    
+    Args:
+        df (pd.DataFrame): The original dataframe
+        column (str): The column to encode and visualize
+        
+    Returns:
+        QMainWindow: The visualization window
+    """
+    # Create a copy to avoid modifying the original
+    original_df = df.copy()
+    
+    # Apply one-hot encoding
+    encoded_df = get_ohe(original_df, column)
+    
+    # Create and show the visualization
+    vis = OneHotEncodingVisualization(original_df, encoded_df, column)
+    vis.show()
+    
+    return vis
+
 if __name__ == "__main__":
     test_ohe()
     test_categorical_ohe()

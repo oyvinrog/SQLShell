@@ -3442,6 +3442,56 @@ LIMIT 10
             QMessageBox.critical(self, "Analysis Error", f"Error analyzing column:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error analyzing column: {str(e)}')
 
+    def encode_text(self, column_name):
+        """Generate one-hot encoding for a text column and visualize the results"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                return
+                
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Preparing one-hot encoding for "{column_name}"...')
+            
+            # Get the dataframe from the current tab
+            df = current_tab.current_df
+            
+            if df is not None and not df.empty:
+                # Sample the data if it's larger than 1000 rows for better performance
+                row_count = len(df)
+                if row_count > 1000:
+                    self.statusBar().showMessage(f'Sampling data (using 1000 rows from {row_count} total)...')
+                    df = df.sample(n=1000, random_state=42)
+                
+                # Import the one-hot encoding visualizer
+                from sqlshell.utils.profile_ohe import visualize_ohe
+                
+                # Create and show the visualization
+                self.statusBar().showMessage(f'Generating one-hot encoding for "{column_name}"...')
+                vis = visualize_ohe(df, column_name)
+                
+                # Store a reference to prevent garbage collection
+                self._ohe_window = vis
+                
+                if row_count > 1000:
+                    self.statusBar().showMessage(f'One-hot encoding generated for "{column_name}" (sampled 1000 rows from {row_count})')
+                else:
+                    self.statusBar().showMessage(f'One-hot encoding generated for "{column_name}"')
+            else:
+                QMessageBox.warning(self, "Empty Data", "No data available to encode.")
+                self.statusBar().showMessage(f'No data to encode')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Encoding Error", f"Error generating one-hot encoding:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error generating one-hot encoding: {str(e)}')
+
+    def get_current_query_tab(self):
+        """Get the currently active tab if it's a query tab (has query_edit attribute)"""
+        current_tab = self.get_current_tab()
+        if current_tab and hasattr(current_tab, 'query_edit'):
+            return current_tab
+        return None
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='SQL Shell - SQL Query Tool')

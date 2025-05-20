@@ -93,6 +93,9 @@ class FilterHeader(QHeaderView):
         # Add explain column action
         explain_action = context_menu.addAction("Explain Column")
         
+        # Add encode text action
+        encode_action = context_menu.addAction("Encode Text")
+        
         context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
         
@@ -141,6 +144,15 @@ class FilterHeader(QHeaderView):
                     if logical_index < len(current_tab.current_df.columns):
                         column_name = current_tab.current_df.columns[logical_index]
                         self.main_window.explain_column(column_name)
+        elif action == encode_action:
+            # Call the encode_text method on the main window
+            if self.main_window and hasattr(self.main_window, "encode_text"):
+                # Get the column name from the table (if it has a current dataframe)
+                current_tab = self.main_window.get_current_tab()
+                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
+                    if logical_index < len(current_tab.current_df.columns):
+                        column_name = current_tab.current_df.columns[logical_index]
+                        self.main_window.encode_text(column_name)
 
     def set_main_window(self, window):
         """Set the reference to the main window"""
