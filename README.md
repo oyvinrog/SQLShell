@@ -230,6 +230,50 @@ The Column Profiler now offers in-depth multivariate analysis to explore relatio
 
 This feature is particularly useful for exploratory data analysis, helping you understand your data structure and relationships on the fly.
 
+### One-hot encoding
+
+If you are working with text (i.e. job description or job title to analyze salary), you would want to 
+do 'one-hot encoding'. 
+
+1. **How to Access**:
+   - Right-click on any column header in the query results table
+   - Select "Encode text" from the context menu
+
+
+<div align="center">
+<img src="https://github.com/oyvinrog/SQLShell/raw/main/column_encoding.png" alt="Column Profiler" width="80%" height="auto">
+</div>
+
+2. **How It Works**:
+   - SQLShell tokenizes the text into meaningful words and phrases
+   - Each unique token becomes a new binary feature (1 if present, 0 if absent)
+   - The system applies intelligent filtering to remove common words with low information value
+   - Results appear as a new query with encoded columns automatically added
+
+<!-- Screenshot 2: Encoding process/dialog showing options -->
+
+3. **Applications**:
+   - Analyze how specific keywords in job descriptions correlate with salary levels
+   - Identify which terms in product descriptions drive higher sales
+   - Extract features from unstructured text for further analysis
+   - Prepare text data for statistical modeling and machine learning
+
+4. **Using the Encoded Data**:
+   - After encoding, SQLShell presents a visualization showing top correlations
+   - Sort encoded features by correlation strength to identify key terms
+   - Use encoded columns in subsequent queries for deeper analysis
+   - Join encoded results with other tables for cross-dataset insights
+
+<!-- Screenshot 3: Results showing correlation between job descriptions and salary -->
+
+5. **Benefits**:
+   - Transform unstructured text into structured, analyzable data
+   - Discover hidden patterns between text content and numerical outcomes
+   - Identify specific terms that have the strongest relationship with target variables
+   - Perform advanced text analysis without specialized NLP knowledge
+
+This feature is particularly powerful for HR analytics, marketing text analysis, and any scenario where you need to extract insights from unstructured text data.
+
 ## 📋 Requirements
 
 - Python 3.8 or higher
