@@ -3454,13 +3454,22 @@ LIMIT 10
             self.statusBar().showMessage(f'Preparing one-hot encoding for "{column_name}"...')
             
             # Get the dataframe from the current tab
-            df = current_tab.current_df
+            full_df = current_tab.current_df.copy()
+            df = full_df
+            
+            # Save original row count for reference
+            current_tab.original_df_rowcount = len(full_df)
             
             if df is not None and not df.empty:
                 # Sample the data if it's larger than 1000 rows for better performance
                 row_count = len(df)
                 if row_count > 1000:
                     self.statusBar().showMessage(f'Sampling data (using 1000 rows from {row_count} total)...')
+                    
+                    # Store the full dataframe before sampling for later use
+                    current_tab._original_df_before_encoding = full_df
+                    
+                    # Sample the data
                     df = df.sample(n=1000, random_state=42)
                 
                 # Import the one-hot encoding visualizer
@@ -3469,6 +3478,9 @@ LIMIT 10
                 # Create and show the visualization
                 self.statusBar().showMessage(f'Generating one-hot encoding for "{column_name}"...')
                 vis = visualize_ohe(df, column_name)
+                
+                # Connect to the encodingApplied signal
+                vis.encodingApplied.connect(self.apply_encoded_dataframe)
                 
                 # Store a reference to prevent garbage collection
                 self._ohe_window = vis
@@ -3484,6 +3496,136 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Encoding Error", f"Error generating one-hot encoding:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error generating one-hot encoding: {str(e)}')
+            
+    def apply_encoded_dataframe(self, encoded_df):
+        """Apply the encoded dataframe to the current tab's results table"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                return
+            
+            # Check if we're using a sampled version
+            is_sampled = False
+            full_df = None
+            
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Applying one-hot encoding...')
+            
+            # Progress dialog for large datasets
+            progress = QProgressDialog("Applying encoding...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Processing")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setValue(10)
+            
+            # Check if this sample is smaller than the actual dataset
+            if hasattr(current_tab, '_original_df_before_encoding'):
+                # We have the original, full dataset stored
+                full_df = current_tab._original_df_before_encoding
+                is_sampled = len(full_df) > len(encoded_df)
+            elif hasattr(current_tab, 'original_df_rowcount'):
+                # We know the original row count but don't have the data
+                is_sampled = current_tab.original_df_rowcount > len(encoded_df)
+            
+            progress.setValue(20)
+            QApplication.processEvents()
+            
+            # If we're working with a sample, apply the encoding to the full dataset
+            if is_sampled and full_df is not None:
+                self.statusBar().showMessage(f'Re-applying encoding to full dataset ({len(full_df)} rows)...')
+                
+                try:
+                    # Get the encoding columns (added by the OHE process)
+                    original_cols = set(current_tab.current_df.columns)
+                    ohe_cols = set(encoded_df.columns) - original_cols
+                    
+                    if ohe_cols:
+                        # Import the encoding function to apply to full dataset
+                        from sqlshell.utils.profile_ohe import get_ohe
+                        
+                        # Get the column that was encoded
+                        encoded_column = None
+                        for col in original_cols:
+                            if any(c.startswith(f'is_{col}') for c in ohe_cols) or any(c.startswith(f'has_{col}') for c in ohe_cols):
+                                encoded_column = col
+                                break
+                        
+                        progress.setValue(40)
+                        QApplication.processEvents()
+                        
+                        if encoded_column:
+                            # Apply encoding to full dataset
+                            self.statusBar().showMessage(f'Encoding column "{encoded_column}" on full dataset...')
+                            full_encoded_df = get_ohe(full_df, encoded_column)
+                            
+                            progress.setValue(80)
+                            QApplication.processEvents()
+                            
+                            # Update the current dataframe with the fully encoded one
+                            current_tab.current_df = full_encoded_df
+                            self.current_df = full_encoded_df  # Keep this for compatibility
+                            
+                            # Use the full encoded dataframe instead
+                            encoded_df = full_encoded_df
+                        else:
+                            # If we can't determine the encoded column, use the sampled version
+                            current_tab.current_df = encoded_df
+                            self.current_df = encoded_df  # Keep this for compatibility
+                    else:
+                        # No encoding columns found, use the sampled version
+                        current_tab.current_df = encoded_df
+                        self.current_df = encoded_df  # Keep this for compatibility
+                except Exception as e:
+                    # If there's an error, fall back to the provided encoded_df
+                    print(f"Error applying encoding to full dataset: {e}")
+                    current_tab.current_df = encoded_df
+                    self.current_df = encoded_df  # Keep this for compatibility
+            else:
+                # No sampling occurred, just use the provided encoded dataframe
+                current_tab.current_df = encoded_df
+                self.current_df = encoded_df  # Keep this for compatibility
+            
+            progress.setValue(90)
+            QApplication.processEvents()
+            
+            # Populate the results table with the new dataframe
+            self.populate_table(encoded_df)
+            
+            # Update results title to show this is encoded data
+            current_tab.results_title.setText(f"ENCODED DATA")
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Update status
+            self.statusBar().showMessage(f'Applied one-hot encoding with {len(encoded_df.columns)} columns')
+            
+            # Check if we should register this as a temporary table
+            if len(encoded_df) >= 100:  # Only worth registering as table if it's substantial
+                try:
+                    # Generate a unique table name
+                    import time
+                    timestamp = int(time.time())
+                    table_name = f"encoded_data_{timestamp}"
+                    
+                    # Register as a temporary table in the database manager
+                    self.db_manager.register_dataframe(encoded_df, table_name, "query_result")
+                    
+                    # Add to tables list
+                    self.tables_list.add_table_item(table_name, "encoded data")
+                    
+                    # Update completer
+                    self.update_completer()
+                    
+                    # Notify user
+                    self.statusBar().showMessage(f'Applied one-hot encoding and registered as table "{table_name}"')
+                except Exception as e:
+                    # Just log the error but continue - this is an optional enhancement
+                    print(f"Error registering encoded dataframe as table: {e}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to apply encoded dataframe:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
 
     def get_current_query_tab(self):
         """Get the currently active tab if it's a query tab (has query_edit attribute)"""

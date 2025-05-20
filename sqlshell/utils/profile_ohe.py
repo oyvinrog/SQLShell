@@ -235,13 +235,16 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QComboBox, QSplitter, QTabWidget, QScrollArea,
                            QFrame, QSizePolicy, QButtonGroup, QRadioButton,
                            QMessageBox, QHeaderView, QApplication)
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 class OneHotEncodingVisualization(QMainWindow):
+    # Add signal to notify when encoding should be applied
+    encodingApplied = pyqtSignal(pd.DataFrame)
+    
     def __init__(self, original_df, encoded_df, encoded_column):
         super().__init__()
         self.original_df = original_df
@@ -324,6 +327,33 @@ class OneHotEncodingVisualization(QMainWindow):
         viz_selector_layout.addWidget(self.viz_selector)
         viz_selector_layout.addStretch(1)
         bottom_layout.addLayout(viz_selector_layout)
+        
+        # Add Apply Button
+        apply_layout = QHBoxLayout()
+        apply_layout.addStretch(1)
+        
+        self.apply_button = QPushButton("Apply Encoding")
+        self.apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QPushButton:pressed {
+                background-color: #1F618D;
+            }
+        """)
+        self.apply_button.setMinimumWidth(150)
+        self.apply_button.clicked.connect(self.apply_encoding)
+        apply_layout.addWidget(self.apply_button)
+        
+        bottom_layout.addLayout(apply_layout)
         
         splitter.addWidget(bottom_widget)
         
@@ -409,6 +439,26 @@ class OneHotEncodingVisualization(QMainWindow):
         
         # Update the canvas
         self.canvas.draw()
+    
+    def apply_encoding(self):
+        """Apply the encoded dataframe to the main window"""
+        reply = QMessageBox.question(
+            self, 
+            "Apply Encoding", 
+            "Are you sure you want to apply this encoding to the original table?\n\n"
+            "This will add the one-hot encoded columns to the current result table.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Emit signal with the encoded DataFrame
+            self.encodingApplied.emit(self.encoded_df)
+            QMessageBox.information(
+                self,
+                "Encoding Applied",
+                "The one-hot encoding has been applied to the table."
+            )
 
 def visualize_ohe(df, column):
     """
