@@ -19,7 +19,7 @@ try:
 except LookupError:
     nltk.download('punkt_tab')
 
-def get_ohe(dataframe: pd.DataFrame, column: str) -> pd.DataFrame:
+def get_ohe(dataframe: pd.DataFrame, column: str, binary_format: str = "numeric") -> pd.DataFrame:
     """
     Create one-hot encoded columns based on the content of the specified column.
     Automatically detects whether the column contains text data or categorical data.
@@ -27,6 +27,7 @@ def get_ohe(dataframe: pd.DataFrame, column: str) -> pd.DataFrame:
     Args:
         dataframe (pd.DataFrame): Input dataframe
         column (str): Name of the column to process
+        binary_format (str): Format for encoding - "numeric" for 1/0 or "text" for "Yes"/"No"
         
     Returns:
         pd.DataFrame: Original dataframe with additional one-hot encoded columns
@@ -34,6 +35,10 @@ def get_ohe(dataframe: pd.DataFrame, column: str) -> pd.DataFrame:
     # Check if column exists
     if column not in dataframe.columns:
         raise ValueError(f"Column '{column}' not found in dataframe")
+    
+    # Check binary format is valid
+    if binary_format not in ["numeric", "text"]:
+        raise ValueError("binary_format must be either 'numeric' or 'text'")
     
     # Check if the column appears to be categorical or text
     # Heuristic: If average string length > 15 or contains spaces, treat as text
@@ -75,41 +80,57 @@ def get_ohe(dataframe: pd.DataFrame, column: str) -> pd.DataFrame:
         # Create one-hot encoded columns
         for word in top_words:
             column_name = f'has_{word}'
-            dataframe[column_name] = dataframe[column].apply(
-                lambda x: 1 if isinstance(x, str) and word in str(x).lower() else 0
-            )
+            if binary_format == "numeric":
+                dataframe[column_name] = dataframe[column].apply(
+                    lambda x: 1 if isinstance(x, str) and word in str(x).lower() else 0
+                )
+            else:  # binary_format == "text"
+                dataframe[column_name] = dataframe[column].apply(
+                    lambda x: "Yes" if isinstance(x, str) and word in str(x).lower() else "No"
+                )
     else:
         # Apply categorical one-hot encoding
-        dataframe = get_categorical_ohe(dataframe, column)
+        dataframe = get_categorical_ohe(dataframe, column, binary_format)
     
     return dataframe
 
-def get_categorical_ohe(dataframe: pd.DataFrame, categorical_column: str) -> pd.DataFrame:
+def get_categorical_ohe(dataframe: pd.DataFrame, categorical_column: str, binary_format: str = "numeric") -> pd.DataFrame:
     """
     Create one-hot encoded columns for each unique category in a categorical column.
     
     Args:
         dataframe (pd.DataFrame): Input dataframe
         categorical_column (str): Name of the categorical column to process
+        binary_format (str): Format for encoding - "numeric" for 1/0 or "text" for "Yes"/"No"
         
     Returns:
         pd.DataFrame: Original dataframe with additional one-hot encoded columns
     """
+    # Check binary format is valid
+    if binary_format not in ["numeric", "text"]:
+        raise ValueError("binary_format must be either 'numeric' or 'text'")
+    
     # Get unique categories
     categories = dataframe[categorical_column].dropna().unique()
     
     # Create one-hot encoded columns
     for category in categories:
         column_name = f'is_{category}'
-        dataframe[column_name] = dataframe[categorical_column].apply(
-            lambda x: 1 if x == category else 0
-        )
+        if binary_format == "numeric":
+            dataframe[column_name] = dataframe[categorical_column].apply(
+                lambda x: 1 if x == category else 0
+            )
+        else:  # binary_format == "text"
+            dataframe[column_name] = dataframe[categorical_column].apply(
+                lambda x: "Yes" if x == category else "No"
+            )
     
     return dataframe
 
 def test_ohe():
     """
     Test the one-hot encoding function with sample dataframes for both text and categorical data.
+    Tests both numeric (1/0) and text (Yes/No) encoding formats.
     """
     print("\n===== Testing Text Data One-Hot Encoding =====")
     # Create sample text data
@@ -131,25 +152,38 @@ def test_ohe():
     # Create dataframe
     text_df = pd.DataFrame(text_data)
     
-    # Get the original column count
-    original_col_count = len(text_df.columns)
-    
-    # Apply one-hot encoding
-    text_result_df = get_ohe(text_df, 'text')
+    # Test numeric format (1/0)
+    print("\n----- Testing Numeric Format (1/0) -----")
+    # Apply one-hot encoding with numeric format
+    text_result_numeric = get_ohe(text_df.copy(), 'text', binary_format="numeric")
     
     # Print results
     print("\nOriginal Text DataFrame:")
     print(text_df)
-    print("\nDataFrame with One-Hot Encoded Columns:")
-    print(text_result_df)
+    print("\nDataFrame with Numeric One-Hot Encoded Columns (1/0):")
+    print(text_result_numeric)
     
     # Verify that the function correctly identified this as text data
-    has_columns = [col for col in text_result_df.columns if col.startswith('has_')]
+    has_columns = [col for col in text_result_numeric.columns if col.startswith('has_')]
     assert len(has_columns) > 0, "Text data was not correctly identified"
     
     # Verify that all OHE columns contain only 0s and 1s
     for col in has_columns:
-        assert set(text_result_df[col].unique()).issubset({0, 1}), f"Column {col} contains invalid values"
+        assert set(text_result_numeric[col].unique()).issubset({0, 1}), f"Column {col} contains invalid values"
+    
+    # Test text format (Yes/No)
+    print("\n----- Testing Text Format (Yes/No) -----")
+    # Apply one-hot encoding with text format
+    text_result_text = get_ohe(text_df.copy(), 'text', binary_format="text")
+    
+    # Print results
+    print("\nDataFrame with Text One-Hot Encoded Columns (Yes/No):")
+    print(text_result_text)
+    
+    # Verify that all OHE columns contain only Yes and No
+    has_columns_text = [col for col in text_result_text.columns if col.startswith('has_')]
+    for col in has_columns_text:
+        assert set(text_result_text[col].unique()).issubset({"Yes", "No"}), f"Column {col} contains invalid values"
     
     print("\nText data tests passed successfully!")
     
@@ -165,20 +199,19 @@ def test_ohe():
     # Create dataframe
     cat_df = pd.DataFrame(categorical_data)
     
-    # Get the original column count
-    cat_original_col_count = len(cat_df.columns)
-    
-    # Apply one-hot encoding (should automatically detect categorical data)
-    cat_result_df = get_ohe(cat_df, 'category')
+    # Test numeric format (1/0)
+    print("\n----- Testing Numeric Format (1/0) -----")
+    # Apply one-hot encoding with numeric format
+    cat_result_numeric = get_ohe(cat_df.copy(), 'category', binary_format="numeric")
     
     # Print results
     print("\nOriginal Categorical DataFrame:")
     print(cat_df)
-    print("\nDataFrame with Categorical One-Hot Encoded Columns:")
-    print(cat_result_df)
+    print("\nDataFrame with Numeric One-Hot Encoded Columns (1/0):")
+    print(cat_result_numeric)
     
     # Verify that the function correctly identified this as categorical data
-    is_columns = [col for col in cat_result_df.columns if col.startswith('is_')]
+    is_columns = [col for col in cat_result_numeric.columns if col.startswith('is_')]
     assert len(is_columns) > 0, "Categorical data was not correctly identified"
     
     # Verify that we have the expected number of columns for categorical data
@@ -187,13 +220,28 @@ def test_ohe():
     
     # Verify that all OHE columns contain only 0s and 1s
     for col in is_columns:
-        assert set(cat_result_df[col].unique()).issubset({0, 1}), f"Column {col} contains invalid values"
+        assert set(cat_result_numeric[col].unique()).issubset({0, 1}), f"Column {col} contains invalid values"
+    
+    # Test text format (Yes/No)
+    print("\n----- Testing Text Format (Yes/No) -----")
+    # Apply one-hot encoding with text format
+    cat_result_text = get_ohe(cat_df.copy(), 'category', binary_format="text")
+    
+    # Print results
+    print("\nDataFrame with Text One-Hot Encoded Columns (Yes/No):")
+    print(cat_result_text)
+    
+    # Verify that all OHE columns contain only Yes and No
+    is_columns_text = [col for col in cat_result_text.columns if col.startswith('is_')]
+    for col in is_columns_text:
+        assert set(cat_result_text[col].unique()).issubset({"Yes", "No"}), f"Column {col} contains invalid values"
     
     print("\nCategorical data tests passed successfully!")
 
 def test_categorical_ohe():
     """
     Test the categorical one-hot encoding function with a sample dataframe.
+    Tests both numeric (1/0) and text (Yes/No) encoding formats.
     """
     # Create sample data with categorical values
     data = {
@@ -206,26 +254,39 @@ def test_categorical_ohe():
     # Create dataframe
     df = pd.DataFrame(data)
     
-    # Get the original column count
-    original_col_count = len(df.columns)
-    
-    # Apply categorical one-hot encoding
-    result_df = get_categorical_ohe(df, 'category')
+    # Test numeric format (1/0)
+    print("\n----- Testing Numeric Format (1/0) -----")
+    # Apply categorical one-hot encoding with numeric format
+    result_numeric = get_categorical_ohe(df.copy(), 'category', binary_format="numeric")
     
     # Print results
     print("\nOriginal DataFrame:")
     print(df)
-    print("\nDataFrame with Categorical One-Hot Encoded Columns:")
-    print(result_df)
+    print("\nDataFrame with Numeric One-Hot Encoded Columns (1/0):")
+    print(result_numeric)
     
     # Verify that we have the expected number of columns
     unique_categories = len(df['category'].unique())
-    is_columns = [col for col in result_df.columns if col.startswith('is_')]
+    is_columns = [col for col in result_numeric.columns if col.startswith('is_')]
     assert len(is_columns) == unique_categories, "Incorrect number of categorical columns"
     
     # Verify that all OHE columns contain only 0s and 1s
     for col in is_columns:
-        assert set(result_df[col].unique()).issubset({0, 1}), f"Column {col} contains invalid values"
+        assert set(result_numeric[col].unique()).issubset({0, 1}), f"Column {col} contains invalid values"
+    
+    # Test text format (Yes/No)
+    print("\n----- Testing Text Format (Yes/No) -----")
+    # Apply categorical one-hot encoding with text format
+    result_text = get_categorical_ohe(df.copy(), 'category', binary_format="text")
+    
+    # Print results
+    print("\nDataFrame with Text One-Hot Encoded Columns (Yes/No):")
+    print(result_text)
+    
+    # Verify that all OHE columns contain only Yes and No
+    is_columns_text = [col for col in result_text.columns if col.startswith('is_')]
+    for col in is_columns_text:
+        assert set(result_text[col].unique()).issubset({"Yes", "No"}), f"Column {col} contains invalid values"
     
     print("\nAll categorical tests passed successfully!")
 
@@ -245,11 +306,12 @@ class OneHotEncodingVisualization(QMainWindow):
     # Add signal to notify when encoding should be applied
     encodingApplied = pyqtSignal(pd.DataFrame)
     
-    def __init__(self, original_df, encoded_df, encoded_column):
+    def __init__(self, original_df, encoded_df, encoded_column, binary_format="numeric"):
         super().__init__()
         self.original_df = original_df
         self.encoded_df = encoded_df
         self.encoded_column = encoded_column
+        self.binary_format = binary_format
         self.setWindowTitle(f"One-Hot Encoding Visualization - {encoded_column}")
         self.setGeometry(100, 100, 1000, 800)
         
@@ -274,6 +336,18 @@ class OneHotEncodingVisualization(QMainWindow):
         desc_label = QLabel(description)
         desc_label.setWordWrap(True)
         main_layout.addWidget(desc_label)
+        
+        # Format selector
+        format_layout = QHBoxLayout()
+        format_label = QLabel("Encoding Format:")
+        self.format_selector = QComboBox()
+        self.format_selector.addItems(["Numeric (1/0)", "Text (Yes/No)"])
+        self.format_selector.setCurrentIndex(0 if binary_format == "numeric" else 1)
+        self.format_selector.currentIndexChanged.connect(self.change_format)
+        format_layout.addWidget(format_label)
+        format_layout.addWidget(self.format_selector)
+        format_layout.addStretch(1)
+        main_layout.addLayout(format_layout)
         
         # Splitter to divide the screen
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -459,14 +533,52 @@ class OneHotEncodingVisualization(QMainWindow):
                 "Encoding Applied",
                 "The one-hot encoding has been applied to the table."
             )
+    
+    def change_format(self):
+        """Change the binary format and reapply encoding"""
+        # Get the selected format
+        selected_format = "numeric" if self.format_selector.currentIndex() == 0 else "text"
+        
+        # Only update if format has changed
+        if selected_format != self.binary_format:
+            # Update format
+            self.binary_format = selected_format
+            
+            # Reapply encoding
+            self.encoded_df = get_ohe(self.original_df.copy(), self.encoded_column, self.binary_format)
+            
+            # Update tables
+            tab_widget = self.findChild(QTabWidget)
+            if tab_widget:
+                # Update encoded data tab
+                encoded_tab = tab_widget.widget(1)
+                if encoded_tab:
+                    # Clear old layout
+                    for i in reversed(range(encoded_tab.layout().count())): 
+                        encoded_tab.layout().itemAt(i).widget().setParent(None)
+                    
+                    # Add new table
+                    encoded_table = self.create_table_from_df(self.encoded_df)
+                    encoded_tab.layout().addWidget(encoded_table)
+            
+            # Update visualization
+            self.update_visualization()
+            
+            # Show confirmation
+            QMessageBox.information(
+                self,
+                "Format Changed",
+                f"Encoding format changed to {selected_format}"
+            )
 
-def visualize_ohe(df, column):
+def visualize_ohe(df, column, binary_format="numeric"):
     """
     Visualize the one-hot encoding of a column in a dataframe.
     
     Args:
         df (pd.DataFrame): The original dataframe
         column (str): The column to encode and visualize
+        binary_format (str): Format for encoding - "numeric" for 1/0 or "text" for "Yes"/"No"
         
     Returns:
         QMainWindow: The visualization window
@@ -475,14 +587,45 @@ def visualize_ohe(df, column):
     original_df = df.copy()
     
     # Apply one-hot encoding
-    encoded_df = get_ohe(original_df, column)
+    encoded_df = get_ohe(original_df, column, binary_format)
     
     # Create and show the visualization
-    vis = OneHotEncodingVisualization(original_df, encoded_df, column)
+    vis = OneHotEncodingVisualization(original_df, encoded_df, column, binary_format)
     vis.show()
     
     return vis
 
 if __name__ == "__main__":
+    # Run tests
     test_ohe()
     test_categorical_ohe()
+    
+    # Test the visualization with both formats
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    
+    if QApplication.instance() is None:
+        app = QApplication(sys.argv)
+    
+        # Create a sample dataframe
+        data = {
+            'category': ['red', 'blue', 'green', 'red', 'yellow', 'blue'],
+            'text': [
+                'The quick brown fox',
+                'A lazy dog',
+                'Brown fox jumps',
+                'Quick brown fox',
+                'Lazy dog sleeps',
+                'Fox and dog'
+            ]
+        }
+        df = pd.DataFrame(data)
+        
+        # Show visualization with numeric format
+        vis_numeric = visualize_ohe(df, 'category', binary_format="numeric")
+        
+        # Show visualization with text format
+        vis_text = visualize_ohe(df, 'text', binary_format="text")
+        
+        # Start the application
+        sys.exit(app.exec())
