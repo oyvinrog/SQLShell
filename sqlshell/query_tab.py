@@ -112,6 +112,12 @@ class QueryTab(QWidget):
         
         results_layout.addLayout(header_layout)
         
+        # Add descriptive text about table interactions
+        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query (e.g., double-click 'product_id' to insert 'product_id' at cursor). Right-click for analytical capabilities including bar charts, distributions, and column encoding (e.g., right-click 'price' to analyze distributions or generate visualizations).")
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet("color: #7FB3D5; font-size: 11px; margin: 5px 0; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
+        results_layout.addWidget(help_text)
+        
         # Results table with customized header
         self.results_table = QTableWidget()
         self.results_table.setAlternatingRowColors(True)
