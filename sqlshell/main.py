@@ -29,7 +29,7 @@ from sqlshell.splash_screen import AnimatedSplashScreen
 from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
 from sqlshell.editor import LineNumberArea, SQLEditor
 from sqlshell.ui import FilterHeader, BarChartDelegate
-from sqlshell.db import DatabaseManager
+from sqlshell.db import DatabaseManager, ExportManager
 from sqlshell.query_tab import QueryTab
 from sqlshell.styles import (get_application_stylesheet, get_tab_corner_stylesheet, 
                            get_context_menu_stylesheet,
@@ -42,6 +42,7 @@ class SQLShell(QMainWindow):
     def __init__(self):
         super().__init__()
         self.db_manager = DatabaseManager()
+        self.export_manager = ExportManager(self.db_manager)
         self.current_df = None  # Store the current DataFrame for filtering
         self.filter_widgets = []  # Store filter line edits
         self.current_project_file = None  # Store the current project file path
@@ -1109,28 +1110,14 @@ LIMIT 10
             self.statusBar().showMessage('Exporting data to Excel...')
             
             # Convert table data to DataFrame
-            df = self.get_table_data_as_dataframe()
-            df.to_excel(file_name, index=False)
+            df = self.export_manager.convert_table_to_dataframe(current_tab.results_table)
+            if df is None:
+                raise Exception("Failed to convert table data to DataFrame")
             
-            # Generate table name from file name
-            base_name = os.path.splitext(os.path.basename(file_name))[0]
-            table_name = self.db_manager.sanitize_table_name(base_name)
+            # Export using ExportManager
+            table_name, metadata = self.export_manager.export_to_excel(df, file_name)
             
-            # Ensure unique table name
-            original_name = table_name
-            counter = 1
-            while table_name in self.db_manager.loaded_tables:
-                table_name = f"{original_name}_{counter}"
-                counter += 1
-            
-            # Register the table in the database manager
-            self.db_manager.register_dataframe(df, table_name, file_name)
-            
-            # Update tracking
-            self.db_manager.loaded_tables[table_name] = file_name
-            self.db_manager.table_columns[table_name] = df.columns.tolist()
-            
-            # Update UI using new method
+            # Update UI
             self.tables_list.add_table_item(table_name, os.path.basename(file_name))
             self.statusBar().showMessage(f'Data exported to {file_name} and loaded as table "{table_name}"')
             
@@ -1167,28 +1154,14 @@ LIMIT 10
             self.statusBar().showMessage('Exporting data to Parquet...')
             
             # Convert table data to DataFrame
-            df = self.get_table_data_as_dataframe()
-            df.to_parquet(file_name, index=False)
+            df = self.export_manager.convert_table_to_dataframe(current_tab.results_table)
+            if df is None:
+                raise Exception("Failed to convert table data to DataFrame")
             
-            # Generate table name from file name
-            base_name = os.path.splitext(os.path.basename(file_name))[0]
-            table_name = self.db_manager.sanitize_table_name(base_name)
+            # Export using ExportManager
+            table_name, metadata = self.export_manager.export_to_parquet(df, file_name)
             
-            # Ensure unique table name
-            original_name = table_name
-            counter = 1
-            while table_name in self.db_manager.loaded_tables:
-                table_name = f"{original_name}_{counter}"
-                counter += 1
-            
-            # Register the table in the database manager
-            self.db_manager.register_dataframe(df, table_name, file_name)
-            
-            # Update tracking
-            self.db_manager.loaded_tables[table_name] = file_name
-            self.db_manager.table_columns[table_name] = df.columns.tolist()
-            
-            # Update UI using new method
+            # Update UI
             self.tables_list.add_table_item(table_name, os.path.basename(file_name))
             self.statusBar().showMessage(f'Data exported to {file_name} and loaded as table "{table_name}"')
             
@@ -1208,94 +1181,10 @@ LIMIT 10
 
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame with proper data types"""
-        # Get the current tab
         current_tab = self.get_current_tab()
         if not current_tab:
             return pd.DataFrame()
-            
-        headers = [current_tab.results_table.horizontalHeaderItem(i).text() for i in range(current_tab.results_table.columnCount())]
-        data = []
-        for row in range(current_tab.results_table.rowCount()):
-            row_data = []
-            for column in range(current_tab.results_table.columnCount()):
-                item = current_tab.results_table.item(row, column)
-                row_data.append(item.text() if item else '')
-            data.append(row_data)
-        
-        # Create DataFrame from raw string data
-        df_raw = pd.DataFrame(data, columns=headers)
-        
-        # Try to use the original dataframe's dtypes if available
-        if hasattr(current_tab, 'current_df') and current_tab.current_df is not None:
-            original_df = current_tab.current_df
-            # Since we might have filtered rows, we can't just return the original DataFrame
-            # But we can use its column types to convert our string data appropriately
-            
-            # Create a new DataFrame with appropriate types
-            df_typed = pd.DataFrame()
-            
-            for col in df_raw.columns:
-                if col in original_df.columns:
-                    # Get the original column type
-                    orig_type = original_df[col].dtype
-                    
-                    # Special handling for different data types
-                    if pd.api.types.is_numeric_dtype(orig_type):
-                        # Handle numeric columns (int or float)
-                        try:
-                            # First try to convert to numeric type
-                            # Remove commas used for thousands separators
-                            numeric_col = pd.to_numeric(df_raw[col].str.replace(',', '').replace('NULL', np.nan))
-                            df_typed[col] = numeric_col
-                        except:
-                            # If that fails, keep the original string
-                            df_typed[col] = df_raw[col]
-                    elif pd.api.types.is_datetime64_dtype(orig_type):
-                        # Handle datetime columns
-                        try:
-                            df_typed[col] = pd.to_datetime(df_raw[col].replace('NULL', np.nan))
-                        except:
-                            df_typed[col] = df_raw[col]
-                    elif pd.api.types.is_bool_dtype(orig_type):
-                        # Handle boolean columns
-                        try:
-                            df_typed[col] = df_raw[col].map({'True': True, 'False': False}).replace('NULL', np.nan)
-                        except:
-                            df_typed[col] = df_raw[col]
-                    else:
-                        # For other types, keep as is
-                        df_typed[col] = df_raw[col]
-                else:
-                    # For columns not in the original dataframe, infer type
-                    df_typed[col] = df_raw[col]
-                    
-            return df_typed
-            
-        else:
-            # If we don't have the original dataframe, try to infer types
-            # First replace 'NULL' with actual NaN
-            df_raw.replace('NULL', np.nan, inplace=True)
-            
-            # Try to convert each column to numeric if possible
-            for col in df_raw.columns:
-                try:
-                    # First try to convert to numeric by removing commas
-                    df_raw[col] = pd.to_numeric(df_raw[col].str.replace(',', ''))
-                except:
-                    # If that fails, try to convert to datetime
-                    try:
-                        df_raw[col] = pd.to_datetime(df_raw[col])
-                    except:
-                        # If both numeric and datetime conversions fail,
-                        # try boolean conversion for True/False strings
-                        try:
-                            if df_raw[col].dropna().isin(['True', 'False']).all():
-                                df_raw[col] = df_raw[col].map({'True': True, 'False': False})
-                        except:
-                            # Otherwise, keep as is
-                            pass
-            
-            return df_raw
+        return self.export_manager.convert_table_to_dataframe(current_tab.results_table)
 
     def keyPressEvent(self, event):
         """Handle global keyboard shortcuts"""
