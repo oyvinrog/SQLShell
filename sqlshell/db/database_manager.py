@@ -240,8 +240,17 @@ class DatabaseManager:
                     # Load the Delta table
                     import deltalake
                     delta_table = deltalake.DeltaTable(file_path)
-                    # Convert to pandas DataFrame
+                    # Convert to pandas DataFrame with higher precision for decimal columns
                     df = delta_table.to_pandas()
+                    
+                    # Handle decimal columns by converting to float64 to avoid precision issues
+                    for col in df.columns:
+                        if df[col].dtype == 'object':
+                            try:
+                                # Try to convert to float64 if it's a decimal string
+                                df[col] = pd.to_numeric(df[col], errors='ignore')
+                            except:
+                                pass
                 except Exception as e:
                     raise ValueError(f"Error loading Delta table: {str(e)}")
             elif file_path.endswith(('.xlsx', '.xls')):
