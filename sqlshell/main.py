@@ -1355,6 +1355,12 @@ LIMIT 10
         # Add menu actions
         select_from_action = context_menu.addAction("Select from")
         add_to_editor_action = context_menu.addAction("Just add to editor")
+        select_from_new_tab_action = context_menu.addAction("Select From in New Tab")
+        
+        # Add copy path actions
+        context_menu.addSeparator()
+        copy_path_action = context_menu.addAction("Copy Path")
+        copy_relative_path_action = context_menu.addAction("Copy Relative Path")
         
         # Add entropy profiler action
         context_menu.addSeparator()
@@ -1419,6 +1425,11 @@ LIMIT 10
             cursor = current_tab.query_edit.textCursor()
             cursor.insertText(table_name)
             current_tab.query_edit.setFocus()
+        elif action == select_from_new_tab_action:
+            # Create a new tab with the selected table
+            new_tab = self.add_tab(title=table_name)
+            new_tab.set_query_text(f"SELECT * FROM {table_name}")
+            new_tab.query_edit.setFocus()
         elif action == reload_action:
             self.reload_selected_table(table_name)
         elif action == analyze_entropy_action:
@@ -1485,6 +1496,24 @@ LIMIT 10
             if target_folder:
                 self.tables_list.move_item_to_folder(item, target_folder)
                 self.statusBar().showMessage(f'Moved table "{table_name}" to folder "{target_folder.text(0)}"')
+        elif action == copy_path_action:
+            # Get the full path from the table source
+            if table_name in self.db_manager.loaded_tables:
+                path = self.db_manager.loaded_tables[table_name]
+                if path != 'database':  # Only copy if it's a file path
+                    QApplication.clipboard().setText(path)
+                    self.statusBar().showMessage(f"Copied full path to clipboard")
+        elif action == copy_relative_path_action:
+            # Get the relative path from the table source
+            if table_name in self.db_manager.loaded_tables:
+                path = self.db_manager.loaded_tables[table_name]
+                if path != 'database':  # Only copy if it's a file path
+                    try:
+                        rel_path = os.path.relpath(path)
+                        QApplication.clipboard().setText(rel_path)
+                        self.statusBar().showMessage(f"Copied relative path to clipboard")
+                    except ValueError:
+                        self.statusBar().showMessage("Could not determine relative path")
                 
     def analyze_foreign_keys_between_tables(self, table_items):
         """Analyze foreign key relationships between selected tables"""
