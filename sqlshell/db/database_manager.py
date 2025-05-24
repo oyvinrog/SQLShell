@@ -240,15 +240,17 @@ class DatabaseManager:
                     # Load the Delta table
                     import deltalake
                     delta_table = deltalake.DeltaTable(file_path)
-                    # Convert to pandas DataFrame with higher precision for decimal columns
+                    # Convert to pandas DataFrame
                     df = delta_table.to_pandas()
                     
-                    # Handle decimal columns by converting to float64 to avoid precision issues
+                    # Handle decimal columns by converting them to string to preserve precision
                     for col in df.columns:
                         if df[col].dtype == 'object':
                             try:
-                                # Try to convert to float64 if it's a decimal string
-                                df[col] = pd.to_numeric(df[col], errors='ignore')
+                                # First try to convert to float to check if it's numeric
+                                pd.to_numeric(df[col], errors='raise')
+                                # If successful, convert to string to preserve precision
+                                df[col] = df[col].astype(str)
                             except:
                                 pass
                 except Exception as e:
