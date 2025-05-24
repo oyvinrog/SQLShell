@@ -237,11 +237,32 @@ class DatabaseManager:
             if is_delta_table:
                 # Read as Delta table using deltalake library
                 try:
-                    # Load the Delta table with proper decimal handling
+                    # Load the Delta table
                     import deltalake
                     delta_table = deltalake.DeltaTable(file_path)
-                    # Read with decimal precision handling
-                    df = delta_table.to_pandas(decimal_as_float=True)
+                    
+                    # Get the schema to identify decimal columns
+                    schema = delta_table.schema()
+                    decimal_columns = []
+                    
+                    # Identify decimal columns from schema
+                    for field in schema.fields:
+                        # Use string representation to check for decimal
+                        if 'decimal' in str(field.type).lower():
+                            decimal_columns.append(field.name)
+                    
+                    # Read the data
+                    df = delta_table.to_pandas()
+                    
+                    # Try to convert decimal columns to float64, warn if not possible
+                    for col in decimal_columns:
+                        if col in df.columns:
+                            try:
+                                df[col] = pd.to_numeric(df[col], errors='coerce').astype('float64')
+                                if df[col].isna().any():
+                                    print(f"Warning: Some values in column '{col}' could not be converted to float64 and are set as NaN.")
+                            except Exception as e:
+                                print(f"Warning: Could not convert column '{col}' to float64: {e}")
                 except Exception as e:
                     raise ValueError(f"Error loading Delta table: {str(e)}")
             elif file_path.endswith(('.xlsx', '.xls')):
