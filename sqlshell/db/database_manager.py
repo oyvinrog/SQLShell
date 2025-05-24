@@ -237,22 +237,11 @@ class DatabaseManager:
             if is_delta_table:
                 # Read as Delta table using deltalake library
                 try:
-                    # Load the Delta table
+                    # Load the Delta table with proper decimal handling
                     import deltalake
                     delta_table = deltalake.DeltaTable(file_path)
-                    # Convert to pandas DataFrame
-                    df = delta_table.to_pandas()
-                    
-                    # Handle decimal columns by converting them to string to preserve precision
-                    for col in df.columns:
-                        if df[col].dtype == 'object':
-                            try:
-                                # First try to convert to float to check if it's numeric
-                                pd.to_numeric(df[col], errors='raise')
-                                # If successful, convert to string to preserve precision
-                                df[col] = df[col].astype(str)
-                            except:
-                                pass
+                    # Read with decimal precision handling
+                    df = delta_table.to_pandas(decimal_as_float=True)
                 except Exception as e:
                     raise ValueError(f"Error loading Delta table: {str(e)}")
             elif file_path.endswith(('.xlsx', '.xls')):
@@ -849,6 +838,7 @@ class DatabaseManager:
         if self.connection_type == 'sqlite':
             df.to_sql(table_name, self.conn, index=False, if_exists='replace')
         else:  # duckdb
+            # Register the DataFrame directly
             self.conn.register(table_name, df)
         
         # Track the table
