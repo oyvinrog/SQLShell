@@ -2,11 +2,11 @@
 
 <div align="center">
 
-<img src="assets/images/sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
+<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
 
 **A powerful SQL shell with GUI interface for data analysis**
 
-<img src="assets/images/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
+<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
 </div>
 
@@ -142,7 +142,7 @@ FROM test_v;
 SQLShell provides powerful table profiling tools to help you understand your data. These tools are accessible from the left-hand side table menu via right-click on any table:
 
 <div align="center">
-<img src="assets/images/column_profiler.png" alt="Column Profiler" width="80%" height="auto">
+<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/column_profiler.png" alt="Column Profiler" width="80%" height="auto">
 </div>
 
 ### Table Profiling Options
@@ -248,9 +248,8 @@ do 'one-hot encoding'.
    - Right-click on any column header in the query results table
    - Select "Encode text" from the context menu
 
-
 <div align="center">
-<img src="assets/images/column_encoding.png" alt="Column Profiler" width="80%" height="auto">
+<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/column_encoding.png" alt="Column Profiler" width="80%" height="auto">
 </div>
 
 2. **How It Works**:
