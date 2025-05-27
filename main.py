@@ -1323,6 +1323,11 @@ LIMIT 10
         add_to_editor_action = context_menu.addAction("Just add to editor")
         select_from_new_tab_action = context_menu.addAction("Select From in New Tab")
         
+        # Add copy path actions
+        context_menu.addSeparator()
+        copy_path_action = context_menu.addAction("Copy Path")
+        copy_relative_path_action = context_menu.addAction("Copy Relative Path")
+        
         # Add entropy profiler action
         context_menu.addSeparator()
         analyze_entropy_action = context_menu.addAction("Analyze Column Importance")
@@ -1393,6 +1398,32 @@ LIMIT 10
             new_tab.query_edit.setFocus()
         elif action == reload_action:
             self.reload_selected_table(table_name)
+        elif action == copy_path_action:
+            # Get the full path from the table source
+            if table_name in self.db_manager.loaded_tables:
+                path = self.db_manager.loaded_tables[table_name]
+                if path != 'database':  # Only copy if it's a file path
+                    QApplication.clipboard().setText(path)
+                    self.statusBar().showMessage(f"Copied full path to clipboard")
+                else:
+                    self.statusBar().showMessage("Table is from database - no file path to copy")
+            else:
+                self.statusBar().showMessage("No path information available for this table")
+        elif action == copy_relative_path_action:
+            # Get the relative path from the table source
+            if table_name in self.db_manager.loaded_tables:
+                path = self.db_manager.loaded_tables[table_name]
+                if path != 'database':  # Only copy if it's a file path
+                    try:
+                        rel_path = os.path.relpath(path)
+                        QApplication.clipboard().setText(rel_path)
+                        self.statusBar().showMessage(f"Copied relative path to clipboard")
+                    except ValueError:
+                        self.statusBar().showMessage("Could not determine relative path")
+                else:
+                    self.statusBar().showMessage("Table is from database - no file path to copy")
+            else:
+                self.statusBar().showMessage("No path information available for this table")
         elif action == analyze_entropy_action:
             # Call the entropy analysis method
             self.analyze_table_entropy(table_name)
