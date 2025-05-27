@@ -12,6 +12,7 @@ from sqlshell.editor import SQLEditor
 from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
 from sqlshell.ui import FilterHeader
 from sqlshell.styles import get_row_count_label_stylesheet
+from sqlshell.editor_integration import integrate_execution_functionality
 
 class QueryTab(QWidget):
     def __init__(self, parent, results_title="RESULTS"):
@@ -46,6 +47,12 @@ class QueryTab(QWidget):
         # Apply syntax highlighting to the query editor
         self.sql_highlighter = SQLSyntaxHighlighter(self.query_edit.document())
         
+        # Integrate F5/F9 execution functionality
+        self.execution_integration = integrate_execution_functionality(
+            self.query_edit, 
+            self._execute_query_callback
+        )
+        
         # Ensure a default completer is available
         if not self.query_edit.completer:
             from PyQt6.QtCore import QStringListModel
@@ -72,10 +79,21 @@ class QueryTab(QWidget):
         self.execute_btn.setIcon(QIcon.fromTheme("media-playback-start"))
         self.execute_btn.clicked.connect(self.execute_query)
         
+        # Add F5/F9 buttons for clarity
+        self.execute_all_btn = QPushButton('F5 - Execute All')
+        self.execute_all_btn.setToolTip('Execute all statements (F5)')
+        self.execute_all_btn.clicked.connect(self.execute_all_statements)
+        
+        self.execute_current_btn = QPushButton('F9 - Execute Current')
+        self.execute_current_btn.setToolTip('Execute current statement (F9)')
+        self.execute_current_btn.clicked.connect(self.execute_current_statement)
+        
         self.clear_btn = QPushButton('Clear')
         self.clear_btn.clicked.connect(self.clear_query)
         
         button_layout.addWidget(self.execute_btn)
+        button_layout.addWidget(self.execute_all_btn)
+        button_layout.addWidget(self.execute_current_btn)
         button_layout.addWidget(self.clear_btn)
         button_layout.addStretch()
         
@@ -112,8 +130,8 @@ class QueryTab(QWidget):
         
         results_layout.addLayout(header_layout)
         
-        # Add descriptive text about table interactions
-        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query (e.g., double-click 'product_id' to insert 'product_id' at cursor). Right-click for analytical capabilities including bar charts, distributions, and column encoding (e.g., right-click 'price' to analyze distributions or generate visualizations).")
+        # Add descriptive text about table interactions and new F5/F9 functionality
+        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query.")
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #7FB3D5; font-size: 11px; margin: 5px 0; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
         results_layout.addWidget(help_text)
@@ -734,3 +752,29 @@ class QueryTab(QWidget):
         
         # If all else fails, return placeholder
         return "[table_name]" 
+
+    def _execute_query_callback(self, query_text):
+        """Callback function for the execution handler to execute a single query."""
+        # This is called by the execution handler when F5/F9 is pressed
+        # We temporarily store the current query and replace it with the specific statement
+        if hasattr(self.parent, 'execute_specific_query'):
+            self.parent.execute_specific_query(query_text)
+        else:
+            # Fallback: execute using the standard method
+            original_text = self.query_edit.toPlainText()
+            self.query_edit.setPlainText(query_text)
+            if hasattr(self.parent, 'execute_query'):
+                self.parent.execute_query()
+            self.query_edit.setPlainText(original_text)
+    
+    def execute_all_statements(self):
+        """Execute all statements in the editor (F5 functionality)."""
+        if self.execution_integration:
+            return self.execution_integration.execute_all_statements()
+        return None
+    
+    def execute_current_statement(self):
+        """Execute the current statement (F9 functionality)."""
+        if self.execution_integration:
+            return self.execution_integration.execute_current_statement()
+        return None 

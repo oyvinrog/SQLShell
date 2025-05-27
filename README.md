@@ -2,11 +2,11 @@
 
 <div align="center">
 
-<img src="https://github.com/oyvinrog/SQLShell/raw/main/sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
+<img src="assets/images/sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
 
 **A powerful SQL shell with GUI interface for data analysis**
 
-<img src="https://github.com/oyvinrog/SQLShell/raw/main/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
+<img src="assets/images/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
 </div>
 
@@ -20,8 +20,17 @@
 - **Table Preview** - Quick view of imported data tables
 - **Test Data Generation** - Built-in sample data for testing and learning
 - **Multiple Views** - Support for multiple concurrent table views
-- **Productivity Tools** - Streamlined workflow with keyboard shortcuts (e.g., Ctrl+Enter for query execution)
+- **Productivity Tools** - Streamlined workflow with F5/F9 shortcuts and Ctrl+Enter for query execution
 - **Explain Column** - Analyze relationships between data columns directly from query results
+
+## ⚡ F5/F9 Quick Execution
+
+SQLShell includes powerful keyboard shortcuts for efficient SQL execution:
+
+- **F5**: Execute all SQL statements in the editor sequentially
+- **F9**: Execute only the current SQL statement (where your cursor is positioned)
+
+This allows for rapid testing and development - place your cursor in any statement and press F9 to execute just that query, or press F5 to run everything.
 
 ## 📦 Installation
 
@@ -133,7 +142,7 @@ FROM test_v;
 SQLShell provides powerful table profiling tools to help you understand your data. These tools are accessible from the left-hand side table menu via right-click on any table:
 
 <div align="center">
-<img src="https://github.com/oyvinrog/SQLShell/raw/main/column_profiler.png" alt="Column Profiler" width="80%" height="auto">
+<img src="assets/images/column_profiler.png" alt="Column Profiler" width="80%" height="auto">
 </div>
 
 ### Table Profiling Options
@@ -228,7 +237,7 @@ The Column Profiler now offers in-depth multivariate analysis to explore relatio
    - Identify patterns and outliers in multivariate relationships
    - Make better decisions about feature selection for analysis and modeling
 
-This feature is particularly useful for exploratory data analysis, helping you understand your data structure and relationships on the fly.
+This feature is particularly useful for data scientists and analysts who need to understand variable relationships quickly without writing complex correlation queries.
 
 ### One-hot encoding
 
@@ -241,7 +250,7 @@ do 'one-hot encoding'.
 
 
 <div align="center">
-<img src="https://github.com/oyvinrog/SQLShell/raw/main/column_encoding.png" alt="Column Profiler" width="80%" height="auto">
+<img src="assets/images/column_encoding.png" alt="Column Profiler" width="80%" height="auto">
 </div>
 
 2. **How It Works**:
@@ -286,6 +295,72 @@ This feature is particularly powerful for HR analytics, marketing text analysis,
   - pyarrow ≥ 14.0.1 (Parquet support)
   - fastparquet ≥ 2023.10.1 (Alternative parquet engine)
   - xlrd ≥ 2.0.1 (Support for older .xls files)
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 📁 Project Structure
+
+```
+SQLShell/
+├── sqlshell/                   # Main package
+│   ├── __init__.py
+│   ├── main.py                 # Main application entry point
+│   ├── execution_handler.py    # F5/F9 SQL execution functionality
+│   ├── editor_integration.py   # Editor integration utilities
+│   ├── query_tab.py           # Query tab implementation
+│   ├── splash_screen.py       # Application splash screen
+│   └── styles.py              # UI styling
+├── tests/                     # Test files
+│   ├── f5_f9_functionality/   # F5/F9 functionality tests and demos
+│   │   ├── README.md          # Documentation for F5/F9 tests
+│   │   ├── test_execution_handler.py  # Comprehensive test suite
+│   │   └── demo_f5_f9.py      # Interactive demo
+│   └── test_query_executor.py # Other test files
+├── docs/                      # Documentation
+│   ├── F5_F9_FUNCTIONALITY.md # Detailed F5/F9 documentation
+│   └── IMPLEMENTATION_SUMMARY.md # Implementation details
+├── assets/                    # Assets and resources
+│   └── images/               # Images and screenshots
+│       ├── sqlshell_logo.png
+│       ├── sqlshell_demo.png
+│       ├── column_profiler.png
+│       └── column_encoding.png
+├── sample_data/              # Sample data files
+│   ├── test_*.csv           # Test CSV files
+│   ├── california_housing_data.parquet
+│   └── pool.db              # Sample database
+├── main.py                  # Application launcher
+├── run.py                   # Alternative launcher
+├── README.md               # This file
+├── requirements.txt        # Python dependencies
+├── pyproject.toml         # Project configuration
+└── MANIFEST.in            # Package manifest
+```
+
+## 🧪 Testing
+
+The project includes comprehensive tests for the F5/F9 functionality:
+
+```bash
+# Run the interactive test suite
+cd tests/f5_f9_functionality
+python test_execution_handler.py
+
+# Try the interactive demo
+python demo_f5_f9.py
+```
+
+For complete documentation on F5/F9 functionality, see `docs/F5_F9_FUNCTIONALITY.md`.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
 ## 📄 License
 

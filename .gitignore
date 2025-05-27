@@ -30,6 +30,9 @@ tests/data/*.delta
 tests/data/*.duckdb
 tests/data/*.sqls
 
+# Sample data files - exclude CSV files but keep other sample files
+sample_data/*.csv
+
 # IDE
 .idea/
 .vscode/
@@ -61,11 +64,8 @@ ENV/
 .venv
 
 # Project specific
-*.db
-*.xlsx
-*.xls
-*.csv
-sample_sales_data.xlsx
+# Don't ignore sample_data/ since it contains example files
+# But ignore any dynamic database files
 pool.db
 
 # Logs
@@ -86,3 +86,12 @@ tests/
 *.sqls
 sqlshell-0.2.0/
 TODO
+
+# Temporary files and directories
+temp/
+tmp/
+*.tmp
+
+# Backup files
+*.bak
+*.backup

@@ -731,6 +731,83 @@ class SQLShell(QMainWindow):
                 f"An unexpected error occurred:\n\n{str(e)}")
             self.statusBar().showMessage("Query execution failed")
 
+    def execute_specific_query(self, query_text):
+        """
+        Execute a specific query string (used by F5/F9 functionality).
+        
+        Args:
+            query_text: The specific SQL query string to execute
+        """
+        try:
+            if not query_text.strip():
+                QMessageBox.warning(self, "Empty Query", "Cannot execute empty statement.")
+                return
+
+            # Check if the query references any tables that need to be loaded
+            referenced_tables = self.extract_table_names_from_query(query_text)
+            tables_to_load = [table for table in referenced_tables if table in self.tables_list.tables_needing_reload]
+            
+            # Load any tables that need to be loaded
+            if tables_to_load:
+                progress = QProgressDialog(f"Loading tables...", "Cancel", 0, len(tables_to_load), self)
+                progress.setWindowTitle("Loading Tables")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.show()
+                
+                for i, table_name in enumerate(tables_to_load):
+                    if progress.wasCanceled():
+                        self.statusBar().showMessage("Query canceled: table loading was interrupted")
+                        return
+                    
+                    progress.setLabelText(f"Loading table: {table_name}")
+                    progress.setValue(i)
+                    QApplication.processEvents()
+                    
+                    self.reload_selected_table(table_name)
+                
+                progress.setValue(len(tables_to_load))
+                progress.close()
+
+            start_time = datetime.now()
+            
+            try:
+                # Use the database manager to execute the query
+                result = self.db_manager.execute_query(query_text)
+                
+                execution_time = (datetime.now() - start_time).total_seconds()
+                self.populate_table(result)
+                
+                # Show which statement was executed in status
+                query_preview = query_text[:50] + "..." if len(query_text) > 50 else query_text
+                self.statusBar().showMessage(f"Statement executed: {query_preview} | Time: {execution_time:.2f}s | Rows: {len(result)}")
+                
+                # Record query for context-aware suggestions
+                try:
+                    from sqlshell.suggester_integration import get_suggestion_manager
+                    suggestion_mgr = get_suggestion_manager()
+                    suggestion_mgr.record_query(query_text)
+                except Exception as e:
+                    # Don't let suggestion errors affect query execution
+                    print(f"Error recording query for suggestions: {e}")
+                
+                # Record query in history and update completion usage (legacy)
+                self._update_query_history(query_text)
+                
+            except SyntaxError as e:
+                QMessageBox.critical(self, "SQL Syntax Error", str(e))
+                self.statusBar().showMessage("Statement execution failed: syntax error")
+            except ValueError as e:
+                QMessageBox.critical(self, "Query Error", str(e))
+                self.statusBar().showMessage("Statement execution failed")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", str(e))
+                self.statusBar().showMessage("Statement execution failed")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Unexpected Error",
+                f"An unexpected error occurred:\n\n{str(e)}")
+            self.statusBar().showMessage("Statement execution failed")
+
     def _update_query_history(self, query):
         """Update query history and track term usage for improved autocompletion"""
         import re
