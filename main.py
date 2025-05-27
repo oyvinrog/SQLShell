@@ -3511,6 +3511,65 @@ LIMIT 10
             QMessageBox.critical(self, "Analysis Error", f"Error analyzing column:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error analyzing column: {str(e)}')
 
+    def encode_text(self, column_name):
+        """Generate one-hot encoding for a text column and visualize the results"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                return
+                
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Preparing one-hot encoding for "{column_name}"...')
+            
+            # Get the dataframe from the current tab
+            full_df = current_tab.current_df.copy()
+            df = full_df
+            
+            # Save original row count for reference
+            current_tab.original_df_rowcount = len(full_df)
+            
+            # Check if the column exists
+            if column_name not in df.columns:
+                QMessageBox.warning(self, "Column Not Found", f"Column '{column_name}' not found in the current dataset.")
+                return
+            
+            # Import and use the visualize_ohe function from profile_ohe
+            from sqlshell.utils.profile_ohe import visualize_ohe
+            
+            # Create and show the one-hot encoding visualization
+            vis = visualize_ohe(df, column_name)
+            
+            # Connect the encodingApplied signal to our handler
+            vis.encodingApplied.connect(self.apply_encoding_to_current_tab)
+            
+            self.statusBar().showMessage(f'One-hot encoding visualization ready for "{column_name}"')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Encoding Error", f"Error creating one-hot encoding:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error encoding column: {str(e)}')
+
+    def apply_encoding_to_current_tab(self, encoded_df):
+        """Apply the encoded dataframe to the current tab"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                return
+            
+            # Update the current tab's dataframe with the encoded version
+            current_tab.current_df = encoded_df
+            
+            # Update the table display
+            self.populate_table(encoded_df)
+            
+            # Update status
+            self.statusBar().showMessage(f'Applied one-hot encoding. New table has {len(encoded_df)} rows and {len(encoded_df.columns)} columns.')
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Apply Encoding Error", f"Error applying encoding:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
+
     def get_current_query_tab(self):
         """Get the currently active tab if it's a query tab (has query_edit attribute)"""
         current_tab = self.get_current_tab()
