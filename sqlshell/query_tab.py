@@ -756,16 +756,22 @@ class QueryTab(QWidget):
     def _execute_query_callback(self, query_text):
         """Callback function for the execution handler to execute a single query."""
         # This is called by the execution handler when F5/F9 is pressed
-        # We temporarily store the current query and replace it with the specific statement
         if hasattr(self.parent, 'execute_specific_query'):
             self.parent.execute_specific_query(query_text)
         else:
             # Fallback: execute using the standard method
             original_text = self.query_edit.toPlainText()
+            cursor_pos = self.query_edit.textCursor().position()  # Save current cursor position
             self.query_edit.setPlainText(query_text)
             if hasattr(self.parent, 'execute_query'):
                 self.parent.execute_query()
             self.query_edit.setPlainText(original_text)
+            # Restore cursor position (as close as possible)
+            doc_length = len(self.query_edit.toPlainText())
+            restored_pos = min(cursor_pos, doc_length)
+            cursor = self.query_edit.textCursor()
+            cursor.setPosition(restored_pos)
+            self.query_edit.setTextCursor(cursor)
     
     def execute_all_statements(self):
         """Execute all statements in the editor (F5 functionality)."""
