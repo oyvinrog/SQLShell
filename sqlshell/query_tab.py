@@ -112,9 +112,9 @@ class QueryTab(QWidget):
         
         # Bottom part - Results section
         results_widget = QWidget()
-        results_layout = QVBoxLayout(results_widget)
-        results_layout.setContentsMargins(16, 16, 16, 16)
-        results_layout.setSpacing(12)
+        self.results_layout = QVBoxLayout(results_widget)
+        self.results_layout.setContentsMargins(16, 16, 16, 16)
+        self.results_layout.setSpacing(12)
         
         # Results header with row count
         header_layout = QHBoxLayout()
@@ -128,13 +128,13 @@ class QueryTab(QWidget):
         self.row_count_label.setStyleSheet(get_row_count_label_stylesheet())
         header_layout.addWidget(self.row_count_label)
         
-        results_layout.addLayout(header_layout)
+        self.results_layout.addLayout(header_layout)
         
         # Add descriptive text about table interactions and new F5/F9 functionality
         help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query.")
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #7FB3D5; font-size: 11px; margin: 5px 0; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
-        results_layout.addWidget(help_text)
+        self.results_layout.addWidget(help_text)
         
         # Results table with customized header
         self.results_table = QTableWidget()
@@ -161,7 +161,7 @@ class QueryTab(QWidget):
         # Connect header double-click signal to add column to query
         self.results_table.horizontalHeader().sectionDoubleClicked.connect(self.handle_header_double_click)
         
-        results_layout.addWidget(self.results_table)
+        self.results_layout.addWidget(self.results_table)
         
         # Add widgets to splitter
         self.splitter.addWidget(query_widget)

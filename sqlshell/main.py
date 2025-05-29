@@ -18,11 +18,13 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QCompleter, QFrame, QToolButton, QSizePolicy, QTabWidget,
                            QStyleFactory, QToolBar, QStatusBar, QLineEdit, QMenu,
                            QCheckBox, QWidgetAction, QMenuBar, QInputDialog, QProgressDialog,
-                           QListWidgetItem, QDialog, QGraphicsDropShadowEffect, QTreeWidgetItem)
+                           QListWidgetItem, QDialog, QGraphicsDropShadowEffect, QTreeWidgetItem,
+                           QComboBox)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QRegularExpression, QRect, QSize, QStringListModel, QPropertyAnimation, QEasingCurve, QTimer, QPoint, QMimeData
 from PyQt6.QtGui import QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QPainter, QTextFormat, QTextCursor, QIcon, QPalette, QLinearGradient, QBrush, QPixmap, QPolygon, QPainterPath, QDrag
 import numpy as np
 from datetime import datetime
+import psutil
 
 from sqlshell import create_test_data
 from sqlshell.splash_screen import AnimatedSplashScreen
@@ -418,25 +420,126 @@ class SQLShell(QMainWindow):
             headers = [str(col) for col in df.columns]
             current_tab.results_table.setHorizontalHeaderLabels(headers)
             
-            # Calculate chunk size (adjust based on available memory)
-            CHUNK_SIZE = 1000
+            # Calculate dynamic chunk size based on available memory
+            import psutil
+            available_memory = psutil.virtual_memory().available
+            # Use 10% of available memory for chunking, with a minimum of 1000 rows
+            memory_per_row = df.memory_usage(deep=True).sum() / len(df)
+            CHUNK_SIZE = max(1000, min(10000, int(available_memory * 0.1 / memory_per_row)))
             
-            # Process data in chunks to avoid memory issues with large datasets
-            for chunk_start in range(0, row_count, CHUNK_SIZE):
-                chunk_end = min(chunk_start + CHUNK_SIZE, row_count)
-                chunk = df.iloc[chunk_start:chunk_end]
+            # Add pagination controls if dataset is large
+            if row_count > CHUNK_SIZE:
+                # Remove any existing pagination widgets
+                for i in reversed(range(current_tab.results_layout.count())):
+                    item = current_tab.results_layout.itemAt(i)
+                    widget = item.widget() if item is not None else None
+                    if widget and widget.objectName() == "pagination_widget":
+                        current_tab.results_layout.removeWidget(widget)
+                        widget.setParent(None)
+                        widget.deleteLater()
+
+                # Create pagination widget
+                pagination_widget = QWidget()
+                pagination_widget.setObjectName("pagination_widget")
+                pagination_layout = QHBoxLayout(pagination_widget)
                 
-                # Add rows for this chunk
-                current_tab.results_table.setRowCount(chunk_end)
+                # Add page size selector
+                page_size_label = QLabel("Rows per page:")
+                page_size_combo = QComboBox()
+                page_sizes = [1000, 5000, 10000, 50000, 100000]
+                page_size_combo.addItems([str(size) for size in page_sizes])
+                page_size_combo.setCurrentText(str(CHUNK_SIZE))
                 
-                for row_idx, (_, row_data) in enumerate(chunk.iterrows(), start=chunk_start):
+                # Add navigation buttons
+                prev_btn = QPushButton("Previous")
+                next_btn = QPushButton("Next")
+                page_label = QLabel("Page 1")
+                
+                # Add widgets to layout
+                pagination_layout.addWidget(page_size_label)
+                pagination_layout.addWidget(page_size_combo)
+                pagination_layout.addStretch()
+                pagination_layout.addWidget(prev_btn)
+                pagination_layout.addWidget(page_label)
+                pagination_layout.addWidget(next_btn)
+                
+                # Add pagination widget to results layout
+                current_tab.results_layout.addWidget(pagination_widget)
+                
+                # Store pagination state
+                current_tab.pagination_state = {
+                    'current_page': 0,
+                    'page_size': CHUNK_SIZE,
+                    'total_pages': (row_count + CHUNK_SIZE - 1) // CHUNK_SIZE,
+                    'page_label': page_label,
+                    'prev_btn': prev_btn,
+                    'next_btn': next_btn,
+                    'page_size_combo': page_size_combo
+                }
+                
+                # Connect pagination signals
+                def update_page_size(size):
+                    current_tab.pagination_state['page_size'] = int(size)
+                    current_tab.pagination_state['total_pages'] = (row_count + int(size) - 1) // int(size)
+                    current_tab.pagination_state['current_page'] = 0
+                    load_current_page()
+                
+                def load_current_page():
+                    state = current_tab.pagination_state
+                    start_idx = state['current_page'] * state['page_size']
+                    end_idx = min(start_idx + state['page_size'], row_count)
+                    
+                    # Clear existing rows
+                    current_tab.results_table.setRowCount(0)
+                    
+                    # Load current page
+                    chunk = df.iloc[start_idx:end_idx]
+                    current_tab.results_table.setRowCount(len(chunk))
+                    
+                    for row_idx, (_, row_data) in enumerate(chunk.iterrows()):
+                        for col_idx, value in enumerate(row_data):
+                            formatted_value = self.format_value(value)
+                            item = QTableWidgetItem(formatted_value)
+                            current_tab.results_table.setItem(row_idx, col_idx, item)
+                    
+                    # Update pagination controls
+                    state['page_label'].setText(f"Page {state['current_page'] + 1} of {state['total_pages']}")
+                    state['prev_btn'].setEnabled(state['current_page'] > 0)
+                    state['next_btn'].setEnabled(state['current_page'] < state['total_pages'] - 1)
+                    
+                    # Process events to keep UI responsive
+                    QApplication.processEvents()
+                
+                def next_page():
+                    if current_tab.pagination_state['current_page'] < current_tab.pagination_state['total_pages'] - 1:
+                        current_tab.pagination_state['current_page'] += 1
+                        load_current_page()
+                
+                def prev_page():
+                    if current_tab.pagination_state['current_page'] > 0:
+                        current_tab.pagination_state['current_page'] -= 1
+                        load_current_page()
+                
+                # Connect signals
+                page_size_combo.currentTextChanged.connect(update_page_size)
+                next_btn.clicked.connect(next_page)
+                prev_btn.clicked.connect(prev_page)
+                
+                # Load first page
+                load_current_page()
+            else:
+                # For smaller datasets, load all at once
+                current_tab.results_table.setRowCount(row_count)
+                
+                for row_idx, (_, row_data) in enumerate(df.iterrows()):
                     for col_idx, value in enumerate(row_data):
                         formatted_value = self.format_value(value)
                         item = QTableWidgetItem(formatted_value)
                         current_tab.results_table.setItem(row_idx, col_idx, item)
-                        
-                # Process events to keep UI responsive
-                QApplication.processEvents()
+                    
+                    # Process events periodically to keep UI responsive
+                    if row_idx % 1000 == 0:
+                        QApplication.processEvents()
             
             # Optimize column widths
             current_tab.results_table.resizeColumnsToContents()
