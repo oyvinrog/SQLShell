@@ -2,7 +2,7 @@
 SQLShell - A powerful SQL shell with GUI interface for data analysis
 """
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 __author__ = "SQLShell Team"
 
 from sqlshell.main import main, SQLShell
@@ -39,6 +39,6 @@ def start(database_path=None):
             print(f"Error opening database: {e}")
     
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
 
 # SQLShell package initialization 
