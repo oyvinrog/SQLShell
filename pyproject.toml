@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlshell"
-version = "0.3.1"
+version = "0.3.2"
 description = "A powerful SQL shell with GUI interface for data analysis"
 readme = "README.md"
 authors = [
@@ -38,7 +38,8 @@ dependencies = [
     "matplotlib>=3.10.0",
     "scipy>=1.15.0",
     "seaborn>=0.13.0",
-    "nltk>=3.8.1"
+    "nltk>=3.8.1",
+    "psutil>=5.9.0"
 ]
 
 [project.urls]
