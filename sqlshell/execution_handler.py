@@ -271,6 +271,7 @@ class SQLExecutionHandler:
     def get_current_statement(self, text: str, cursor_position: int) -> Optional[Tuple[str, int, int]]:
         """
         Get the statement that contains the cursor position.
+        If cursor is not inside any statement, returns the closest statement before the cursor.
         
         Args:
             text: SQL text
@@ -281,11 +282,23 @@ class SQLExecutionHandler:
         """
         statements = self.parse_sql_statements(text)
         
+        # First try to find a statement containing the cursor
         for statement_text, start_pos, end_pos in statements:
             if start_pos <= cursor_position <= end_pos:
                 return (statement_text, start_pos, end_pos)
         
-        return None
+        # If no statement contains the cursor, find the closest statement before the cursor
+        closest_statement = None
+        closest_distance = float('inf')
+        
+        for statement_text, start_pos, end_pos in statements:
+            if end_pos <= cursor_position:  # Statement is before cursor
+                distance = cursor_position - end_pos
+                if distance < closest_distance:
+                    closest_distance = distance
+                    closest_statement = (statement_text, start_pos, end_pos)
+        
+        return closest_statement
     
     def execute_all_statements(self, text: str) -> List[str]:
         """
