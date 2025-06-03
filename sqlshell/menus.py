@@ -61,6 +61,13 @@ def create_view_menu(main_window):
     # Create View menu
     view_menu = main_window.menuBar().addMenu('&View')
     
+    # Search action
+    search_action = view_menu.addAction('Search in Results...')
+    search_action.setShortcut('Ctrl+F')
+    search_action.triggered.connect(main_window.show_search_dialog)
+    
+    view_menu.addSeparator()
+    
     # Maximized window option
     maximize_action = view_menu.addAction('Maximize Window')
     maximize_action.setShortcut('F11')

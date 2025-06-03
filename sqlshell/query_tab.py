@@ -132,7 +132,7 @@ class QueryTab(QWidget):
         self.results_layout.addLayout(header_layout)
         
         # Add descriptive text about table interactions and new F5/F9 functionality
-        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query. <b>📋 Copy:</b> Ctrl+C copies selected data to clipboard.")
+        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query. <b>🔍 Search:</b> Ctrl+F to search in results, ESC to clear search. <b>📋 Copy:</b> Ctrl+C copies selected data to clipboard.")
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #7FB3D5; font-size: 11px; margin: 5px 0; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
         self.results_layout.addWidget(help_text)

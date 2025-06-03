@@ -1256,6 +1256,18 @@ LIMIT 10
             self.rename_current_tab()
             return
         
+        # Search in results with Ctrl+F
+        if event.key() == Qt.Key.Key_F and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.show_search_dialog()
+            return
+        
+        # Clear search with ESC key (only if search is active)
+        if event.key() == Qt.Key.Key_Escape:
+            current_tab = self.get_current_tab()
+            if current_tab and "SEARCH RESULTS:" in current_tab.results_title.text():
+                self.clear_search()
+                return
+        
         # Show quick access menu with Ctrl+Shift+O
         if (event.key() == Qt.Key.Key_O and 
             (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and 
@@ -2677,14 +2689,94 @@ LIMIT 10
             self.statusBar().showMessage(f"Error opening file: {os.path.basename(file_path)}")
 
     def show_quick_access_menu(self):
-        """Display the quick access menu when the button is clicked"""
-        # First, make sure the menu is up to date
-        self.update_quick_access_menu()
+        """Show the quick access menu at cursor position"""
+        self.quick_access_btn.showMenu()
         
-        # Show the menu below the quick access button
-        if hasattr(self, 'quick_access_menu') and hasattr(self, 'quick_access_btn'):
-            self.quick_access_menu.popup(self.quick_access_btn.mapToGlobal(
-                QPoint(0, self.quick_access_btn.height())))
+    def show_search_dialog(self):
+        """Show search dialog and search in current results"""
+        # Get current tab and check if it has results
+        current_tab = self.get_current_tab()
+        if not current_tab or current_tab.current_df is None or current_tab.current_df.empty:
+            QMessageBox.information(self, "Search", "No data to search. Please execute a query first.")
+            return
+        
+        # Create a custom dialog with search options
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Search in Results")
+        dialog.setLabelText("Enter text to search for:")
+        dialog.setTextValue("")
+        dialog.resize(400, 150)
+        
+        # Add a checkbox for case sensitivity (though we default to case-insensitive)
+        # For now, keep it simple with just the text input
+        
+        if dialog.exec() == QInputDialog.DialogCode.Accepted:
+            search_text = dialog.textValue().strip()
+            if search_text:
+                self.search_in_results(search_text)
+            else:
+                # If empty search, offer to clear current search
+                if "SEARCH RESULTS:" in current_tab.results_title.text():
+                    reply = QMessageBox.question(self, "Clear Search", 
+                        "Clear current search and show all results?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.clear_search()
+    
+    def search_in_results(self, search_text):
+        """Search in current results using the optimized search function"""
+        try:
+            # Get current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                return
+            
+            # Import the search function
+            from sqlshell.utils.search_in_df import search_optimized
+            
+            # Perform the search
+            filtered_df = search_optimized(current_tab.current_df, search_text, case_sensitive=False)
+            
+            if filtered_df.empty:
+                QMessageBox.information(self, "Search Results", f"No results found for '{search_text}'")
+                return
+            
+            # Update the table with search results
+            self.populate_table(filtered_df)
+            
+            # Update results title to show search
+            current_tab.results_title.setText(f"SEARCH RESULTS: '{search_text}'")
+            
+            # Update status
+            total_rows = len(current_tab.current_df)
+            found_rows = len(filtered_df)
+            self.statusBar().showMessage(f"Search found {found_rows:,} of {total_rows:,} rows matching '{search_text}' (Ctrl+F to search again)")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Search Error", f"An error occurred while searching:\n{str(e)}")
+            self.statusBar().showMessage(f"Search failed: {str(e)}")
+    
+    def clear_search(self):
+        """Clear search results and show all original data"""
+        try:
+            # Get current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                return
+            
+            # Restore original data
+            self.populate_table(current_tab.current_df)
+            
+            # Reset results title
+            current_tab.results_title.setText("RESULTS")
+            
+            # Update status
+            total_rows = len(current_tab.current_df)
+            self.statusBar().showMessage(f"Showing all {total_rows:,} rows")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Clear Search Error", f"An error occurred while clearing search:\n{str(e)}")
+            self.statusBar().showMessage(f"Clear search failed: {str(e)}")
 
     def add_tab(self, title="Query 1"):
         """Add a new query tab"""
