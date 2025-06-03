@@ -141,6 +141,9 @@ class QueryTab(QWidget):
         self.results_table = CopyableTableWidget()
         self.results_table.setAlternatingRowColors(True)
         
+        # Set a reference to this tab so the copy functionality can access current_df
+        self.results_table._parent_tab = self
+        
         # Use custom FilterHeader for filtering
         header = FilterHeader(self.results_table)
         header.set_main_window(self.parent)  # Set reference to main window

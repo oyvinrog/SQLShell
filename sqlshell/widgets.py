@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QTableWidget, QApplication, QMenu
 from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QKeyEvent, QAction
 import pandas as pd
+import numpy as np
 
 
 class CopyableTableWidget(QTableWidget):
@@ -43,6 +44,79 @@ class CopyableTableWidget(QTableWidget):
         # Only show menu if we have actions
         if menu.actions():
             menu.exec(self.mapToGlobal(position))
+    
+    def _get_unformatted_value(self, row, col):
+        """Get the unformatted value from the original DataFrame if available"""
+        try:
+            # Try to get the original DataFrame from the parent tab
+            parent_tab = None
+            
+            # First try the direct reference we set
+            if hasattr(self, '_parent_tab') and self._parent_tab is not None:
+                parent_tab = self._parent_tab
+            else:
+                # Fallback to parent() method
+                parent_tab = self.parent()
+            
+            if parent_tab and hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+                original_df = parent_tab.current_df
+                
+                # Calculate the actual DataFrame row index, accounting for pagination
+                actual_row_idx = row
+                
+                # If pagination is active, adjust the row index
+                if hasattr(parent_tab, 'pagination_state') and parent_tab.pagination_state:
+                    state = parent_tab.pagination_state
+                    page_offset = state['current_page'] * state['page_size']
+                    actual_row_idx = page_offset + row
+                
+                # Check if we have valid indices
+                if actual_row_idx < len(original_df) and col < len(original_df.columns):
+                    # Get the raw value from the original DataFrame
+                    raw_value = original_df.iloc[actual_row_idx, col]
+                    
+                    # Handle NaN/NULL values
+                    if pd.isna(raw_value):
+                        return "NULL"
+                    
+                    # For numeric types, return the raw value as string without formatting
+                    if isinstance(raw_value, (int, float, np.integer, np.floating)):
+                        return str(raw_value)
+                    
+                    # For other types, return as string
+                    return str(raw_value)
+            
+            # Try alternative ways to access the dataframe
+            # Check if the parent has a parent (main window) that might have current_df
+            if parent_tab and hasattr(parent_tab, 'parent') and hasattr(parent_tab.parent(), 'current_df') and parent_tab.parent().current_df is not None:
+                original_df = parent_tab.parent().current_df
+                
+                # Calculate the actual DataFrame row index, accounting for pagination
+                actual_row_idx = row
+                
+                # Check if we have valid indices
+                if actual_row_idx < len(original_df) and col < len(original_df.columns):
+                    # Get the raw value from the original DataFrame
+                    raw_value = original_df.iloc[actual_row_idx, col]
+                    
+                    # Handle NaN/NULL values
+                    if pd.isna(raw_value):
+                        return "NULL"
+                    
+                    # For numeric types, return the raw value as string without formatting
+                    if isinstance(raw_value, (int, float, np.integer, np.floating)):
+                        return str(raw_value)
+                    
+                    # For other types, return as string
+                    return str(raw_value)
+                    
+        except Exception as e:
+            # If anything fails, fall back to formatted text
+            pass
+        
+        # Fallback: use the formatted text from the table item
+        item = self.item(row, col)
+        return item.text() if item else ""
     
     def copy_selection_to_clipboard(self):
         """Copy selected cells to clipboard in tab-separated format"""
@@ -92,8 +166,8 @@ class CopyableTableWidget(QTableWidget):
                 if col >= self.columnCount():
                     break
                     
-                item = self.item(row, col)
-                cell_text = item.text() if item else ""
+                # Use unformatted value when possible
+                cell_text = self._get_unformatted_value(row, col)
                 row_data.append(cell_text)
             
             copied_data.append('\t'.join(row_data))
@@ -131,8 +205,8 @@ class CopyableTableWidget(QTableWidget):
         for row in range(self.rowCount()):
             row_data = []
             for col in range(self.columnCount()):
-                item = self.item(row, col)
-                cell_text = item.text() if item else ""
+                # Use unformatted value when possible
+                cell_text = self._get_unformatted_value(row, col)
                 row_data.append(cell_text)
             copied_data.append('\t'.join(row_data))
         
