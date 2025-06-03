@@ -249,7 +249,7 @@ do 'one-hot encoding'.
    - Select "Encode text" from the context menu
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/column_encoding.png" alt="Column Profiler" width="80%" height="auto">
+<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/column_encoding.png" alt="Column Encoding" width="80%" height="auto">
 </div>
 
 2. **How It Works**:
@@ -257,8 +257,6 @@ do 'one-hot encoding'.
    - Each unique token becomes a new binary feature (1 if present, 0 if absent)
    - The system applies intelligent filtering to remove common words with low information value
    - Results appear as a new query with encoded columns automatically added
-
-<!-- Screenshot 2: Encoding process/dialog showing options -->
 
 3. **Applications**:
    - Analyze how specific keywords in job descriptions correlate with salary levels
@@ -271,8 +269,6 @@ do 'one-hot encoding'.
    - Sort encoded features by correlation strength to identify key terms
    - Use encoded columns in subsequent queries for deeper analysis
    - Join encoded results with other tables for cross-dataset insights
-
-<!-- Screenshot 3: Results showing correlation between job descriptions and salary -->
 
 5. **Benefits**:
    - Transform unstructured text into structured, analyzable data
@@ -294,10 +290,6 @@ This feature is particularly powerful for HR analytics, marketing text analysis,
   - pyarrow ≥ 14.0.1 (Parquet support)
   - fastparquet ≥ 2023.10.1 (Alternative parquet engine)
   - xlrd ≥ 2.0.1 (Support for older .xls files)
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 📁 Project Structure
 
