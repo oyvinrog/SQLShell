@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt
+import re
 
 
 def find_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str], min_match_ratio: float = 0.95):
@@ -23,6 +24,63 @@ def find_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str], min_match_ra
     """
     foreign_keys = []
     
+    # Helper function to check if a column name suggests it's an ID/key column
+    def is_likely_id_column(col_name):
+        col_lower = col_name.lower()
+        id_patterns = [
+            r'.*_?id$',           # ends with 'id' or '_id'
+            r'^id_?.*',           # starts with 'id' or 'id_'
+            r'.*_?key$',          # ends with 'key' or '_key'
+            r'^key_?.*',          # starts with 'key' or 'key_'
+            r'.*_?code$',         # ends with 'code' or '_code'
+            r'.*_?ref$',          # ends with 'ref' or '_ref'
+            r'.*_?num$',          # ends with 'num' or '_num'
+            r'.*_?number$'        # ends with 'number' or '_number'
+        ]
+        return any(re.match(pattern, col_lower) for pattern in id_patterns)
+    
+    # Helper function to check if a column name suggests it's NOT a foreign key
+    def is_unlikely_fk_column(col_name):
+        col_lower = col_name.lower()
+        non_fk_patterns = [
+            r'.*quantity.*', r'.*amount.*', r'.*price.*', r'.*cost.*',
+            r'.*total.*', r'.*sum.*', r'.*count.*', r'.*rate.*',
+            r'.*percent.*', r'.*ratio.*', r'.*score.*', r'.*weight.*',
+            r'.*length.*', r'.*width.*', r'.*height.*', r'.*size.*',
+            r'.*age.*', r'.*year.*', r'.*month.*', r'.*day.*',
+            r'.*time.*', r'.*date.*', r'.*timestamp.*',
+            r'.*name.*', r'.*title.*', r'.*description.*', r'.*text.*',
+            r'.*comment.*', r'.*note.*', r'.*email.*', r'.*phone.*',
+            r'.*address.*', r'.*city.*', r'.*state.*', r'.*country.*'
+        ]
+        return any(re.match(pattern, col_lower) for pattern in non_fk_patterns)
+    
+    # Helper function to calculate column name similarity
+    def column_name_similarity(col1, col2):
+        col1_lower = col1.lower()
+        col2_lower = col2.lower()
+        
+        # Exact match
+        if col1_lower == col2_lower:
+            return 1.0
+        
+        # Check if one is a substring of the other
+        if col1_lower in col2_lower or col2_lower in col1_lower:
+            return 0.8
+        
+        # Check for common FK patterns (e.g., "customer_id" matches "customer")
+        col1_clean = re.sub(r'_?(id|key|ref|code|num|number)$', '', col1_lower)
+        col2_clean = re.sub(r'_?(id|key|ref|code|num|number)$', '', col2_lower)
+        
+        if col1_clean == col2_clean and col1_clean:
+            return 0.9
+        
+        # Check if cleaned versions have overlap
+        if col1_clean in col2_clean or col2_clean in col1_clean:
+            return 0.6
+        
+        return 0.0
+    
     # First, identify potential primary keys in each DataFrame
     pk_candidates = {}
     for i, df in enumerate(dfs):
@@ -30,9 +88,11 @@ def find_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str], min_match_ra
         # Consider columns with unique values as potential primary keys
         for col in df.columns:
             if df[col].nunique() == len(df) and not df[col].isna().any():
-                if name not in pk_candidates:
-                    pk_candidates[name] = []
-                pk_candidates[name].append(col)
+                # Prefer columns that look like ID columns
+                if is_likely_id_column(col):
+                    if name not in pk_candidates:
+                        pk_candidates[name] = []
+                    pk_candidates[name].append(col)
     
     # For each DataFrame pair, check for foreign key relationships
     for i, df1 in enumerate(dfs):
@@ -60,6 +120,10 @@ def find_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str], min_match_ra
                     if df1[pk_col].dtype != df2[fk_col].dtype:
                         continue
                     
+                    # Skip columns that are unlikely to be foreign keys
+                    if is_unlikely_fk_column(fk_col):
+                        continue
+                    
                     # Get unique values in potential foreign key column
                     fk_values = set(df2[fk_col].dropna())
                     
@@ -67,15 +131,37 @@ def find_foreign_keys(dfs: List[pd.DataFrame], df_names: List[str], min_match_ra
                     if not fk_values:
                         continue
                     
+                    # Check cardinality - FK column should have fewer or equal unique values than PK
+                    if len(fk_values) > len(pk_values):
+                        continue
+                    
                     # Check if foreign key values are a subset of primary key values
                     common_values = fk_values.intersection(pk_values)
                     match_ratio = len(common_values) / len(fk_values)
                     
-                    # Consider it a foreign key if match ratio exceeds threshold
-                    if match_ratio >= min_match_ratio:
+                    # Calculate a confidence score based on multiple factors
+                    confidence_score = match_ratio
+                    
+                    # Boost confidence for column name similarity
+                    name_similarity = column_name_similarity(pk_col, fk_col)
+                    if name_similarity > 0.5:
+                        confidence_score += name_similarity * 0.3  # Up to 30% boost
+                    
+                    # Boost confidence if FK column name suggests it's an ID
+                    if is_likely_id_column(fk_col):
+                        confidence_score += 0.1  # 10% boost
+                    
+                    # Penalize if the FK column has too many unique values relative to total rows
+                    fk_cardinality_ratio = len(fk_values) / len(df2)
+                    if fk_cardinality_ratio > 0.5:  # More than 50% unique values
+                        confidence_score -= 0.2  # 20% penalty
+                    
+                    # Consider it a foreign key if confidence score exceeds threshold
+                    # But also require minimum match ratio
+                    if confidence_score >= min_match_ratio and match_ratio >= 0.9:
                         foreign_keys.append((name1, pk_col, name2, fk_col, match_ratio))
     
-    # Sort by match ratio (descending)
+    # Sort by match ratio (descending), then by confidence
     foreign_keys.sort(key=lambda x: x[4], reverse=True)
     return foreign_keys
 
@@ -94,6 +180,63 @@ def find_inclusion_dependencies(dfs: List[pd.DataFrame], df_names: List[str], mi
     - List of tuples (referenced_table, referenced_column, referencing_table, referencing_column, match_ratio)
     """
     dependencies = []
+    
+    # Helper function to check if a column name suggests it's an ID/key column
+    def is_likely_id_column(col_name):
+        col_lower = col_name.lower()
+        id_patterns = [
+            r'.*_?id$',           # ends with 'id' or '_id'
+            r'^id_?.*',           # starts with 'id' or 'id_'
+            r'.*_?key$',          # ends with 'key' or '_key'
+            r'^key_?.*',          # starts with 'key' or 'key_'
+            r'.*_?code$',         # ends with 'code' or '_code'
+            r'.*_?ref$',          # ends with 'ref' or '_ref'
+            r'.*_?num$',          # ends with 'num' or '_num'
+            r'.*_?number$'        # ends with 'number' or '_number'
+        ]
+        return any(re.match(pattern, col_lower) for pattern in id_patterns)
+    
+    # Helper function to check if a column name suggests it's NOT a foreign key
+    def is_unlikely_fk_column(col_name):
+        col_lower = col_name.lower()
+        non_fk_patterns = [
+            r'.*quantity.*', r'.*amount.*', r'.*price.*', r'.*cost.*',
+            r'.*total.*', r'.*sum.*', r'.*count.*', r'.*rate.*',
+            r'.*percent.*', r'.*ratio.*', r'.*score.*', r'.*weight.*',
+            r'.*length.*', r'.*width.*', r'.*height.*', r'.*size.*',
+            r'.*age.*', r'.*year.*', r'.*month.*', r'.*day.*',
+            r'.*time.*', r'.*date.*', r'.*timestamp.*',
+            r'.*name.*', r'.*title.*', r'.*description.*', r'.*text.*',
+            r'.*comment.*', r'.*note.*', r'.*email.*', r'.*phone.*',
+            r'.*address.*', r'.*city.*', r'.*state.*', r'.*country.*'
+        ]
+        return any(re.match(pattern, col_lower) for pattern in non_fk_patterns)
+    
+    # Helper function to calculate column name similarity
+    def column_name_similarity(col1, col2):
+        col1_lower = col1.lower()
+        col2_lower = col2.lower()
+        
+        # Exact match
+        if col1_lower == col2_lower:
+            return 1.0
+        
+        # Check if one is a substring of the other
+        if col1_lower in col2_lower or col2_lower in col1_lower:
+            return 0.8
+        
+        # Check for common FK patterns (e.g., "customer_id" matches "customer")
+        col1_clean = re.sub(r'_?(id|key|ref|code|num|number)$', '', col1_lower)
+        col2_clean = re.sub(r'_?(id|key|ref|code|num|number)$', '', col2_lower)
+        
+        if col1_clean == col2_clean and col1_clean:
+            return 0.9
+        
+        # Check if cleaned versions have overlap
+        if col1_clean in col2_clean or col2_clean in col1_clean:
+            return 0.6
+        
+        return 0.0
     
     # For each pair of DataFrames
     for i, df1 in enumerate(dfs):
@@ -115,9 +258,17 @@ def find_inclusion_dependencies(dfs: List[pd.DataFrame], df_names: List[str], mi
                 if not values1:
                     continue
                 
+                # Prefer columns that look like ID columns for referenced side
+                if not is_likely_id_column(col1):
+                    continue
+                
                 for col2 in df2.columns:
                     # Skip if data types are incompatible
                     if df1[col1].dtype != df2[col2].dtype:
+                        continue
+                    
+                    # Skip columns that are unlikely to be foreign keys
+                    if is_unlikely_fk_column(col2):
                         continue
                     
                     # Get unique values in the potential referencing column
@@ -127,12 +278,29 @@ def find_inclusion_dependencies(dfs: List[pd.DataFrame], df_names: List[str], mi
                     if not values2:
                         continue
                     
+                    # Check cardinality - referencing column should have fewer or equal unique values
+                    if len(values2) > len(values1):
+                        continue
+                    
                     # Check if values2 is approximately a subset of values1
                     common_values = values2.intersection(values1)
                     match_ratio = len(common_values) / len(values2)
                     
-                    # Consider it an inclusion dependency if match ratio exceeds threshold
-                    if match_ratio >= min_match_ratio:
+                    # Calculate a confidence score based on multiple factors
+                    confidence_score = match_ratio
+                    
+                    # Boost confidence for column name similarity
+                    name_similarity = column_name_similarity(col1, col2)
+                    if name_similarity > 0.5:
+                        confidence_score += name_similarity * 0.3  # Up to 30% boost
+                    
+                    # Boost confidence if referencing column name suggests it's an ID
+                    if is_likely_id_column(col2):
+                        confidence_score += 0.1  # 10% boost
+                    
+                    # Consider it an inclusion dependency if confidence score exceeds threshold
+                    # But also require minimum match ratio
+                    if confidence_score >= min_match_ratio and match_ratio >= 0.85:
                         dependencies.append((name1, col1, name2, col2, match_ratio))
     
     # Sort by match ratio (descending)
@@ -542,6 +710,70 @@ def test_profile_foreign_keys():
     window = visualize_foreign_keys(dfs, df_names, min_match_ratio=0.9, on_generate_join=handle_join_query)
     sys.exit(app.exec())
 
-# Only run the test function when script is executed directly
+
+def test_profile_foreign_keys_console():
+    """
+    Console test function to demonstrate improved foreign key detection.
+    """
+    import random
+    
+    # Create test data with clear foreign key relationships
+    
+    # Customers table
+    customers_data = {
+        "customer_id": list(range(1, 21)),
+        "customer_name": ["Customer " + str(i) for i in range(1, 21)],
+        "city": ["City " + str(i % 5) for i in range(1, 21)]
+    }
+    customers_df = pd.DataFrame(customers_data)
+    
+    # Products table
+    products_data = {
+        "product_id": list(range(101, 111)),
+        "product_name": ["Product " + str(i) for i in range(101, 111)],
+        "category": ["Category " + str(i % 3) for i in range(101, 111)]
+    }
+    products_df = pd.DataFrame(products_data)
+    
+    # Orders table (with foreign keys to customers)
+    random.seed(42)
+    orders_data = {
+        "order_id": list(range(1001, 1101)),
+        "customer_id": [random.randint(1, 20) for _ in range(100)],
+        "order_date": [pd.Timestamp("2021-01-01") + pd.Timedelta(days=i) for i in range(100)]
+    }
+    orders_df = pd.DataFrame(orders_data)
+    
+    # Order details table (with foreign keys to orders and products)
+    order_details_data = {
+        "order_detail_id": list(range(10001, 10201)),
+        "order_id": [random.choice(orders_data["order_id"]) for _ in range(200)],
+        "product_id": [random.choice(products_data["product_id"]) for _ in range(200)],
+        "quantity": [random.randint(1, 10) for _ in range(200)]
+    }
+    order_details_df = pd.DataFrame(order_details_data)
+    
+    # Run foreign key detection
+    dfs = [customers_df, products_df, orders_df, order_details_df]
+    df_names = ["Customers", "Products", "Orders", "OrderDetails"]
+    
+    foreign_keys, inclusion_dependencies, integrity_results = profile_foreign_keys(
+        dfs, df_names, min_match_ratio=0.9
+    )
+    
+    print("=== IMPROVED FOREIGN KEY DETECTION RESULTS ===")
+    print(f"\nFound {len(foreign_keys)} potential foreign key relationships:")
+    
+    for i, (pk_table, pk_col, fk_table, fk_col, match_ratio) in enumerate(foreign_keys, 1):
+        print(f"{i}. {fk_table}.{fk_col} → {pk_table}.{pk_col} (Match: {match_ratio:.2%})")
+    
+    print(f"\nFound {len(inclusion_dependencies)} inclusion dependencies:")
+    for i, (table1, col1, table2, col2, match_ratio) in enumerate(inclusion_dependencies[:10], 1):  # Show first 10
+        print(f"{i}. {table2}.{col2} ⊆ {table1}.{col1} (Match: {match_ratio:.2%})")
+    
+    if len(inclusion_dependencies) > 10:
+        print(f"... and {len(inclusion_dependencies) - 10} more")
+
+# Only run the GUI test function when script is executed directly
 if __name__ == "__main__":
     test_profile_foreign_keys() 
