@@ -13,6 +13,7 @@ from sqlshell.syntax_highlighter import SQLSyntaxHighlighter
 from sqlshell.ui import FilterHeader
 from sqlshell.styles import get_row_count_label_stylesheet
 from sqlshell.editor_integration import integrate_execution_functionality
+from sqlshell.widgets import CopyableTableWidget
 
 class QueryTab(QWidget):
     def __init__(self, parent, results_title="RESULTS"):
@@ -131,13 +132,13 @@ class QueryTab(QWidget):
         self.results_layout.addLayout(header_layout)
         
         # Add descriptive text about table interactions and new F5/F9 functionality
-        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query.")
+        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query. <b>📋 Copy:</b> Ctrl+C copies selected data to clipboard.")
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #7FB3D5; font-size: 11px; margin: 5px 0; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
         self.results_layout.addWidget(help_text)
         
         # Results table with customized header
-        self.results_table = QTableWidget()
+        self.results_table = CopyableTableWidget()
         self.results_table.setAlternatingRowColors(True)
         
         # Use custom FilterHeader for filtering
