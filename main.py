@@ -3589,26 +3589,20 @@ LIMIT 10
                 df = self.db_manager.execute_query(query)
                 
                 if df is not None and not df.empty:
-                    # Sample the data if it's larger than 10,000 rows
                     row_count = len(df)
-                    if row_count > 10000:
-                        self.statusBar().showMessage(f'Sampling {table_name} (using 10,000 rows from {row_count} total)...')
-                        df = df.sample(n=10000, random_state=42)
                     
-                    # Import the key profiler
+                    # Import the key profiler - uses our intelligent optimization system
                     from sqlshell.utils.profile_keys import visualize_profile
                     
-                    # Create and show the visualization
-                    self.statusBar().showMessage(f'Generating table profile for "{table_name}"...')
+                    # The profiler will automatically select the best optimization level
+                    # and handle sampling intelligently based on dataset characteristics
+                    self.statusBar().showMessage(f'Analyzing table structure for "{table_name}" ({row_count:,} rows)...')
                     vis = visualize_profile(df)
                     
                     # Store a reference to prevent garbage collection
                     self._keys_profile_window = vis
                     
-                    if row_count > 10000:
-                        self.statusBar().showMessage(f'Table structure profile generated for "{table_name}" (sampled 10,000 rows from {row_count})')
-                    else:
-                        self.statusBar().showMessage(f'Table structure profile generated for "{table_name}"')
+                    self.statusBar().showMessage(f'Table structure profile generated for "{table_name}" ({row_count:,} rows)')
                 else:
                     QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
