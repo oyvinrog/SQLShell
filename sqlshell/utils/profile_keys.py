@@ -46,34 +46,65 @@ def sample_dataframe_intelligently(df, sample_size, random_state=42):
     """
     Sample dataframe while preserving data characteristics for key analysis.
     """
-    if len(df) <= sample_size:
-        return df, False
-    
-    # Strategy: Take a mix of random sample and important patterns
-    np.random.seed(random_state)
-    
-    # 1. Take a random sample (80% of sample)
-    random_sample_size = int(sample_size * 0.8)
-    random_indices = np.random.choice(len(df), size=random_sample_size, replace=False)
-    
-    # 2. Add unique value representatives (20% of sample)
-    remaining_sample = sample_size - random_sample_size
-    unique_representatives = []
-    
-    for col in df.columns:
-        if len(unique_representatives) >= remaining_sample:
-            break
-        # Get indices of unique values not already in random sample
-        unique_values = df[col].drop_duplicates()
-        unique_indices = unique_values.index
-        new_indices = [i for i in unique_indices if i not in random_indices]
-        unique_representatives.extend(new_indices[:remaining_sample - len(unique_representatives)])
-    
-    # Combine samples
-    all_indices = list(set(random_indices) | set(unique_representatives))[:sample_size]
-    sampled_df = df.iloc[all_indices].reset_index(drop=True)
-    
-    return sampled_df, True
+    try:
+        if len(df) <= sample_size:
+            return df, False
+        
+        # Ensure sample_size is valid
+        sample_size = min(sample_size, len(df))
+        if sample_size <= 0:
+            return df.head(100) if len(df) > 100 else df, True
+        
+        # Strategy: Take a mix of random sample and important patterns
+        np.random.seed(random_state)
+        
+        # 1. Take a random sample (80% of sample)
+        random_sample_size = max(1, int(sample_size * 0.8))
+        random_sample_size = min(random_sample_size, len(df))
+        
+        try:
+            random_indices = np.random.choice(len(df), size=random_sample_size, replace=False)
+        except ValueError:
+            # Fallback if numpy choice fails
+            random_indices = np.random.permutation(len(df))[:random_sample_size]
+        
+        # 2. Add unique value representatives (20% of sample)
+        remaining_sample = sample_size - random_sample_size
+        unique_representatives = []
+        
+        if remaining_sample > 0:
+            for col in df.columns:
+                if len(unique_representatives) >= remaining_sample:
+                    break
+                try:
+                    # Get indices of unique values not already in random sample
+                    unique_values = df[col].drop_duplicates()
+                    unique_indices = unique_values.index.tolist()
+                    new_indices = [i for i in unique_indices if i not in random_indices and i < len(df)]
+                    unique_representatives.extend(new_indices[:remaining_sample - len(unique_representatives)])
+                except Exception:
+                    continue  # Skip problematic columns
+        
+        # Combine samples and ensure all indices are valid
+        all_indices = list(set(random_indices) | set(unique_representatives))
+        all_indices = [i for i in all_indices if 0 <= i < len(df)]  # Bounds check
+        all_indices = all_indices[:sample_size]  # Limit to sample size
+        
+        if not all_indices:
+            # Fallback: just take first sample_size rows
+            return df.head(sample_size), True
+        
+        try:
+            sampled_df = df.iloc[all_indices].reset_index(drop=True)
+            return sampled_df, True
+        except (IndexError, KeyError):
+            # Final fallback: simple head sampling
+            return df.head(sample_size), True
+            
+    except Exception as e:
+        print(f"Warning: Error in intelligent sampling: {e}. Using simple head sampling.")
+        safe_sample_size = min(sample_size, len(df))
+        return df.head(safe_sample_size), True
 
 
 def find_functional_dependencies_ultra_optimized(df: pd.DataFrame, max_lhs_size: int = 2):
@@ -1531,7 +1562,7 @@ def find_functional_dependencies_hyper_optimized(df: pd.DataFrame, max_lhs_size:
             lhs_candidates = [(col,) for col in non_unique_cols[:max_lhs_combinations]]
         else:
             # For multi-column, be very selective but still thorough
-            all_combos = list(itertools.combinations(non_unique_cols[:15], size))
+            all_combos = list(itertools.combinations(non_unique_cols[:15], size))[:30]
             lhs_candidates = sorted(all_combos, 
                                   key=lambda x: sum(col_cardinalities[col] for col in x))[:30]
         
@@ -2089,131 +2120,154 @@ def find_functional_dependencies_high_column_optimized(df: pd.DataFrame, max_lhs
     Specialized functional dependency discovery for high-column datasets (>50 columns).
     Uses intelligent column selection and aggressive limits.
     """
-    n_rows = len(df)
-    cols = list(df.columns)
-    n_cols = len(cols)
-    
-    if n_rows == 0 or n_cols < 2:
-        return []
-    
-    print(f"  High-column FD analysis: {n_rows} rows × {n_cols} columns")
-    
-    # Always sample for high-column datasets to keep it manageable
-    if n_rows > 2000:
-        sample_size = min(2000, max(500, n_rows // 50))
-        df, was_sampled = sample_dataframe_intelligently(df, sample_size)
+    try:
         n_rows = len(df)
-        print(f"    Sampled to {n_rows} rows for high-column analysis")
-    
-    # Pre-compute column characteristics for intelligent selection
-    col_info = {}
-    for col in cols:
-        unique_count = df[col].nunique()
-        col_info[col] = {
-            'cardinality': unique_count,
-            'uniqueness_ratio': unique_count / n_rows,
-            'is_potential_key': unique_count == n_rows,
-            'is_low_cardinality': unique_count < n_rows * 0.1,
-            'is_boolean_like': unique_count <= 2
-        }
-    
-    # Select most promising columns for LHS (determinants)
-    # Focus on columns that are likely to be good determinants
-    lhs_candidates = []
-    
-    # Add potential keys first (high cardinality)
-    potential_keys = [col for col, info in col_info.items() if info['uniqueness_ratio'] > 0.8]
-    lhs_candidates.extend(potential_keys[:10])  # Top 10 potential keys
-    
-    # Add low-cardinality columns (good for grouping)
-    low_card_cols = sorted([col for col, info in col_info.items() if info['is_low_cardinality']], 
-                          key=lambda x: col_info[x]['cardinality'])
-    lhs_candidates.extend(low_card_cols[:15])  # Top 15 low-cardinality
-    
-    # Add some medium-cardinality columns
-    medium_card_cols = [col for col, info in col_info.items() 
-                       if 0.1 <= info['uniqueness_ratio'] <= 0.8]
-    medium_card_cols = sorted(medium_card_cols, key=lambda x: col_info[x]['cardinality'])
-    lhs_candidates.extend(medium_card_cols[:10])  # Top 10 medium-cardinality
-    
-    # Remove duplicates while preserving order
-    seen = set()
-    lhs_candidates = [col for col in lhs_candidates if not (col in seen or seen.add(col))]
-    
-    # Limit to top 30 LHS candidates to keep it manageable
-    lhs_candidates = lhs_candidates[:30]
-    
-    print(f"    Selected {len(lhs_candidates)} promising LHS candidates from {n_cols} columns")
-    
-    fds = []
-    group_cache = {}
-    
-    # Very aggressive limits for high-column datasets
-    max_tests = 200  # Maximum total FD tests
-    tests_performed = 0
-    
-    for size in range(1, min(max_lhs_size + 1, 3)):  # Cap at size 2 for high-column
-        if tests_performed >= max_tests:
-            break
-            
-        if size == 1:
-            # Single column determinants
-            candidates = lhs_candidates[:20]  # Top 20 for single-column
-        else:
-            # Multi-column determinants - be very selective
-            candidates = list(itertools.combinations(lhs_candidates[:15], size))[:30]
+        cols = list(df.columns)
+        n_cols = len(cols)
         
-        for lhs in candidates:
-            if tests_performed >= max_tests:
+        if n_rows == 0 or n_cols < 2:
+            return []
+        
+        print(f"  High-column FD analysis: {n_rows} rows × {n_cols} columns")
+        
+        # Always sample for high-column datasets to keep it manageable
+        if n_rows > 2000:
+            sample_size = min(2000, max(500, n_rows // 50))
+            df, was_sampled = sample_dataframe_intelligently(df, sample_size)
+            n_rows = len(df)
+            print(f"    Sampled to {n_rows} rows for high-column analysis")
+        
+        # Pre-compute column characteristics for intelligent selection
+        col_info = {}
+        for col in cols:
+            try:
+                unique_count = df[col].nunique()
+                col_info[col] = {
+                    'cardinality': unique_count,
+                    'uniqueness_ratio': unique_count / n_rows,
+                    'is_potential_key': unique_count == n_rows,
+                    'is_low_cardinality': unique_count < n_rows * 0.1,
+                    'is_boolean_like': unique_count <= 2
+                }
+            except Exception:
+                # Skip problematic columns
+                col_info[col] = {
+                    'cardinality': 0,
+                    'uniqueness_ratio': 0,
+                    'is_potential_key': False,
+                    'is_low_cardinality': False,
+                    'is_boolean_like': False
+                }
+        
+        # Select most promising columns for LHS (determinants)
+        # Focus on columns that are likely to be good determinants
+        lhs_candidates = []
+        
+        # Add potential keys first (high cardinality)
+        potential_keys = [col for col, info in col_info.items() if info['uniqueness_ratio'] > 0.8]
+        lhs_candidates.extend(potential_keys[:10])  # Top 10 potential keys
+        
+        # Add low-cardinality columns (good for grouping)
+        low_card_cols = sorted([col for col, info in col_info.items() if info['is_low_cardinality']], 
+                              key=lambda x: col_info[x]['cardinality'])
+        lhs_candidates.extend(low_card_cols[:15])  # Top 15 low-cardinality
+        
+        # Add some medium-cardinality columns
+        medium_card_cols = [col for col, info in col_info.items() 
+                           if 0.1 <= info['uniqueness_ratio'] <= 0.8]
+        medium_card_cols = sorted(medium_card_cols, key=lambda x: col_info[x]['cardinality'])
+        lhs_candidates.extend(medium_card_cols[:10])  # Top 10 medium-cardinality
+        
+        # Remove duplicates while preserving order and ensure they exist in dataframe
+        seen = set()
+        lhs_candidates = [col for col in lhs_candidates 
+                         if col in df.columns and not (col in seen or seen.add(col))]
+        
+        # Limit to top 30 LHS candidates to keep it manageable
+        lhs_candidates = lhs_candidates[:30]
+        
+        print(f"    Selected {len(lhs_candidates)} promising LHS candidates from {n_cols} columns")
+        
+        fds = []
+        group_cache = {}
+        
+        # Very aggressive limits for high-column datasets
+        max_tests = 200  # Maximum total FD tests
+        tests_performed = 0
+        
+        for size in range(1, min(max_lhs_size + 1, 3)):  # Cap at size 2 for high-column
+            if tests_performed >= max_tests or not lhs_candidates:
                 break
                 
-            lhs_tuple = tuple(lhs) if isinstance(lhs, (list, tuple)) else (lhs,)
+            if size == 1:
+                # Single column determinants
+                candidates = lhs_candidates[:20]  # Top 20 for single-column
+            else:
+                # Multi-column determinants - be very selective
+                try:
+                    candidates = list(itertools.combinations(lhs_candidates[:15], size))[:30]
+                except Exception:
+                    candidates = []
             
-            try:
-                if lhs_tuple not in group_cache:
-                    grouped = df.groupby(list(lhs_tuple), sort=False, dropna=False)
-                    group_sizes = grouped.size()
-                    group_cache[lhs_tuple] = (grouped, group_sizes)
-                else:
-                    grouped, group_sizes = group_cache[lhs_tuple]
+            for lhs in candidates:
+                if tests_performed >= max_tests:
+                    break
+                    
+                lhs_tuple = tuple(lhs) if isinstance(lhs, (list, tuple)) else (lhs,)
                 
-                n_groups = len(group_sizes)
-                if n_groups == n_rows or group_sizes.max() == 1:
-                    continue
-                
-                # Test only most promising RHS candidates
-                rhs_candidates = []
-                
-                # Add high-cardinality columns as RHS candidates
-                high_card_rhs = [col for col, info in col_info.items() 
-                               if info['uniqueness_ratio'] > 0.5 and col not in lhs_tuple]
-                rhs_candidates.extend(high_card_rhs[:10])
-                
-                # Add some other columns
-                other_rhs = [col for col in cols if col not in lhs_tuple and col not in rhs_candidates]
-                rhs_candidates.extend(other_rhs[:10])
-                
-                for rhs in rhs_candidates:
-                    if tests_performed >= max_tests:
-                        break
+                try:
+                    # Ensure all columns in lhs_tuple exist in dataframe
+                    if not all(col in df.columns for col in lhs_tuple):
+                        continue
                         
-                    # Quick heuristic check
-                    if col_info[rhs]['cardinality'] > n_groups * 1.5:
+                    if lhs_tuple not in group_cache:
+                        grouped = df.groupby(list(lhs_tuple), sort=False, dropna=False)
+                        group_sizes = grouped.size()
+                        group_cache[lhs_tuple] = (grouped, group_sizes)
+                    else:
+                        grouped, group_sizes = group_cache[lhs_tuple]
+                    
+                    n_groups = len(group_sizes)
+                    if n_groups == n_rows or group_sizes.max() == 1:
                         continue
                     
-                    try:
-                        rhs_per_group = grouped[rhs].nunique()
-                        if (rhs_per_group <= 1).all():
-                            fds.append((lhs_tuple, rhs))
-                        tests_performed += 1
-                    except Exception:
-                        continue
+                    # Test only most promising RHS candidates
+                    rhs_candidates = []
+                    
+                    # Add high-cardinality columns as RHS candidates
+                    high_card_rhs = [col for col, info in col_info.items() 
+                                   if info['uniqueness_ratio'] > 0.5 and col not in lhs_tuple and col in df.columns]
+                    rhs_candidates.extend(high_card_rhs[:10])
+                    
+                    # Add some other columns
+                    other_rhs = [col for col in cols if col not in lhs_tuple and col not in rhs_candidates and col in df.columns]
+                    rhs_candidates.extend(other_rhs[:10])
+                    
+                    for rhs in rhs_candidates:
+                        if tests_performed >= max_tests:
+                            break
+                            
+                        # Quick heuristic check
+                        if col_info.get(rhs, {}).get('cardinality', 0) > n_groups * 1.5:
+                            continue
                         
-            except Exception:
-                continue
-    
-    print(f"    Performed {tests_performed} FD tests (limit: {max_tests})")
-    return fds
+                        try:
+                            rhs_per_group = grouped[rhs].nunique()
+                            if (rhs_per_group <= 1).all():
+                                fds.append((lhs_tuple, rhs))
+                            tests_performed += 1
+                        except Exception:
+                            continue
+                            
+                except Exception:
+                    continue
+        
+        print(f"    Performed {tests_performed} FD tests (limit: {max_tests})")
+        return fds
+        
+    except Exception as e:
+        print(f"    Error in high-column FD analysis: {e}")
+        return []  # Return empty list on error
 
 
 def find_candidate_keys_high_column_optimized(df: pd.DataFrame, max_combination_size: int = 2):
@@ -2221,123 +2275,156 @@ def find_candidate_keys_high_column_optimized(df: pd.DataFrame, max_combination_
     Specialized candidate key discovery for high-column datasets (>50 columns).
     Uses intelligent column selection and aggressive limits.
     """
-    n_rows = len(df)
-    cols = list(df.columns)
-    n_cols = len(cols)
-    
-    if n_rows == 0:
-        return [], [], []
-    
-    print(f"  High-column key analysis: {n_rows} rows × {n_cols} columns")
-    
-    # Always sample for high-column datasets
-    if n_rows > 2000:
-        sample_size = min(2000, max(500, n_rows // 50))
-        df, was_sampled = sample_dataframe_intelligently(df, sample_size)
+    try:
         n_rows = len(df)
-        print(f"    Sampled to {n_rows} rows for high-column key analysis")
-    
-    all_keys = []
-    
-    # Quick single-column check with cardinality-based prioritization
-    col_cardinalities = {}
-    potential_single_keys = []
-    
-    # Sort columns by cardinality (descending) to check most promising first
-    for col in cols:
-        cardinality = df[col].nunique()
-        col_cardinalities[col] = cardinality
-        if cardinality == n_rows:
-            potential_single_keys.append((col,))
-            all_keys.append((col,))
-    
-    print(f"    Found {len(potential_single_keys)} single-column keys")
-    
-    # For high-column datasets, if we have single-column keys, be very conservative about multi-column
-    if potential_single_keys and n_cols > 80:
-        print(f"    Stopping early due to high column count ({n_cols}) and existing single-column keys")
-        return all_keys, potential_single_keys, []
-    
-    # Select most promising columns for multi-column key testing
-    # Sort by cardinality (highest first) and take top candidates
-    sorted_cols = sorted(cols, key=lambda x: col_cardinalities[x], reverse=True)
-    
-    # Take top candidates based on cardinality
-    if n_cols > 80:
-        promising_cols = sorted_cols[:15]  # Very selective for >80 columns
-    elif n_cols > 60:
-        promising_cols = sorted_cols[:20]  # Selective for >60 columns  
-    else:
-        promising_cols = sorted_cols[:25]  # Less selective for 50-60 columns
-    
-    print(f"    Selected {len(promising_cols)} promising columns for multi-column key testing")
-    
-    # Very conservative multi-column key testing
-    max_combination_size = min(max_combination_size, 2)  # Cap at 2 for high-column
-    max_combinations_to_test = 50  # Hard limit
-    
-    for size in range(2, max_combination_size + 1):
-        if size > len(promising_cols):
-            break
+        cols = list(df.columns)
+        n_cols = len(cols)
         
-        # Generate combinations from promising columns only
-        combinations = list(itertools.combinations(promising_cols, size))
+        if n_rows == 0:
+            return [], [], []
         
-        # Sort by total cardinality (higher is more likely to be a key)
-        combinations = sorted(combinations, 
-                            key=lambda x: sum(col_cardinalities[col] for col in x), 
-                            reverse=True)
+        print(f"  High-column key analysis: {n_rows} rows × {n_cols} columns")
         
-        # Test only top combinations
-        combinations_to_test = combinations[:max_combinations_to_test]
+        # Always sample for high-column datasets
+        if n_rows > 2000:
+            sample_size = min(2000, max(500, n_rows // 50))
+            df, was_sampled = sample_dataframe_intelligently(df, sample_size)
+            n_rows = len(df)
+            print(f"    Sampled to {n_rows} rows for high-column key analysis")
         
-        tested_count = 0
-        for combo in combinations_to_test:
-            # Skip if contains single-column key
-            if any((col,) in potential_single_keys for col in combo):
-                continue
-            
-            # Quick heuristic: if sum of cardinalities is much less than n_rows, skip
-            total_card = sum(col_cardinalities[col] for col in combo)
-            if total_card < n_rows * 0.7:
-                continue
-            
+        all_keys = []
+        
+        # Quick single-column check with cardinality-based prioritization
+        col_cardinalities = {}
+        potential_single_keys = []
+        
+        # Sort columns by cardinality (descending) to check most promising first
+        for col in cols:
             try:
-                unique_count = len(df[list(combo)].drop_duplicates())
-                if unique_count == n_rows:
-                    all_keys.append(combo)
-                tested_count += 1
-                
-                # Early termination for high-column datasets
-                if tested_count >= 20:  # Test at most 20 combinations per size
-                    break
-                    
+                if col in df.columns:
+                    cardinality = df[col].nunique()
+                    col_cardinalities[col] = cardinality
+                    if cardinality == n_rows:
+                        potential_single_keys.append((col,))
+                        all_keys.append((col,))
+                else:
+                    col_cardinalities[col] = 0
             except Exception:
-                continue
+                col_cardinalities[col] = 0
         
-        print(f"    Tested {tested_count} combinations of size {size}")
+        print(f"    Found {len(potential_single_keys)} single-column keys")
         
-        # Early termination if we found keys and this is a very high-column dataset
-        if all_keys and n_cols > 80:
-            break
-    
-    # Classify keys
-    candidate_keys = []
-    superkeys = []
-    
-    for key in all_keys:
-        is_candidate = True
-        for other_key in all_keys:
-            if len(other_key) < len(key) and set(other_key).issubset(set(key)):
-                is_candidate = False
+        # For high-column datasets, if we have single-column keys, be very conservative about multi-column
+        if potential_single_keys and n_cols > 80:
+            print(f"    Stopping early due to high column count ({n_cols}) and existing single-column keys")
+            return all_keys, potential_single_keys, []
+        
+        # Select most promising columns for multi-column key testing
+        # Sort by cardinality (highest first) and take top candidates
+        try:
+            sorted_cols = sorted([col for col in cols if col in df.columns], 
+                                key=lambda x: col_cardinalities.get(x, 0), reverse=True)
+        except Exception:
+            sorted_cols = [col for col in cols if col in df.columns]
+        
+        # Take top candidates based on cardinality
+        if n_cols > 80:
+            promising_cols = sorted_cols[:15]  # Very selective for >80 columns
+        elif n_cols > 60:
+            promising_cols = sorted_cols[:20]  # Selective for >60 columns  
+        else:
+            promising_cols = sorted_cols[:25]  # Less selective for 50-60 columns
+        
+        print(f"    Selected {len(promising_cols)} promising columns for multi-column key testing")
+        
+        # Very conservative multi-column key testing
+        max_combination_size = min(max_combination_size, 2)  # Cap at 2 for high-column
+        max_combinations_to_test = 50  # Hard limit
+        
+        for size in range(2, max_combination_size + 1):
+            if size > len(promising_cols):
+                break
+            
+            # Generate combinations from promising columns only
+            try:
+                combinations = list(itertools.combinations(promising_cols, size))
+            except Exception:
+                combinations = []
+            
+            # Sort by total cardinality (higher is more likely to be a key)
+            try:
+                combinations = sorted(combinations, 
+                                    key=lambda x: sum(col_cardinalities.get(col, 0) for col in x), 
+                                    reverse=True)
+            except Exception:
+                pass  # Keep original order if sorting fails
+            
+            # Test only top combinations
+            combinations_to_test = combinations[:max_combinations_to_test]
+            
+            tested_count = 0
+            for combo in combinations_to_test:
+                try:
+                    # Skip if contains single-column key
+                    if any((col,) in potential_single_keys for col in combo):
+                        continue
+                    
+                    # Ensure all columns in combo exist in dataframe
+                    if not all(col in df.columns for col in combo):
+                        continue
+                    
+                    # Quick heuristic: if sum of cardinalities is much less than n_rows, skip
+                    total_card = sum(col_cardinalities.get(col, 0) for col in combo)
+                    if total_card < n_rows * 0.7:
+                        continue
+                    
+                    try:
+                        unique_count = len(df[list(combo)].drop_duplicates())
+                        if unique_count == n_rows:
+                            all_keys.append(combo)
+                    except Exception:
+                        continue  # Skip problematic combinations
+                        
+                    tested_count += 1
+                    
+                    # Early termination for high-column datasets
+                    if tested_count >= 20:  # Test at most 20 combinations per size
+                        break
+                        
+                except Exception:
+                    continue
+            
+            print(f"    Tested {tested_count} combinations of size {size}")
+            
+            # Early termination if we found keys and this is a very high-column dataset
+            if all_keys and n_cols > 80:
                 break
         
-        if is_candidate:
-            candidate_keys.append(key)
-        else:
-            superkeys.append(key)
-    
-    return all_keys, candidate_keys, superkeys
+        # Classify keys
+        candidate_keys = []
+        superkeys = []
+        
+        for key in all_keys:
+            try:
+                is_candidate = True
+                for other_key in all_keys:
+                    if len(other_key) < len(key) and set(other_key).issubset(set(key)):
+                        is_candidate = False
+                        break
+                
+                if is_candidate:
+                    candidate_keys.append(key)
+                else:
+                    superkeys.append(key)
+            except Exception:
+                # If classification fails, treat as candidate key
+                candidate_keys.append(key)
+        
+        return all_keys, candidate_keys, superkeys
+        
+    except Exception as e:
+        print(f"    Error in high-column key analysis: {e}")
+        return [], [], []  # Return empty lists on error
 
 
 def profile_high_column_optimized(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int = 2):
@@ -2345,88 +2432,78 @@ def profile_high_column_optimized(df: pd.DataFrame, max_combination_size: int = 
     Specialized profile function for high-column datasets (>50 columns).
     Uses aggressive optimization and intelligent column selection.
     """
-    start_time = time.time()
-    n_rows = len(df)
-    cols = list(df.columns)
-    n_cols = len(cols)
-    
-    print(f"Starting HIGH-COLUMN analysis of {n_rows:,} rows × {n_cols} columns...")
-    
-    # Very aggressive parameter limits for high-column datasets
-    max_combination_size = min(max_combination_size, 2)
-    max_lhs_size = min(max_lhs_size, 2)
-    print(f"  High-column mode: limiting to max combination size {max_combination_size}")
-    
-    # Discover functional dependencies
-    fd_start = time.time()
-    fds = find_functional_dependencies_high_column_optimized(df, max_lhs_size)
-    fd_time = time.time() - fd_start
-    print(f"  FD discovery completed in {fd_time:.2f}s - found {len(fds)} dependencies")
-    
-    fd_results = [(", ".join(lhs), rhs) for lhs, rhs in fds]
-    
-    # Discover keys
-    key_start = time.time()
-    all_keys, candidate_keys, superkeys = find_candidate_keys_high_column_optimized(df, max_combination_size)
-    key_time = time.time() - key_start
-    print(f"  Key discovery completed in {key_time:.2f}s - found {len(candidate_keys)} candidate keys")
-    
-    # Minimal result preparation for high-column datasets
-    results = []
-    
-    # Pre-compute single column uniqueness for efficiency
-    single_col_uniqueness = {}
-    print("  Computing column uniqueness...")
-    for col in cols:
-        single_col_uniqueness[col] = df[col].nunique()
-    
-    # Only process essential combinations for high-column datasets
-    max_combinations_total = min(100, n_cols * 2)  # Very conservative
-    combinations_tested = 0
-    
-    print(f"  Preparing results (testing max {max_combinations_total} combinations)...")
-    
-    # Process single columns first (most important)
-    for col in cols:
-        if combinations_tested >= max_combinations_total:
-            break
-            
-        combo = (col,)
-        unique_count = single_col_uniqueness[col]
-        unique_ratio = unique_count / n_rows if n_rows > 0 else 0
-        is_key = combo in all_keys
-        is_candidate = combo in candidate_keys
-        is_superkey = combo in superkeys
+    try:
+        start_time = time.time()
+        n_rows = len(df)
+        cols = list(df.columns)
+        n_cols = len(cols)
         
-        key_type = ""
-        if is_candidate:
-            key_type = "★ Candidate Key"
-        elif is_superkey:
-            key_type = "⊃ Superkey"
+        print(f"Starting HIGH-COLUMN analysis of {n_rows:,} rows × {n_cols} columns...")
         
-        results.append((combo, unique_count, unique_ratio, is_key, key_type))
-        combinations_tested += 1
-    
-    # Process only the most promising multi-column combinations
-    if combinations_tested < max_combinations_total and max_combination_size > 1:
-        # Sort columns by uniqueness (highest first) for better multi-column candidates
-        sorted_cols = sorted(cols, key=lambda x: single_col_uniqueness[x], reverse=True)
-        top_cols = sorted_cols[:min(20, len(cols))]  # Top 20 most unique columns
+        # Very aggressive parameter limits for high-column datasets
+        max_combination_size = min(max_combination_size, 2)
+        max_lhs_size = min(max_lhs_size, 2)
+        print(f"  High-column mode: limiting to max combination size {max_combination_size}")
         
-        for size in range(2, min(max_combination_size + 1, 3)):
-            if combinations_tested >= max_combinations_total:
-                break
-                
-            for combo in itertools.combinations(top_cols, size):
+        # Discover functional dependencies
+        fd_start = time.time()
+        try:
+            fds = find_functional_dependencies_high_column_optimized(df, max_lhs_size)
+        except Exception as e:
+            print(f"    Error in FD discovery: {e}")
+            fds = []
+        fd_time = time.time() - fd_start
+        print(f"  FD discovery completed in {fd_time:.2f}s - found {len(fds)} dependencies")
+        
+        fd_results = [(", ".join(lhs), rhs) for lhs, rhs in fds]
+        
+        # Discover keys
+        key_start = time.time()
+        try:
+            all_keys, candidate_keys, superkeys = find_candidate_keys_high_column_optimized(df, max_combination_size)
+        except Exception as e:
+            print(f"    Error in key discovery: {e}")
+            all_keys, candidate_keys, superkeys = [], [], []
+        key_time = time.time() - key_start
+        print(f"  Key discovery completed in {key_time:.2f}s - found {len(candidate_keys)} candidate keys")
+        
+        # Minimal result preparation for high-column datasets
+        results = []
+        
+        # Pre-compute single column uniqueness for efficiency
+        single_col_uniqueness = {}
+        print("  Computing column uniqueness...")
+        try:
+            for col in cols:
+                if col in df.columns:
+                    try:
+                        single_col_uniqueness[col] = df[col].nunique()
+                    except Exception:
+                        single_col_uniqueness[col] = 0
+                else:
+                    single_col_uniqueness[col] = 0
+        except Exception as e:
+            print(f"    Error computing column uniqueness: {e}")
+            # Set default values
+            single_col_uniqueness = {col: 0 for col in cols}
+        
+        # Only process essential combinations for high-column datasets
+        max_combinations_total = min(100, n_cols * 2)  # Very conservative
+        combinations_tested = 0
+        
+        print(f"  Preparing results (testing max {max_combinations_total} combinations)...")
+        
+        # Process single columns first (most important)
+        try:
+            for col in cols:
                 if combinations_tested >= max_combinations_total:
                     break
                     
-                if combo in all_keys:
-                    unique_count = n_rows
-                else:
-                    # For non-keys, estimate uniqueness
-                    unique_count = min(n_rows, sum(single_col_uniqueness[col] for col in combo) // len(combo))
-                
+                if col not in df.columns:
+                    continue
+                    
+                combo = (col,)
+                unique_count = single_col_uniqueness.get(col, 0)
                 unique_ratio = unique_count / n_rows if n_rows > 0 else 0
                 is_key = combo in all_keys
                 is_candidate = combo in candidate_keys
@@ -2440,19 +2517,85 @@ def profile_high_column_optimized(df: pd.DataFrame, max_combination_size: int = 
                 
                 results.append((combo, unique_count, unique_ratio, is_key, key_type))
                 combinations_tested += 1
-    
-    # Quick sort
-    results.sort(key=lambda x: (not x[3], -x[2], len(x[0])))
-    key_results = [(", ".join(c), u, f"{u/n_rows:.2%}", k) 
-                   for c, u, _, _, k in results]
-    
-    # Simplified normalized tables
-    normalized_tables = propose_normalized_tables(cols, candidate_keys, fds)
-    
-    total_time = time.time() - start_time
-    print(f"  HIGH-COLUMN analysis completed in {total_time:.2f}s")
-    
-    return fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size, normalized_tables
+        except Exception as e:
+            print(f"    Error processing single columns: {e}")
+        
+        # Process only the most promising multi-column combinations
+        try:
+            if combinations_tested < max_combinations_total and max_combination_size > 1:
+                # Sort columns by uniqueness (highest first) for better multi-column candidates
+                try:
+                    sorted_cols = sorted([col for col in cols if col in df.columns], 
+                                       key=lambda x: single_col_uniqueness.get(x, 0), reverse=True)
+                    top_cols = sorted_cols[:min(20, len(sorted_cols))]  # Top 20 most unique columns
+                except Exception:
+                    top_cols = [col for col in cols if col in df.columns][:20]
+                
+                for size in range(2, min(max_combination_size + 1, 3)):
+                    if combinations_tested >= max_combinations_total:
+                        break
+                        
+                    try:
+                        for combo in itertools.combinations(top_cols, size):
+                            if combinations_tested >= max_combinations_total:
+                                break
+                                
+                            # Ensure all columns exist
+                            if not all(col in df.columns for col in combo):
+                                continue
+                                
+                            if combo in all_keys:
+                                unique_count = n_rows
+                            else:
+                                # For non-keys, estimate uniqueness
+                                unique_count = min(n_rows, sum(single_col_uniqueness.get(col, 0) for col in combo) // len(combo))
+                            
+                            unique_ratio = unique_count / n_rows if n_rows > 0 else 0
+                            is_key = combo in all_keys
+                            is_candidate = combo in candidate_keys
+                            is_superkey = combo in superkeys
+                            
+                            key_type = ""
+                            if is_candidate:
+                                key_type = "★ Candidate Key"
+                            elif is_superkey:
+                                key_type = "⊃ Superkey"
+                            
+                            results.append((combo, unique_count, unique_ratio, is_key, key_type))
+                            combinations_tested += 1
+                    except Exception as e:
+                        print(f"    Error processing size {size} combinations: {e}")
+                        continue
+        except Exception as e:
+            print(f"    Error processing multi-column combinations: {e}")
+        
+        # Quick sort
+        try:
+            results.sort(key=lambda x: (not x[3], -x[2], len(x[0])))
+            key_results = [(", ".join(c), u, f"{u/n_rows:.2%}", k) 
+                           for c, u, _, _, k in results]
+        except Exception as e:
+            print(f"    Error sorting results: {e}")
+            key_results = []
+        
+        # Simplified normalized tables
+        try:
+            normalized_tables = propose_normalized_tables(cols, candidate_keys, fds)
+        except Exception as e:
+            print(f"    Error creating normalized tables: {e}")
+            normalized_tables = []
+        
+        total_time = time.time() - start_time
+        print(f"  HIGH-COLUMN analysis completed in {total_time:.2f}s")
+        
+        return fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size, normalized_tables
+        
+    except Exception as e:
+        print(f"  Critical error in HIGH-COLUMN analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return safe defaults
+        return [], [], len(df), list(df.columns), max_combination_size, max_lhs_size, []
 
 
 def test_high_column_scenario():
