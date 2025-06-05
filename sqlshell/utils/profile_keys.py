@@ -17,6 +17,12 @@ def estimate_computation_cost(n_rows, n_cols, max_combination_size, max_lhs_size
     Estimate computational cost to decide on sampling strategy.
     Returns (estimated_seconds, should_sample, sample_size)
     """
+    # Special handling for high-column datasets - these are computationally expensive
+    if n_cols > 50:
+        # Very aggressive limits for high-column datasets
+        print(f"  High-column dataset detected ({n_cols} columns) - using aggressive optimization")
+        return float('inf'), True, min(5000, max(1000, n_rows // 20))
+    
     # Base cost factors
     fd_combinations = sum(math.comb(n_cols, i) for i in range(1, max_lhs_size + 1))
     key_combinations = sum(math.comb(n_cols, i) for i in range(1, max_combination_size + 1))
@@ -920,7 +926,7 @@ def profile_original(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_si
 def profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int = 2):
     """
     Analyze a pandas DataFrame to suggest candidate keys and discover functional dependencies.
-    Automatically selects the best optimization level based on dataset size.
+    Automatically selects the best optimization level based on dataset size and characteristics.
 
     Parameters:
     - df: pandas.DataFrame to analyze.
@@ -933,7 +939,11 @@ def profile(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int =
     n_rows, n_cols = len(df), len(df.columns)
     
     # Choose optimization level based on dataset characteristics
-    if n_rows > 500000 or (n_rows > 100000 and n_cols > 15):
+    if n_cols > 50:
+        # High-column datasets get special treatment regardless of row count
+        print("🏗️ Using HIGH-COLUMN-OPTIMIZED mode for wide dataset")
+        return profile_high_column_optimized(df, max_combination_size, max_lhs_size)
+    elif n_rows > 500000 or (n_rows > 100000 and n_cols > 15):
         print("🚀 Using HYPER-OPTIMIZED mode for very large dataset")
         return profile_hyper_optimized(df, max_combination_size, max_lhs_size)
     elif n_rows > 10000 or n_cols > 10:
@@ -2074,6 +2084,588 @@ def test_small_data_optimizations():
     return results
 
 
+def find_functional_dependencies_high_column_optimized(df: pd.DataFrame, max_lhs_size: int = 2):
+    """
+    Specialized functional dependency discovery for high-column datasets (>50 columns).
+    Uses intelligent column selection and aggressive limits.
+    """
+    n_rows = len(df)
+    cols = list(df.columns)
+    n_cols = len(cols)
+    
+    if n_rows == 0 or n_cols < 2:
+        return []
+    
+    print(f"  High-column FD analysis: {n_rows} rows × {n_cols} columns")
+    
+    # Always sample for high-column datasets to keep it manageable
+    if n_rows > 2000:
+        sample_size = min(2000, max(500, n_rows // 50))
+        df, was_sampled = sample_dataframe_intelligently(df, sample_size)
+        n_rows = len(df)
+        print(f"    Sampled to {n_rows} rows for high-column analysis")
+    
+    # Pre-compute column characteristics for intelligent selection
+    col_info = {}
+    for col in cols:
+        unique_count = df[col].nunique()
+        col_info[col] = {
+            'cardinality': unique_count,
+            'uniqueness_ratio': unique_count / n_rows,
+            'is_potential_key': unique_count == n_rows,
+            'is_low_cardinality': unique_count < n_rows * 0.1,
+            'is_boolean_like': unique_count <= 2
+        }
+    
+    # Select most promising columns for LHS (determinants)
+    # Focus on columns that are likely to be good determinants
+    lhs_candidates = []
+    
+    # Add potential keys first (high cardinality)
+    potential_keys = [col for col, info in col_info.items() if info['uniqueness_ratio'] > 0.8]
+    lhs_candidates.extend(potential_keys[:10])  # Top 10 potential keys
+    
+    # Add low-cardinality columns (good for grouping)
+    low_card_cols = sorted([col for col, info in col_info.items() if info['is_low_cardinality']], 
+                          key=lambda x: col_info[x]['cardinality'])
+    lhs_candidates.extend(low_card_cols[:15])  # Top 15 low-cardinality
+    
+    # Add some medium-cardinality columns
+    medium_card_cols = [col for col, info in col_info.items() 
+                       if 0.1 <= info['uniqueness_ratio'] <= 0.8]
+    medium_card_cols = sorted(medium_card_cols, key=lambda x: col_info[x]['cardinality'])
+    lhs_candidates.extend(medium_card_cols[:10])  # Top 10 medium-cardinality
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    lhs_candidates = [col for col in lhs_candidates if not (col in seen or seen.add(col))]
+    
+    # Limit to top 30 LHS candidates to keep it manageable
+    lhs_candidates = lhs_candidates[:30]
+    
+    print(f"    Selected {len(lhs_candidates)} promising LHS candidates from {n_cols} columns")
+    
+    fds = []
+    group_cache = {}
+    
+    # Very aggressive limits for high-column datasets
+    max_tests = 200  # Maximum total FD tests
+    tests_performed = 0
+    
+    for size in range(1, min(max_lhs_size + 1, 3)):  # Cap at size 2 for high-column
+        if tests_performed >= max_tests:
+            break
+            
+        if size == 1:
+            # Single column determinants
+            candidates = lhs_candidates[:20]  # Top 20 for single-column
+        else:
+            # Multi-column determinants - be very selective
+            candidates = list(itertools.combinations(lhs_candidates[:15], size))[:30]
+        
+        for lhs in candidates:
+            if tests_performed >= max_tests:
+                break
+                
+            lhs_tuple = tuple(lhs) if isinstance(lhs, (list, tuple)) else (lhs,)
+            
+            try:
+                if lhs_tuple not in group_cache:
+                    grouped = df.groupby(list(lhs_tuple), sort=False, dropna=False)
+                    group_sizes = grouped.size()
+                    group_cache[lhs_tuple] = (grouped, group_sizes)
+                else:
+                    grouped, group_sizes = group_cache[lhs_tuple]
+                
+                n_groups = len(group_sizes)
+                if n_groups == n_rows or group_sizes.max() == 1:
+                    continue
+                
+                # Test only most promising RHS candidates
+                rhs_candidates = []
+                
+                # Add high-cardinality columns as RHS candidates
+                high_card_rhs = [col for col, info in col_info.items() 
+                               if info['uniqueness_ratio'] > 0.5 and col not in lhs_tuple]
+                rhs_candidates.extend(high_card_rhs[:10])
+                
+                # Add some other columns
+                other_rhs = [col for col in cols if col not in lhs_tuple and col not in rhs_candidates]
+                rhs_candidates.extend(other_rhs[:10])
+                
+                for rhs in rhs_candidates:
+                    if tests_performed >= max_tests:
+                        break
+                        
+                    # Quick heuristic check
+                    if col_info[rhs]['cardinality'] > n_groups * 1.5:
+                        continue
+                    
+                    try:
+                        rhs_per_group = grouped[rhs].nunique()
+                        if (rhs_per_group <= 1).all():
+                            fds.append((lhs_tuple, rhs))
+                        tests_performed += 1
+                    except Exception:
+                        continue
+                        
+            except Exception:
+                continue
+    
+    print(f"    Performed {tests_performed} FD tests (limit: {max_tests})")
+    return fds
+
+
+def find_candidate_keys_high_column_optimized(df: pd.DataFrame, max_combination_size: int = 2):
+    """
+    Specialized candidate key discovery for high-column datasets (>50 columns).
+    Uses intelligent column selection and aggressive limits.
+    """
+    n_rows = len(df)
+    cols = list(df.columns)
+    n_cols = len(cols)
+    
+    if n_rows == 0:
+        return [], [], []
+    
+    print(f"  High-column key analysis: {n_rows} rows × {n_cols} columns")
+    
+    # Always sample for high-column datasets
+    if n_rows > 2000:
+        sample_size = min(2000, max(500, n_rows // 50))
+        df, was_sampled = sample_dataframe_intelligently(df, sample_size)
+        n_rows = len(df)
+        print(f"    Sampled to {n_rows} rows for high-column key analysis")
+    
+    all_keys = []
+    
+    # Quick single-column check with cardinality-based prioritization
+    col_cardinalities = {}
+    potential_single_keys = []
+    
+    # Sort columns by cardinality (descending) to check most promising first
+    for col in cols:
+        cardinality = df[col].nunique()
+        col_cardinalities[col] = cardinality
+        if cardinality == n_rows:
+            potential_single_keys.append((col,))
+            all_keys.append((col,))
+    
+    print(f"    Found {len(potential_single_keys)} single-column keys")
+    
+    # For high-column datasets, if we have single-column keys, be very conservative about multi-column
+    if potential_single_keys and n_cols > 80:
+        print(f"    Stopping early due to high column count ({n_cols}) and existing single-column keys")
+        return all_keys, potential_single_keys, []
+    
+    # Select most promising columns for multi-column key testing
+    # Sort by cardinality (highest first) and take top candidates
+    sorted_cols = sorted(cols, key=lambda x: col_cardinalities[x], reverse=True)
+    
+    # Take top candidates based on cardinality
+    if n_cols > 80:
+        promising_cols = sorted_cols[:15]  # Very selective for >80 columns
+    elif n_cols > 60:
+        promising_cols = sorted_cols[:20]  # Selective for >60 columns  
+    else:
+        promising_cols = sorted_cols[:25]  # Less selective for 50-60 columns
+    
+    print(f"    Selected {len(promising_cols)} promising columns for multi-column key testing")
+    
+    # Very conservative multi-column key testing
+    max_combination_size = min(max_combination_size, 2)  # Cap at 2 for high-column
+    max_combinations_to_test = 50  # Hard limit
+    
+    for size in range(2, max_combination_size + 1):
+        if size > len(promising_cols):
+            break
+        
+        # Generate combinations from promising columns only
+        combinations = list(itertools.combinations(promising_cols, size))
+        
+        # Sort by total cardinality (higher is more likely to be a key)
+        combinations = sorted(combinations, 
+                            key=lambda x: sum(col_cardinalities[col] for col in x), 
+                            reverse=True)
+        
+        # Test only top combinations
+        combinations_to_test = combinations[:max_combinations_to_test]
+        
+        tested_count = 0
+        for combo in combinations_to_test:
+            # Skip if contains single-column key
+            if any((col,) in potential_single_keys for col in combo):
+                continue
+            
+            # Quick heuristic: if sum of cardinalities is much less than n_rows, skip
+            total_card = sum(col_cardinalities[col] for col in combo)
+            if total_card < n_rows * 0.7:
+                continue
+            
+            try:
+                unique_count = len(df[list(combo)].drop_duplicates())
+                if unique_count == n_rows:
+                    all_keys.append(combo)
+                tested_count += 1
+                
+                # Early termination for high-column datasets
+                if tested_count >= 20:  # Test at most 20 combinations per size
+                    break
+                    
+            except Exception:
+                continue
+        
+        print(f"    Tested {tested_count} combinations of size {size}")
+        
+        # Early termination if we found keys and this is a very high-column dataset
+        if all_keys and n_cols > 80:
+            break
+    
+    # Classify keys
+    candidate_keys = []
+    superkeys = []
+    
+    for key in all_keys:
+        is_candidate = True
+        for other_key in all_keys:
+            if len(other_key) < len(key) and set(other_key).issubset(set(key)):
+                is_candidate = False
+                break
+        
+        if is_candidate:
+            candidate_keys.append(key)
+        else:
+            superkeys.append(key)
+    
+    return all_keys, candidate_keys, superkeys
+
+
+def profile_high_column_optimized(df: pd.DataFrame, max_combination_size: int = 2, max_lhs_size: int = 2):
+    """
+    Specialized profile function for high-column datasets (>50 columns).
+    Uses aggressive optimization and intelligent column selection.
+    """
+    start_time = time.time()
+    n_rows = len(df)
+    cols = list(df.columns)
+    n_cols = len(cols)
+    
+    print(f"Starting HIGH-COLUMN analysis of {n_rows:,} rows × {n_cols} columns...")
+    
+    # Very aggressive parameter limits for high-column datasets
+    max_combination_size = min(max_combination_size, 2)
+    max_lhs_size = min(max_lhs_size, 2)
+    print(f"  High-column mode: limiting to max combination size {max_combination_size}")
+    
+    # Discover functional dependencies
+    fd_start = time.time()
+    fds = find_functional_dependencies_high_column_optimized(df, max_lhs_size)
+    fd_time = time.time() - fd_start
+    print(f"  FD discovery completed in {fd_time:.2f}s - found {len(fds)} dependencies")
+    
+    fd_results = [(", ".join(lhs), rhs) for lhs, rhs in fds]
+    
+    # Discover keys
+    key_start = time.time()
+    all_keys, candidate_keys, superkeys = find_candidate_keys_high_column_optimized(df, max_combination_size)
+    key_time = time.time() - key_start
+    print(f"  Key discovery completed in {key_time:.2f}s - found {len(candidate_keys)} candidate keys")
+    
+    # Minimal result preparation for high-column datasets
+    results = []
+    
+    # Pre-compute single column uniqueness for efficiency
+    single_col_uniqueness = {}
+    print("  Computing column uniqueness...")
+    for col in cols:
+        single_col_uniqueness[col] = df[col].nunique()
+    
+    # Only process essential combinations for high-column datasets
+    max_combinations_total = min(100, n_cols * 2)  # Very conservative
+    combinations_tested = 0
+    
+    print(f"  Preparing results (testing max {max_combinations_total} combinations)...")
+    
+    # Process single columns first (most important)
+    for col in cols:
+        if combinations_tested >= max_combinations_total:
+            break
+            
+        combo = (col,)
+        unique_count = single_col_uniqueness[col]
+        unique_ratio = unique_count / n_rows if n_rows > 0 else 0
+        is_key = combo in all_keys
+        is_candidate = combo in candidate_keys
+        is_superkey = combo in superkeys
+        
+        key_type = ""
+        if is_candidate:
+            key_type = "★ Candidate Key"
+        elif is_superkey:
+            key_type = "⊃ Superkey"
+        
+        results.append((combo, unique_count, unique_ratio, is_key, key_type))
+        combinations_tested += 1
+    
+    # Process only the most promising multi-column combinations
+    if combinations_tested < max_combinations_total and max_combination_size > 1:
+        # Sort columns by uniqueness (highest first) for better multi-column candidates
+        sorted_cols = sorted(cols, key=lambda x: single_col_uniqueness[x], reverse=True)
+        top_cols = sorted_cols[:min(20, len(cols))]  # Top 20 most unique columns
+        
+        for size in range(2, min(max_combination_size + 1, 3)):
+            if combinations_tested >= max_combinations_total:
+                break
+                
+            for combo in itertools.combinations(top_cols, size):
+                if combinations_tested >= max_combinations_total:
+                    break
+                    
+                if combo in all_keys:
+                    unique_count = n_rows
+                else:
+                    # For non-keys, estimate uniqueness
+                    unique_count = min(n_rows, sum(single_col_uniqueness[col] for col in combo) // len(combo))
+                
+                unique_ratio = unique_count / n_rows if n_rows > 0 else 0
+                is_key = combo in all_keys
+                is_candidate = combo in candidate_keys
+                is_superkey = combo in superkeys
+                
+                key_type = ""
+                if is_candidate:
+                    key_type = "★ Candidate Key"
+                elif is_superkey:
+                    key_type = "⊃ Superkey"
+                
+                results.append((combo, unique_count, unique_ratio, is_key, key_type))
+                combinations_tested += 1
+    
+    # Quick sort
+    results.sort(key=lambda x: (not x[3], -x[2], len(x[0])))
+    key_results = [(", ".join(c), u, f"{u/n_rows:.2%}", k) 
+                   for c, u, _, _, k in results]
+    
+    # Simplified normalized tables
+    normalized_tables = propose_normalized_tables(cols, candidate_keys, fds)
+    
+    total_time = time.time() - start_time
+    print(f"  HIGH-COLUMN analysis completed in {total_time:.2f}s")
+    
+    return fd_results, key_results, n_rows, cols, max_combination_size, max_lhs_size, normalized_tables
+
+
+def test_high_column_scenario():
+    """
+    Test the high-column optimization with scenarios similar to user's 16k×100 case.
+    """
+    print("=== HIGH-COLUMN SCENARIO TEST ===\n")
+    
+    # Test different high-column scenarios
+    test_scenarios = [
+        (1000, 60, "1K×60 columns"),
+        (5000, 80, "5K×80 columns"), 
+        (16000, 100, "16K×100 columns (user scenario)"),
+        (10000, 120, "10K×120 columns"),
+        (50000, 200, "50K×200 columns (extreme)")
+    ]
+    
+    results = []
+    
+    for n_rows, n_cols, description in test_scenarios:
+        print(f"\n{'='*60}")
+        print(f"TESTING: {description}")
+        print('='*60)
+        
+        try:
+            # Create test data with many columns
+            print(f"Creating test dataset with {n_rows:,} rows and {n_cols} columns...")
+            
+            # Create a realistic high-column dataset
+            np.random.seed(42)
+            random.seed(42)
+            
+            data = {}
+            
+            # Add ID column (primary key)
+            data['id'] = range(1, n_rows + 1)
+            
+            # Add categorical columns of various cardinalities
+            for i in range(min(20, n_cols - 1)):
+                if i < 5:
+                    # Low cardinality categorical
+                    cardinality = min(10, n_rows // 100)
+                elif i < 10:
+                    # Medium cardinality categorical
+                    cardinality = min(100, n_rows // 10)
+                else:
+                    # Higher cardinality categorical
+                    cardinality = min(1000, n_rows // 5)
+                
+                data[f'cat_{i}'] = [f'cat_{i}_val_{j % cardinality}' for j in range(n_rows)]
+            
+            # Add numeric columns
+            remaining_cols = n_cols - len(data)
+            for i in range(remaining_cols):
+                if i % 4 == 0:
+                    # Integer columns
+                    data[f'num_{i}'] = np.random.randint(1, 1000, n_rows)
+                elif i % 4 == 1:
+                    # Float columns
+                    data[f'float_{i}'] = np.random.uniform(0, 100, n_rows)
+                elif i % 4 == 2:
+                    # Boolean-like columns
+                    data[f'bool_{i}'] = np.random.choice([0, 1], n_rows)
+                else:
+                    # Text columns
+                    data[f'text_{i}'] = [f'text_{j % 50}' for j in range(n_rows)]
+            
+            df = pd.DataFrame(data)
+            
+            # Ensure we have the right number of columns
+            if len(df.columns) != n_cols:
+                print(f"  Adjusting columns: created {len(df.columns)}, target {n_cols}")
+                while len(df.columns) < n_cols:
+                    col_name = f'extra_{len(df.columns)}'
+                    df[col_name] = np.random.randint(1, 100, n_rows)
+                df = df.iloc[:, :n_cols]  # Trim if too many
+            
+            memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
+            print(f"Memory usage: {memory_mb:.1f} MB")
+            
+            # Test the high-column optimized version
+            start_time = time.time()
+            
+            print(f"\n🏗️ Running HIGH-COLUMN-OPTIMIZED analysis...")
+            fd_results, key_results, n_rows_result, cols, max_combo, max_lhs, norm_tables = profile_high_column_optimized(
+                df, max_combination_size=3, max_lhs_size=2
+            )
+            
+            analysis_time = time.time() - start_time
+            
+            candidate_keys = [k for k in key_results if "Candidate Key" in k[3]]
+            
+            print(f"\n✅ SUCCESS!")
+            print(f"   • Analysis time: {analysis_time:.2f} seconds")
+            print(f"   • Memory usage: {memory_mb:.1f} MB")
+            print(f"   • Processing rate: {n_rows / analysis_time:,.0f} rows/second")
+            print(f"   • Column processing rate: {n_cols / analysis_time:.1f} columns/second")
+            print(f"   • Found {len(fd_results)} functional dependencies")
+            print(f"   • Found {len(candidate_keys)} candidate keys")
+            
+            # Performance assessment
+            if analysis_time < 10:
+                performance = "🔥 EXCELLENT"
+            elif analysis_time < 30:
+                performance = "✅ GOOD"
+            elif analysis_time < 120:
+                performance = "⚠️ ACCEPTABLE"
+            else:
+                performance = "❌ TOO SLOW"
+            
+            print(f"   • Performance: {performance}")
+            
+            # Show some sample results
+            if fd_results:
+                print(f"\n🔍 Sample functional dependencies found:")
+                for i, (lhs, rhs) in enumerate(fd_results[:3]):
+                    print(f"   • {lhs} → {rhs}")
+                if len(fd_results) > 3:
+                    print(f"   ... and {len(fd_results) - 3} more")
+            
+            if candidate_keys:
+                print(f"\n🔑 Candidate keys found:")
+                for cols_str, count, ratio, key_type in candidate_keys[:3]:
+                    print(f"   • {cols_str} ({ratio} unique)")
+                if len(candidate_keys) > 3:
+                    print(f"   ... and {len(candidate_keys) - 3} more")
+            
+            results.append({
+                'scenario': description,
+                'rows': n_rows,
+                'cols': n_cols,
+                'memory_mb': memory_mb,
+                'time': analysis_time,
+                'rows_per_sec': n_rows / analysis_time,
+                'cols_per_sec': n_cols / analysis_time,
+                'fds': len(fd_results),
+                'keys': len(candidate_keys),
+                'performance': performance,
+                'success': True
+            })
+            
+        except Exception as e:
+            print(f"❌ FAILED: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            results.append({
+                'scenario': description,
+                'rows': n_rows,
+                'cols': n_cols,
+                'memory_mb': 0,
+                'time': float('inf'),
+                'rows_per_sec': 0,
+                'cols_per_sec': 0,
+                'fds': 0,
+                'keys': 0,
+                'performance': "❌ FAILED",
+                'success': False
+            })
+    
+    # Summary
+    print(f"\n{'='*80}")
+    print("HIGH-COLUMN OPTIMIZATION SUMMARY")
+    print('='*80)
+    print(f"{'Scenario':<25} {'Memory':<8} {'Time':<8} {'Rows/s':<8} {'Cols/s':<8} {'FDs':<4} {'Keys':<4} {'Performance'}")
+    print("-" * 80)
+    
+    for result in results:
+        scenario = result['scenario'][:24]
+        memory = f"{result['memory_mb']:.1f}MB"
+        time_str = f"{result['time']:.1f}s" if result['time'] != float('inf') else "FAIL"
+        rows_rate = f"{result['rows_per_sec']:,.0f}" if result['success'] else "N/A"
+        cols_rate = f"{result['cols_per_sec']:.1f}" if result['success'] else "N/A"
+        fds = str(result['fds'])
+        keys = str(result['keys'])
+        performance = result['performance'].split()[0]  # Just the emoji
+        
+        print(f"{scenario:<25} {memory:<8} {time_str:<8} {rows_rate:<8} {cols_rate:<8} {fds:<4} {keys:<4} {performance}")
+    
+    # Analysis
+    successful = [r for r in results if r['success']]
+    if successful:
+        print(f"\n🎯 PERFORMANCE ANALYSIS:")
+        
+        # Check if user scenario (16K×100) was successful
+        user_scenario = next((r for r in successful if '16K×100' in r['scenario']), None)
+        if user_scenario:
+            print(f"   ✅ User scenario (16K×100 columns) completed in {user_scenario['time']:.1f} seconds")
+            if user_scenario['time'] < 30:
+                print(f"   🎉 This should be much faster on your smaller machine!")
+            elif user_scenario['time'] < 120:
+                print(f"   👍 This should provide reasonable performance on your smaller machine")
+            else:
+                print(f"   ⚠️ May still be slow on smaller machines - consider further optimization")
+        
+        avg_time = np.mean([r['time'] for r in successful])
+        avg_cols_per_sec = np.mean([r['cols_per_sec'] for r in successful])
+        
+        print(f"   • Average analysis time: {avg_time:.1f} seconds")
+        print(f"   • Average column processing rate: {avg_cols_per_sec:.1f} columns/second")
+        print(f"   • Successfully handled datasets up to {max(r['cols'] for r in successful)} columns")
+        
+        # Specific optimizations applied
+        print(f"\n💡 HIGH-COLUMN OPTIMIZATIONS APPLIED:")
+        print(f"   • Intelligent column selection (top 30 LHS candidates)")
+        print(f"   • Aggressive sampling (max 2000 rows for analysis)")
+        print(f"   • Limited combination testing (max 200 FD tests)")
+        print(f"   • Prioritized high-cardinality columns for keys")
+        print(f"   • Early termination for very wide datasets (>80 columns)")
+    
+    return results
+
+
 # Test functions to run when script is executed directly
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -2091,6 +2683,8 @@ if __name__ == "__main__":
             test_realistic_scenario()
         elif sys.argv[1] == "demo":
             demo_performance_improvements()
+        elif sys.argv[1] == "highcol":
+            test_high_column_scenario()
         else:
             test_profile_keys()
     else:
