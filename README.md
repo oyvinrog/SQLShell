@@ -4,9 +4,9 @@
 
 <img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_logo.png" alt="SQLShell Logo" width="180" height="auto">
 
-**The SQL tool that makes data analysis feel like magic ✨**
+**A fast SQL interface for analyzing data files ✨**
 
-*Search millions of rows in milliseconds • DuckDB powered • Zero setup*
+*Query CSV, Parquet, Excel files with SQL • DuckDB powered • No database setup required*
 
 [![PyPI version](https://badge.fury.io/py/sqlshell.svg)](https://badge.fury.io/py/sqlshell)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -21,51 +21,53 @@
 
 ---
 
-## 🎯 Why SQLShell Will Transform Your Data Workflow
+## 🎯 What SQLShell Does
 
-**Tired of slow, clunky SQL tools?** SQLShell is the modern SQL interface that data analysts, scientists, and engineers are switching to for one simple reason: **it just works, and it works fast**.
+**SQLShell is a desktop SQL interface specifically designed for analyzing data files.** It's not a database client - instead, it lets you load CSV, Parquet, Excel, and other data files and query them with SQL using DuckDB's fast analytical engine.
 
-### 🔥 The Game Changers
+### 🔥 Key Features
 
 <table>
 <tr>
 <td width="33%">
 
-**⚡ Lightning Search**
-Press `Ctrl+F` and search through **millions of rows in milliseconds**. Find patterns, outliers, and specific data instantly across all columns.
+**⚡ Fast File Analysis**
+Load data files and search through millions of rows quickly. Built on DuckDB for analytical performance.
 
 </td>
 <td width="33%">
 
 **🎯 Smart Execution**
-`F5` runs all queries, `F9` runs current statement. No more copy-pasting or guessing which code to execute.
+`F5` runs all queries, `F9` runs current statement. Simple keyboard shortcuts for iterative analysis.
 
 </td>
 <td width="33%">
 
-**🧠 AI Suggestions**
-Context-aware SQL autocompletion that actually understands your schema and query intent.
+**🧠 SQL Autocompletion**
+Context-aware suggestions that understand your loaded tables and column names.
 
 </td>
 </tr>
 </table>
 
-### 🤖 **AI-Powered Data Intelligence**
+### 📁 **File-Based Data Analysis**
 
-**The first SQL tool that thinks like a data scientist.**
+**Important**: SQLShell works with data files, not live databases. It's designed for:
 
-- **🧠 Smart Schema Understanding** - AI reads your data structure and suggests optimal queries
-- **🔮 Predictive Analytics** - One-click correlation analysis and feature engineering
-- **🎯 Automated Insights** - Discover hidden patterns without writing complex code
-- **⚡ Instant Transformations** - Turn messy text into ML-ready features in seconds
+- **📊 Data Files** - CSV, Parquet, Excel, TSV, JSON files
+- **🗃️ Local Analysis** - Load files from your computer for SQL analysis  
+- **⚡ Fast Queries** - DuckDB engine optimized for analytical workloads
+- **🔍 Data Exploration** - Search and filter capabilities across your datasets
 
-### 💫 What Makes SQLShell Special
+**Not supported**: Live database connections (MySQL, PostgreSQL, etc.). Use dedicated database clients for those.
 
-- **🏎️ DuckDB Powered** - Analytical queries that are 10x faster than traditional databases
-- **📊 Universal File Support** - Drop in Excel, CSV, Parquet files and query immediately
-- **🎨 Modern Interface** - Clean, intuitive UI that doesn't fight you
-- **🔍 Instant Data Discovery** - The fastest search you've ever experienced in a data tool
-- **🚀 Zero Setup** - One command install, works out of the box
+### 💫 What Makes SQLShell Useful
+
+- **🏎️ DuckDB Powered** - Fast analytical queries on data files
+- **📊 Multiple File Formats** - CSV, Parquet, Excel, Delta, TSV, JSON support
+- **🎨 Clean Interface** - Simple SQL editor with result display
+- **🔍 Search Functionality** - Find data across result sets quickly
+- **🚀 Zero Database Setup** - No server installation or configuration needed
 
 ---
 
@@ -78,7 +80,7 @@ pip install sqlshell
 sqls
 ```
 
-**That's it!** 🎉 SQLShell opens, connects to DuckDB, and you're ready to analyze data.
+**That's it!** 🎉 SQLShell opens and you can start loading data files.
 
 <details>
 <summary><b>🐧 Linux Users - One-Time Setup for Better Experience</b></summary>
@@ -108,15 +110,13 @@ python -c "import sqlshell; sqlshell.start()"
 
 ---
 
-## ⚡ The 60-Second Demo
+## ⚡ Getting Started
 
 1. **Launch**: `sqls` 
-2. **Load Data**: Click "Test" to load sample data, or "Load Files" for your data
-3. **Query**: Write SQL with intelligent autocompletion
-4. **Execute**: Hit `Ctrl+Enter` or `F5`
-5. **Search**: Press `Ctrl+F` and watch magic happen ✨
-
-**You'll immediately feel the difference.**
+2. **Load Data**: Click "Load Files" to import your CSV, Parquet, or Excel files
+3. **Query**: Write SQL queries against your loaded data
+4. **Execute**: Hit `Ctrl+Enter` or `F5` to run queries
+5. **Search**: Press `Ctrl+F` to search through results
 
 <div align="center">
 <img src="https://github.com/oyvinrog/SQLShell/blob/main/assets/images/sqlshell_angle.gif?raw=true" alt="SQLShell Live Demo" width="60%" height="auto">
@@ -124,145 +124,84 @@ python -c "import sqlshell; sqlshell.start()"
 
 ---
 
-## 🔍 The Search That Will Blow Your Mind
+## 🔍 Search and Filter Features
 
-<div align="center">
+### ⚡ **Result Search with Ctrl+F**
 
-**🚀 CTRL+F: Search Millions of Rows in Under 100ms 🚀**
+Once you have query results, use `Ctrl+F` to search across all columns:
 
-*This alone is worth the switch*
+- **Cross-column search** - Finds terms across all visible columns
+- **Case-insensitive** - Flexible text matching
+- **Instant feedback** - Filter results as you type
+- **Numeric support** - Search numbers and dates
 
-</div>
+### 💪 **Practical Use Cases**
 
-Forget everything you know about searching in data tools. SQLShell's `Ctrl+F` is a **data exploration superpower**:
+| Use Case | Search Term | What It Finds |
+|----------|-------------|---------------|
+| **Error Analysis** | `"error"` | Error messages in log files |
+| **Data Quality** | `"null"` | Missing data indicators |
+| **ID Tracking** | `"CUST_12345"` | Specific customer records |
+| **Pattern Matching** | `"*.com"` | Email domains |
 
-### ⚡ **Lightning Performance**
-```
-Dataset: 2.5M rows × 50 columns
-Search time: 47ms
-Memory usage: Optimized
-Your productivity: Through the roof 🚀
-```
-
-### 🎯 **Universal Intelligence**
-- **Cross-column search** - Finds your term across ALL columns simultaneously
-- **Smart type handling** - Numbers, dates, text - it finds everything
-- **Case-insensitive** - "Apple" finds "APPLE", "apple", "ApPlE"
-- **Instant feedback** - See results as you type
-- **🤖 AI Pattern Recognition** - Automatically detects data anomalies and outliers during search
-- **🧠 Context-Aware Filtering** - Learns your search patterns and suggests relevant filters
-
-### 💪 **Real-World Power**
-
-| Use Case | Search Term | Result |
-|----------|-------------|---------|
-| **Bug Hunting** | `"error"` | Find all error records across log tables |
-| **Data Quality** | `"null"` | Spot missing data issues instantly |
-| **Customer Analysis** | `"CUST_12345"` | Track customer across all tables |
-| **Financial Auditing** | `"*.99"` | Find suspicious pricing patterns |
-
-**The workflow**: Query → `Ctrl+F` → Type → **Instant insights** → `ESC` to return
-
-This isn't just fast—it **changes how you think about data exploration**.
+**Workflow**: Load file → Query data → `Ctrl+F` → Search → `ESC` to clear
 
 ---
 
-## 🤖 AI Features That Will Revolutionize Your Data Science
+## 🤖 Data Analysis Features
 
-<div align="center">
-
-**🧠 The First SQL Tool with Built-in Data Science AI 🧠**
-
-*One-click insights that would take hours in traditional tools*
-
-</div>
-
-### 🔮 **One-Hot Encoding Magic**
-Right-click any text column → **"Encode Text"** → **Instant ML-ready features**
+### 🔮 **Text Encoding**
+Right-click text columns to create binary indicator columns for analysis:
 
 ```sql
--- Before: Messy categorical data
+-- Original data
 SELECT category FROM products;
--- "Electronics", "Books", "Clothing"...
+-- "Electronics", "Books", "Clothing"
 
--- After AI encoding (automatic):
+-- After encoding
 SELECT 
     category_Electronics,
     category_Books,
     category_Clothing
 FROM products_encoded;
--- Perfect binary features for machine learning!
 ```
 
-**💡 Why this matters**: Transform any text column into ML-ready binary features in **seconds**, not hours.
-
-### 📊 **Instant Correlation Analysis**
-Right-click any column → **"Analyze Correlations"** → **See hidden relationships**
-
-```sql
--- SQLShell's AI automatically generates:
-SELECT 
-    corr(price, rating) as price_rating_corr,
-    corr(price, review_count) as price_reviews_corr,
-    corr(rating, return_rate) as rating_returns_corr
-FROM products;
-
--- Plus visual correlation matrix and insights!
-```
-
-**🚀 The game-changer**: Discover which variables drive your KPIs without writing correlation code.
-
-### 🧠 **Multivariate Intelligence**
-Select multiple columns → **"Deep Analysis"** → **AI reveals complex patterns**
-
-- **Automatic feature importance ranking**
-- **Interaction effect detection** 
-- **Outlier identification with explanations**
-- **Predictive relationship mapping**
-
-### ⚡ **Real-World AI Power**
-
-| Traditional Approach | SQLShell AI | Time Saved |
-|---------------------|-------------|------------|
-| Write encoding scripts | Right-click → Encode | **Hours → 3 seconds** |
-| Manual correlation analysis | AI correlation matrix | **30 min → 10 seconds** |
-| Complex feature engineering | Automated suggestions | **Days → Minutes** |
-| Exploratory data analysis | One-click insights | **Hours → Seconds** |
-
-**The result**: You spend more time on insights, less time on data wrestling.
+### 📊 **Column Analysis**
+Right-click columns for quick statistical analysis and correlation insights.
 
 ---
 
 ## 🚀 Power User Features
 
 ### ⚡ F5/F9 Quick Execution
-- **`F5`** - Execute all SQL statements sequentially
-- **`F9`** - Execute only the current statement (cursor position)
-- **Perfect for**: Testing, debugging, iterative development
+- **`F5`** - Execute all SQL statements in sequence
+- **`F9`** - Execute only the current statement (where cursor is positioned)
+- **Useful for**: Testing queries step by step
 
-### 🧠 Context-Aware AI Suggestions
-- Press `Ctrl+Space` or let it suggest automatically
-- **After SELECT**: Relevant columns and functions
-- **After FROM/JOIN**: Available tables with smart join suggestions  
-- **After WHERE**: Appropriate columns with operators
-- **Inside functions**: Context-specific parameters
+### 🧠 SQL Autocompletion
+- Press `Ctrl+Space` for suggestions
+- **After SELECT**: Available columns from loaded tables
+- **After FROM/JOIN**: Loaded table names
+- **After WHERE**: Column names with appropriate operators
 
-### 📊 Advanced Analytics
-- **Table Profiling** - Right-click tables for deep insights
-- **Column Analysis** - Understand relationships and distributions
-- **One-hot Encoding** - Transform text into analyzable features
-- **Multi-format Support** - Excel, CSV, Parquet files as SQL tables
+### 📊 File Format Support
+SQLShell can load and query:
+- **CSV/TSV** - Comma and tab-separated files
+- **Parquet** - Column-oriented format
+- **Excel** - .xlsx and .xls files  
+- **JSON** - Structured JSON data
+- **Delta** - Delta Lake format files
 
 ---
 
 ## 📝 Query Examples
 
-### Quick Start Queries
+### Basic File Analysis
 ```sql
--- Load and explore your data
-SELECT * FROM your_data LIMIT 10;
+-- Load and explore your CSV data
+SELECT * FROM my_data LIMIT 10;
 
--- Use the power of DuckDB
+-- Aggregate analysis
 SELECT 
     category,
     AVG(price) as avg_price,
@@ -272,30 +211,17 @@ GROUP BY category
 ORDER BY avg_price DESC;
 ```
 
-### Advanced Multi-Statement Analysis
+### Multi-File Analysis
 ```sql
--- Create analytical views
-CREATE OR REPLACE TEMPORARY VIEW customer_summary AS
+-- Join data from multiple loaded files
 SELECT 
-    customer_id,
-    SUM(order_total) as total_spent,
-    COUNT(*) as order_count,
-    AVG(order_total) as avg_order
-FROM orders 
-GROUP BY customer_id;
-
--- Analyze customer segments
-SELECT 
-    CASE 
-        WHEN total_spent > 10000 THEN 'VIP'
-        WHEN total_spent > 1000 THEN 'Regular'
-        ELSE 'New'
-    END as segment,
-    COUNT(*) as customers,
-    AVG(total_spent) as avg_lifetime_value
-FROM customer_summary
-GROUP BY 1
-ORDER BY avg_lifetime_value DESC;
+    c.customer_name,
+    SUM(o.order_total) as total_spent
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_name
+ORDER BY total_spent DESC
+LIMIT 10;
 ```
 
 ---
@@ -307,133 +233,113 @@ ORDER BY avg_lifetime_value DESC;
 <td width="50%">
 
 **📊 Data Analysts**
-- Rapid data exploration
-- Ad-hoc analysis
-- Report generation
-- Data quality checks
+- Quick file exploration
+- CSV/Excel analysis
+- Report generation from files
+- Data quality checking
 
 **🔬 Data Scientists**
-- Feature engineering
-- Exploratory analysis  
-- Model data preparation
+- Dataset exploration
+- Feature analysis
+- Data preparation
 - Quick prototyping
 
 </td>
 <td width="50%">
 
-**💼 Business Intelligence**
-- Dashboard data prep
-- KPI calculations
+**💼 Business Analysts**
+- Spreadsheet analysis with SQL
+- KPI calculations from files
 - Trend analysis
 - Data validation
 
-**🛠️ Engineers**
-- Log analysis
-- Data pipeline testing
-- Performance monitoring
-- Debug data issues
+**🛠️ Developers**
+- Log file analysis
+- CSV processing
+- Data transformation
+- File-based testing
 
 </td>
 </tr>
 </table>
-
----
-
-## 🏆 What Users Are Saying
-
-> *"The Ctrl+F search feature alone has saved me hours every week. I can find needle-in-haystack data instantly."*
-> 
-> — Data Analyst at Fortune 500 Company
-
-> *"Finally, a SQL tool that doesn't fight me. The F5/F9 execution is exactly what I needed for iterative analysis."*
-> 
-> — Senior Data Scientist
-
-> *"SQLShell's speed with large datasets is incredible. We're talking millions of rows processed in seconds."*
-> 
-> — BI Developer
 
 ---
 
 ## 📋 Requirements
 
-- **Python 3.8+** (that's it for manual requirements!)
-- **Auto-installed dependencies**: PyQt6, DuckDB, Pandas, NumPy, and file format support
+- **Python 3.8+** 
+- **Auto-installed dependencies**: PyQt6, DuckDB, Pandas, NumPy
+
+**System Requirements**: SQLShell is a desktop application that works on Windows, macOS, and Linux.
 
 ---
 
-## 💡 Pro Tips for Maximum Productivity
+## 💡 Tips for Better Productivity
 
 <table>
 <tr>
 <td width="50%">
 
-### ⌨️ **Keyboard Mastery**
-- `Ctrl+F` → Instant search
+### ⌨️ **Keyboard Shortcuts**
+- `Ctrl+F` → Search results
 - `F5` → Run all statements  
 - `F9` → Run current statement
 - `Ctrl+Enter` → Quick execute
-- `ESC` → Clear search/reset
+- `ESC` → Clear search
 
 </td>
 <td width="50%">
 
-### 🎯 **Search Like a Pro**
-- Search `"error"` across logs
-- Find data quality with `"null"`
-- Customer tracking: `"ID_12345"`
-- Pattern matching: `"*.com"`
-- Multi-word: `"data science"`
-- **🤖 AI-assisted pattern discovery** - Get suggestions for complex search patterns
+### 🎯 **Efficient File Loading**
+- Drag & drop files into the interface
+- Use "Load Files" button for selection
+- Load multiple related files for joins
+- Supported: CSV, Parquet, Excel, JSON, Delta
 
 </td>
 </tr>
 </table>
 
-### 🚀 **AI-Enhanced Workflow**
-1. **Load data** (drag & drop or Load Files)
-2. **AI-powered exploration** (right-click for instant insights)
-3. **Search with intelligence** (Ctrl+F with pattern recognition)
-4. **One-click feature engineering** (encode text, analyze correlations)
-5. **Build final analysis** (F5 for full execution)
+### 🚀 **Typical Workflow**
+1. **Load files** (drag & drop or Load Files button)
+2. **Explore structure** (`SELECT * FROM table_name LIMIT 5`)
+3. **Build analysis** (use F9 to test statements)
+4. **Search results** (Ctrl+F for specific data)
+5. **Export findings** (copy results or save queries)
 
 ---
 
-## 🔧 Advanced AI-Powered Features
+## 🔧 Advanced Features
 
 <details>
-<summary><b>🧠 Intelligent Table Profiling</b></summary>
+<summary><b>📊 Table Analysis Tools</b></summary>
 
-Right-click any table for AI-powered profiling tools:
+Right-click loaded tables for:
 
-- **AI Column Importance Ranking** - Machine learning identifies most predictive columns
-- **Smart Relationship Discovery** - Automatic foreign key and dependency detection  
-- **Statistical Distribution Analysis** - AI-generated insights and visualizations
-- **Anomaly Detection** - Automatically flag unusual patterns and outliers
+- **Column profiling** - Data types, null counts, unique values
+- **Quick statistics** - Min, max, average for numeric columns
+- **Sample data preview** - Quick look at table contents
 
 </details>
 
 <details>
-<summary><b>🔮 Smart Column Analysis</b></summary>
+<summary><b>🔮 Column Operations</b></summary>
 
 Right-click column headers in results:
 
-- **AI Correlation Explanation** - Understand WHY columns are related
-- **One-Hot Encoding** - Instant ML-ready categorical features
-- **Predictive Analysis** - See which columns predict target variables
-- **Feature Engineering Suggestions** - AI recommends derived columns
+- **Text encoding** - Create binary columns from categories
+- **Statistical summary** - Distribution and correlation info
+- **Data type conversion** - Format suggestions
 
 </details>
 
 <details>
-<summary><b>⚡ Performance + Intelligence</b></summary>
+<summary><b>⚡ Performance Tips</b></summary>
 
-SQLShell combines speed with smarts:
-
-- **Vectorized AI operations** for instant analysis
-- **Smart caching** learns your query patterns
-- **Parallel ML processing** for large datasets
-- **Adaptive indexing** optimizes based on usage
+- **File format matters** - Parquet files load faster than CSV
+- **Use LIMIT** - for initial exploration of large files
+- **Column selection** - Select only needed columns for better performance
+- **Indexing** - DuckDB automatically optimizes common query patterns
 
 </details>
 
@@ -441,7 +347,7 @@ SQLShell combines speed with smarts:
 
 ## 🤝 Contributing
 
-SQLShell is actively developed and we welcome contributions! Help us reach millions of users.
+SQLShell is open source and welcomes contributions!
 
 ```bash
 git clone https://github.com/oyvinrog/SQLShell.git
@@ -451,7 +357,7 @@ pip install -e .
 
 **Ways to contribute:**
 - 🐛 Report bugs and issues
-- 💡 Suggest new AI features  
+- 💡 Suggest new features  
 - 📖 Improve documentation
 - 🔧 Submit pull requests
 - ⭐ Star the repo to show support
@@ -466,16 +372,16 @@ MIT License - feel free to use SQLShell in your projects!
 
 <div align="center">
 
-**Ready to experience AI-powered data analysis?**
+**Ready to analyze your data files with SQL?**
 
 ```bash
 pip install sqlshell && sqls
 ```
 
-⭐ **Star us on GitHub** if SQLShell transforms your data workflow!
+⭐ **Star us on GitHub** if SQLShell helps with your data analysis!
 
-[🚀 Get Started Now](#-quick-install) • [📖 Full Documentation](#-getting-started) • [🐛 Report Issues](https://github.com/oyvinrog/SQLShell/issues)
+[🚀 Get Started Now](#-quick-install) • [📖 Documentation](#-getting-started) • [🐛 Report Issues](https://github.com/oyvinrog/SQLShell/issues)
 
-*Join millions discovering the future of data analysis*
+*A simple tool for SQL-based file analysis*
 
 </div>
