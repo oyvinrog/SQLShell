@@ -118,6 +118,10 @@ python -c "import sqlshell; sqlshell.start()"
 
 **You'll immediately feel the difference.**
 
+<div align="center">
+<img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_angle.png" alt="SQLShell Live Demo" width="60%" height="auto">
+</div>
+
 ---
 
 ## 🔍 The Search That Will Blow Your Mind
