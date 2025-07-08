@@ -88,7 +88,7 @@ class SuggestionManager:
             if not hasattr(editor, '_original_complete'):
                 editor._original_complete = editor.complete
                 
-            # Replace with our enhanced version
+            # Replace with our enhanced version for ghost text
             def enhanced_complete(editor_ref=editor, suggestion_mgr=self):
                 tc = editor_ref.textCursor()
                 position = tc.position()
@@ -102,20 +102,9 @@ class SuggestionManager:
                 # Don't show completions if Ctrl key is pressed (could be in preparation for Ctrl+Enter)
                 modifiers = QApplication.keyboardModifiers()
                 if modifiers & Qt.KeyboardModifier.ControlModifier:
-                    # If Ctrl is held down, don't show completions as user might be about to execute
-                    if editor_ref.completer and editor_ref.completer.popup().isVisible():
-                        editor_ref.completer.popup().hide()
-                        
-                        # Also check for Ctrl+Enter specifically
-                        if hasattr(QApplication, 'keyboardModifiers'):
-                            if QApplication.keyboardModifiers() == (Qt.KeyboardModifier.ControlModifier):
-                                # Find main window and trigger query execution
-                                parent = editor_ref
-                                while parent is not None:
-                                    if hasattr(parent, 'execute_query'):
-                                        # This is likely the main window
-                                        return True
-                                    parent = parent.parent()
+                    # Clear any ghost text if Ctrl is held down
+                    if hasattr(editor_ref, 'clear_ghost_text'):
+                        editor_ref.clear_ghost_text()
                     return
                 
                 # Special handling for function argument completions
@@ -144,58 +133,40 @@ class SuggestionManager:
                 # Get context-aware suggestions
                 suggestions = suggestion_mgr.get_suggestions(text_before_cursor, current_word)
                 
-                if suggestions:
-                    # Update completer model with suggestions
-                    model = QStringListModel(suggestions)
-                    editor_ref.completer.setModel(model)
-                    editor_ref.completer.setCompletionPrefix(current_word)
+                if suggestions and hasattr(editor_ref, 'show_ghost_text'):
+                    # Find the best suggestion using the same logic as the editor's complete method
+                    prefix = editor_ref.text_under_cursor()
                     
-                    # Check if we have completions
-                    if editor_ref.completer.completionCount() > 0:
-                        # Get popup and position it
-                        popup = editor_ref.completer.popup()
-                        popup.setCurrentIndex(editor_ref.completer.completionModel().index(0, 0))
+                    # Sort by relevance - prioritize exact prefix matches and shorter suggestions
+                    def relevance_score(item):
+                        item_lower = item.lower()
+                        prefix_lower = prefix.lower()
                         
-                        try:
-                            # Calculate position for the popup
-                            cr = editor_ref.cursorRect()
-                            
-                            # Ensure cursorRect is valid
-                            if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
-                                # Try to recompute using the text cursor
-                                cr = editor_ref.cursorRect(tc)
-                                
-                                # If still invalid, use a default position
-                                if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
-                                    pos = editor_ref.mapToGlobal(editor_ref.pos())
-                                    cr = QRect(pos.x() + 10, pos.y() + 10, 10, editor_ref.fontMetrics().height())
-                            
-                            # Calculate width for the popup that fits the content
-                            suggested_width = popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width()
-                            # Ensure minimum width
-                            popup_width = max(suggested_width, 200)
-                            cr.setWidth(popup_width)
-                            
-                            # Show the popup at the correct position
-                            editor_ref.completer.complete(cr)
-                        except Exception as e:
-                            # In case of any error, try a more direct approach
-                            print(f"Error positioning completion popup in suggestion manager: {e}")
-                            try:
-                                cursor_pos = editor_ref.mapToGlobal(editor_ref.cursorRect().bottomLeft())
-                                popup.move(cursor_pos)
-                                popup.show()
-                            except:
-                                # Last resort - if all else fails, hide the popup to avoid showing it in the wrong place
-                                popup.hide()
-                    else:
-                        editor_ref.completer.popup().hide()
+                        # Perfect case match gets highest priority
+                        if item.startswith(prefix):
+                            return (0, len(item))
+                        # Case-insensitive prefix match
+                        elif item_lower.startswith(prefix_lower):
+                            return (1, len(item))
+                        # Contains the prefix somewhere
+                        elif prefix_lower in item_lower:
+                            return (2, len(item))
+                        else:
+                            return (3, len(item))
+                    
+                    suggestions.sort(key=relevance_score)
+                    best_suggestion = suggestions[0]
+                    
+                    # Show ghost text for the best suggestion
+                    editor_ref.show_ghost_text(best_suggestion, position)
                 else:
+                    # Clear ghost text if no suggestions
+                    if hasattr(editor_ref, 'clear_ghost_text'):
+                        editor_ref.clear_ghost_text()
+                    
                     # Fall back to original completion if no context-aware suggestions
                     if hasattr(editor_ref, '_original_complete'):
                         editor_ref._original_complete()
-                    else:
-                        editor_ref.completer.popup().hide()
                     
             editor.complete = enhanced_complete
     

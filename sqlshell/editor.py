@@ -41,6 +41,12 @@ class SQLEditor(QPlainTextEdit):
         self.selection_color = QColor("#3498DB")
         self.selection_color.setAlpha(50)  # Make it semi-transparent
         
+        # Ghost text completion variables
+        self.ghost_text = ""
+        self.ghost_text_position = -1
+        self.ghost_text_suggestion = ""
+        self.ghost_text_color = QColor("#888888")  # Gray color for ghost text
+        
         # SQL keywords for syntax highlighting and autocompletion
         self.sql_keywords = {
             'basic': [
@@ -107,7 +113,7 @@ class SQLEditor(QPlainTextEdit):
             "WITH $cte AS (SELECT * FROM $table) SELECT * FROM $cte WHERE $condition"
         ]
         
-        # Initialize completer with SQL keywords
+        # Initialize completer with SQL keywords (keep for compatibility but disable popup)
         self.completer = None
         self.set_completer(QCompleter(self.all_sql_keywords))
         
@@ -121,8 +127,53 @@ class SQLEditor(QPlainTextEdit):
         # Enable drag and drop
         self.setAcceptDrops(True)
 
+    def clear_ghost_text(self):
+        """Clear the ghost text and update the display"""
+        if self.ghost_text:
+            self.ghost_text = ""
+            self.ghost_text_position = -1
+            self.ghost_text_suggestion = ""
+            self.viewport().update()  # Trigger a repaint
+
+    def show_ghost_text(self, suggestion, position):
+        """Show ghost text suggestion at the given position"""
+        self.ghost_text_suggestion = suggestion
+        self.ghost_text_position = position
+        
+        # Get current word to calculate what part to show as ghost
+        current_word = self.get_word_under_cursor()
+        if suggestion.lower().startswith(current_word.lower()):
+            # Show only the part that hasn't been typed yet
+            self.ghost_text = suggestion[len(current_word):]
+        else:
+            self.ghost_text = suggestion
+            
+        self.viewport().update()  # Trigger a repaint
+
+    def accept_ghost_text(self):
+        """Accept the current ghost text suggestion"""
+        if not self.ghost_text_suggestion:
+            return False
+            
+        # Get current word and replace with full suggestion
+        cursor = self.textCursor()
+        current_word = self.get_word_under_cursor()
+        
+        if current_word:
+            # Select and replace the current word
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousWord, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        
+        # Insert the full suggestion
+        cursor.insertText(self.ghost_text_suggestion)
+        self.setTextCursor(cursor)
+        
+        # Clear ghost text
+        self.clear_ghost_text()
+        return True
+
     def set_completer(self, completer):
-        """Set the completer for the editor"""
+        """Set the completer for the editor (modified to disable popup)"""
         if self.completer:
             try:
                 self.completer.disconnect(self)
@@ -135,9 +186,10 @@ class SQLEditor(QPlainTextEdit):
             return
             
         self.completer.setWidget(self)
-        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        # Set to UnfilteredPopupCompletion but we'll handle it manually
+        self.completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.completer.activated.connect(self.insert_completion)
+        # Don't connect activated signal since we're not using popups
         
     def update_completer_model(self, words_or_model):
         """Update the completer model with new words or a new model
@@ -461,89 +513,72 @@ class SQLEditor(QPlainTextEdit):
         return filtered_completions
 
     def complete(self):
-        """Show improved completion popup with context awareness"""
+        """Show ghost text completion instead of popup"""
         import re
         
         # Get the text under cursor
         prefix = self.text_under_cursor()
+        current_word = self.get_word_under_cursor()
         
-        # Don't show popup for empty text or too short prefixes unless it's a table prefix
-        is_table_prefix = '.' in self.get_word_under_cursor() and self.get_word_under_cursor().endswith('.')
+        # Clear existing ghost text first
+        self.clear_ghost_text()
+        
+        # Don't show completion for empty text or too short prefixes unless it's a table prefix
+        is_table_prefix = '.' in current_word and current_word.endswith('.')
         if not prefix and not is_table_prefix:
-            if self.completer and self.completer.popup().isVisible():
-                self.completer.popup().hide()
             return
         
         # Get context-aware completions 
+        completions = []
         if self.tables_cache:
             # Use our custom context-aware completion
             completions = self.get_context_aware_completions(prefix)
-            if completions:
-                # Create a temporary model for the filtered completions
-                model = QStringListModel()
-                model.setStringList(completions)
-                self.completer.setModel(model)
         
-        # Set the completion prefix
-        self.completer.setCompletionPrefix(prefix)
+        # If no context-aware completions, fall back to basic model
+        if not completions and self.completer and self.completer.model():
+            model = self.completer.model()
+            for i in range(model.rowCount()):
+                completion = model.data(model.index(i, 0))
+                if completion and completion.lower().startswith(prefix.lower()):
+                    completions.append(completion)
         
-        # If no completions, hide popup
-        if self.completer.completionCount() == 0:
-            self.completer.popup().hide()
-            return
-            
-        # Get popup and position it under the current text
-        popup = self.completer.popup()
-        popup.setCurrentIndex(self.completer.completionModel().index(0, 0))
-        
-        try:
-            # Calculate position for the popup
-            cr = self.cursorRect()
-            
-            # Ensure cursorRect is valid
-            if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
-                # Try to recompute using the text cursor
-                cursor = self.textCursor()
-                cr = self.cursorRect(cursor)
+        # Find the best suggestion
+        if completions:
+            # Sort by relevance - prioritize exact prefix matches and shorter suggestions
+            def relevance_score(item):
+                item_lower = item.lower()
+                prefix_lower = prefix.lower()
                 
-                # If still invalid, use a default position
-                if not cr.isValid() or cr.x() < 0 or cr.y() < 0:
-                    pos = self.mapToGlobal(self.pos())
-                    cr = QRect(pos.x() + 10, pos.y() + 10, 10, self.fontMetrics().height())
+                # Perfect case match gets highest priority
+                if item.startswith(prefix):
+                    return (0, len(item))
+                # Case-insensitive prefix match
+                elif item_lower.startswith(prefix_lower):
+                    return (1, len(item))
+                # Contains the prefix somewhere
+                elif prefix_lower in item_lower:
+                    return (2, len(item))
+                else:
+                    return (3, len(item))
             
-            # Calculate width for the popup that fits the content
-            suggested_width = popup.sizeHintForColumn(0) + popup.verticalScrollBar().sizeHint().width()
-            # Ensure minimum width
-            popup_width = max(suggested_width, 200)
-            cr.setWidth(popup_width)
+            completions.sort(key=relevance_score)
+            best_suggestion = completions[0]
             
-            # Show the popup at the correct position
-            self.completer.complete(cr)
-        except Exception as e:
-            # In case of any error, try a more direct approach
-            print(f"Error positioning completion popup: {e}")
-            try:
-                cursor_pos = self.mapToGlobal(self.cursorRect().bottomLeft())
-                popup.move(cursor_pos)
-                popup.show()
-            except:
-                # Last resort - if all else fails, hide the popup to avoid showing it in the wrong place
-                popup.hide()
+            # Show ghost text for the best suggestion
+            cursor_position = self.textCursor().position()
+            self.show_ghost_text(best_suggestion, cursor_position)
 
     def keyPressEvent(self, event):
         # Check for Ctrl+Enter first, which should take precedence over other behaviors
         if event.key() == Qt.Key.Key_Return and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            # If autocomplete popup is showing, hide it
-            if self.completer and self.completer.popup().isVisible():
-                self.completer.popup().hide()
+            # Clear ghost text
+            self.clear_ghost_text()
             
             # Cancel any pending autocomplete timers
             if hasattr(self, '_completion_timer') and self._completion_timer.isActive():
                 self._completion_timer.stop()
             
             # Let the main window handle query execution
-            # Important: We need to emit event to parent to trigger execution
-            # and prevent it from being treated as an autocomplete selection
             event.accept()  # Mark the event as handled
             
             # Find the parent SQLShell instance and call its execute_query method
@@ -558,56 +593,34 @@ class SQLEditor(QPlainTextEdit):
             super().keyPressEvent(event)
             return
         
-        # Handle completer popup navigation
-        if self.completer and self.completer.popup().isVisible():
-            # Handle Tab key to complete the current selection
-            if event.key() == Qt.Key.Key_Tab:
-                # Get the SELECTED completion (not just the current one)
-                popup = self.completer.popup()
-                current_index = popup.currentIndex()
-                selected_completion = popup.model().data(current_index)
-                
-                # Accept the selected completion and close popup
-                if selected_completion:
-                    self.last_key_was_tab = True
-                    self.completer.popup().hide()
-                    self.insert_completion(selected_completion)
-                    self.last_key_was_tab = False
-                    return
-                event.ignore()
+        # Handle Tab key to accept ghost text
+        if event.key() == Qt.Key.Key_Tab:
+            # Try to accept ghost text first
+            if self.ghost_text_suggestion and self.accept_ghost_text():
                 return
-                
-            # Let Enter key escape/close the popup without completing
-            if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return]:
-                self.completer.popup().hide()
-                super().keyPressEvent(event)
-                return
-            
-            # Let Space key escape/close the popup without completing
-            if event.key() == Qt.Key.Key_Space:
-                self.completer.popup().hide()
-                super().keyPressEvent(event)
-                return
-            
-            # Hide popup on Escape
-            if event.key() == Qt.Key.Key_Escape:
-                self.completer.popup().hide()
-                event.ignore()
-                return
-                
-            # Let Up/Down keys navigate the popup
-            if event.key() in [Qt.Key.Key_Up, Qt.Key.Key_Down]:
-                event.ignore()
+            else:
+                # Insert 4 spaces instead of a tab character if no ghost text
+                self.insertPlainText("    ")
                 return
         
-        # Handle special key combinations
-        if event.key() == Qt.Key.Key_Tab:
-            # Insert 4 spaces instead of a tab character
-            self.insertPlainText("    ")
+        # Clear ghost text on navigation keys
+        if event.key() in [Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+                          Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown]:
+            self.clear_ghost_text()
+            super().keyPressEvent(event)
             return
+        
+        # Clear ghost text on Escape
+        if event.key() == Qt.Key.Key_Escape:
+            self.clear_ghost_text()
+            super().keyPressEvent(event)
+            return
+        
+        # Clear ghost text on Enter/Return
+        if event.key() in [Qt.Key.Key_Enter, Qt.Key.Key_Return]:
+            self.clear_ghost_text()
             
-        # Auto-indentation for new lines
-        if event.key() in [Qt.Key.Key_Return, Qt.Key.Key_Enter]:
+            # Auto-indentation for new lines
             cursor = self.textCursor()
             block = cursor.block()
             text = block.text()
@@ -634,7 +647,7 @@ class SQLEditor(QPlainTextEdit):
         # Handle keyboard shortcuts
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Space:
-                # Show completion popup
+                # Show completion manually
                 self.complete()
                 return
             elif event.key() == Qt.Key.Key_K:
@@ -645,7 +658,11 @@ class SQLEditor(QPlainTextEdit):
                 # Also allow Ctrl+/ for commenting (common shortcut in other editors)
                 self.toggle_comment()
                 return
-                
+        
+        # Clear ghost text on space or punctuation
+        if event.text() and (event.text().isspace() or event.text() in ".,;()[]{}+-*/=<>!"):
+            self.clear_ghost_text()
+        
         # For normal key presses
         super().keyPressEvent(event)
         
@@ -664,7 +681,7 @@ class SQLEditor(QPlainTextEdit):
             self._completion_timer = QTimer()
             self._completion_timer.setSingleShot(True)
             self._completion_timer.timeout.connect(self.complete)
-            self._completion_timer.start(250)  # 250 ms delay for better user experience
+            self._completion_timer.start(200)  # 200 ms delay for ghost text (faster than popup)
             
         elif event.key() == Qt.Key.Key_Backspace:
             # Re-evaluate completion when backspacing, with a shorter delay
@@ -737,12 +754,40 @@ class SQLEditor(QPlainTextEdit):
                 painter.drawRect(QRect(0, end_pos.top(), end_pos.right(), end_pos.height()))
             
             painter.end()
+        
+        # Render ghost text if available
+        if self.ghost_text and not cursor.hasSelection():
+            painter = QPainter(self.viewport())
+            
+            try:
+                # Get current cursor position
+                cursor_rect = self.cursorRect()
+                
+                # Set ghost text color and font
+                painter.setPen(self.ghost_text_color)
+                font = self.font()
+                painter.setFont(font)
+                
+                # Calculate position for ghost text (right after cursor)
+                x = cursor_rect.right()
+                y = cursor_rect.top()
+                
+                # Ensure we don't draw outside the viewport
+                if x >= 0 and y >= 0 and x < self.viewport().width() and y < self.viewport().height():
+                    # Draw the ghost text
+                    painter.drawText(x, y + self.fontMetrics().ascent(), self.ghost_text)
+                
+            except Exception as e:
+                # If there's any error with rendering, just skip it
+                print(f"Error rendering ghost text: {e}")
+            finally:
+                painter.end()
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
         # Show temporary hint in status bar when editor gets focus
         if hasattr(self.parent(), 'statusBar'):
-            self.parent().parent().parent().statusBar().showMessage('Press Ctrl+Space for autocomplete', 2000)
+            self.parent().parent().parent().statusBar().showMessage('Ghost text autocomplete: Press Tab to accept suggestions | Ctrl+Space for manual completion', 3000)
 
     def toggle_comment(self):
         cursor = self.textCursor()
