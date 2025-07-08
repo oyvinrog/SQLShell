@@ -1177,6 +1177,10 @@ class ExplainerThread(QThread):
             if target_unique_count <= high_cardinality_threshold * 2:
                 # Standard boxplot for reasonable number of categories
                 order = working_df[target].value_counts().nlargest(high_cardinality_threshold * 2).index
+                
+                # Calculate counts for each category
+                category_counts = working_df[target].value_counts()
+                
                 sns.boxplot(
                     x=target, 
                     y=feature, 
@@ -1185,6 +1189,21 @@ class ExplainerThread(QThread):
                     order=order
                 )
                 canvas.axes.set_title(f"Box Plot: {feature} by {target}")
+                
+                # Add count annotations below each box
+                for i, category in enumerate(order):
+                    if category in category_counts:
+                        count = category_counts[category]
+                        canvas.axes.text(
+                            i, 
+                            canvas.axes.get_ylim()[0] - (canvas.axes.get_ylim()[1] - canvas.axes.get_ylim()[0]) * 0.05,
+                            f'n={count}', 
+                            ha='center', 
+                            va='top', 
+                            fontsize=8,
+                            fontweight='bold'
+                        )
+                
                 # Rotate x-axis labels for better readability
                 canvas.axes.set_xticklabels(
                     canvas.axes.get_xticklabels(), 
@@ -1195,6 +1214,10 @@ class ExplainerThread(QThread):
                 # For very high cardinality, use a violin plot with limited categories
                 order = working_df[target].value_counts().nlargest(high_cardinality_threshold).index
                 working_df_filtered = working_df[working_df[target].isin(order)]
+                
+                # Calculate counts for filtered categories
+                category_counts = working_df_filtered[target].value_counts()
+                
                 sns.violinplot(
                     x=target, 
                     y=feature, 
@@ -1204,6 +1227,21 @@ class ExplainerThread(QThread):
                     cut=0
                 )
                 canvas.axes.set_title(f"Violin Plot: {feature} by Top {len(order)} {target} Categories")
+                
+                # Add count annotations below each violin
+                for i, category in enumerate(order):
+                    if category in category_counts:
+                        count = category_counts[category]
+                        canvas.axes.text(
+                            i, 
+                            canvas.axes.get_ylim()[0] - (canvas.axes.get_ylim()[1] - canvas.axes.get_ylim()[0]) * 0.05,
+                            f'n={count}', 
+                            ha='center', 
+                            va='top', 
+                            fontsize=8,
+                            fontweight='bold'
+                        )
+                
                 canvas.axes.set_xticklabels(
                     canvas.axes.get_xticklabels(), 
                     rotation=45, 
@@ -1215,6 +1253,10 @@ class ExplainerThread(QThread):
             if feature_unique_count <= high_cardinality_threshold * 2:
                 # Use standard barplot for reasonable number of categories
                 order = working_df[feature].value_counts().nlargest(high_cardinality_threshold * 2).index
+                
+                # Calculate counts for each category for annotations
+                category_counts = working_df[feature].value_counts()
+                
                 sns.barplot(
                     x=feature, 
                     y=target, 
@@ -1227,16 +1269,22 @@ class ExplainerThread(QThread):
                 )
                 canvas.axes.set_title(f"Bar Plot: Average {target} by {feature}")
                 
-                # Add value labels on top of bars
-                for p in canvas.axes.patches:
-                    canvas.axes.annotate(
-                        f'{p.get_height():.1f}', 
-                        (p.get_x() + p.get_width() / 2., p.get_height()), 
-                        ha='center', 
-                        va='bottom', 
-                        fontsize=8, 
-                        rotation=0
-                    )
+                # Add value labels and counts on top of bars
+                for i, p in enumerate(canvas.axes.patches):
+                    # Get the category name for this bar
+                    if i < len(order):
+                        category = order[i]
+                        count = category_counts[category]
+                        
+                        # Add mean value and count
+                        canvas.axes.annotate(
+                            f'{p.get_height():.1f}\n(n={count})', 
+                            (p.get_x() + p.get_width() / 2., p.get_height()), 
+                            ha='center', 
+                            va='bottom', 
+                            fontsize=8, 
+                            rotation=0
+                        )
                 
                 # Rotate x-axis labels if needed
                 if feature_unique_count > 5:
@@ -1307,13 +1355,25 @@ class ExplainerThread(QThread):
                 ]
                 
                 # Create a grouped count plot
-                sns.countplot(
+                ax_plot = sns.countplot(
                     x=feature,
                     hue=target,
                     data=filtered_df,
                     ax=canvas.axes
                 )
                 canvas.axes.set_title(f"Count Plot: Top {len(feature_top)} {feature} by Top {len(target_top)} {target}")
+                
+                # Add count labels on top of bars
+                for p in canvas.axes.patches:
+                    if p.get_height() > 0:  # Only add labels for non-zero bars
+                        canvas.axes.annotate(
+                            f'{int(p.get_height())}', 
+                            (p.get_x() + p.get_width() / 2., p.get_height()), 
+                            ha='center', 
+                            va='bottom', 
+                            fontsize=8, 
+                            rotation=0
+                        )
                 
                 # Rotate x-axis labels
                 canvas.axes.set_xticklabels(
@@ -2078,6 +2138,10 @@ class ColumnProfilerApp(QMainWindow):
             if target_unique_count <= high_cardinality_threshold * 2:
                 # Standard boxplot for reasonable number of categories
                 order = working_df[target].value_counts().nlargest(high_cardinality_threshold * 2).index
+                
+                # Calculate counts for each category
+                category_counts = working_df[target].value_counts()
+                
                 sns.boxplot(
                     x=target, 
                     y=feature, 
@@ -2086,6 +2150,21 @@ class ColumnProfilerApp(QMainWindow):
                     order=order
                 )
                 canvas.axes.set_title(f"Box Plot: {feature} by {target}")
+                
+                # Add count annotations below each box
+                for i, category in enumerate(order):
+                    if category in category_counts:
+                        count = category_counts[category]
+                        canvas.axes.text(
+                            i, 
+                            canvas.axes.get_ylim()[0] - (canvas.axes.get_ylim()[1] - canvas.axes.get_ylim()[0]) * 0.05,
+                            f'n={count}', 
+                            ha='center', 
+                            va='top', 
+                            fontsize=8,
+                            fontweight='bold'
+                        )
+                
                 # Rotate x-axis labels for better readability
                 canvas.axes.set_xticklabels(
                     canvas.axes.get_xticklabels(), 
@@ -2096,6 +2175,10 @@ class ColumnProfilerApp(QMainWindow):
                 # For very high cardinality, use a violin plot with limited categories
                 order = working_df[target].value_counts().nlargest(high_cardinality_threshold).index
                 working_df_filtered = working_df[working_df[target].isin(order)]
+                
+                # Calculate counts for filtered categories
+                category_counts = working_df_filtered[target].value_counts()
+                
                 sns.violinplot(
                     x=target, 
                     y=feature, 
@@ -2105,6 +2188,21 @@ class ColumnProfilerApp(QMainWindow):
                     cut=0
                 )
                 canvas.axes.set_title(f"Violin Plot: {feature} by Top {len(order)} {target} Categories")
+                
+                # Add count annotations below each violin
+                for i, category in enumerate(order):
+                    if category in category_counts:
+                        count = category_counts[category]
+                        canvas.axes.text(
+                            i, 
+                            canvas.axes.get_ylim()[0] - (canvas.axes.get_ylim()[1] - canvas.axes.get_ylim()[0]) * 0.05,
+                            f'n={count}', 
+                            ha='center', 
+                            va='top', 
+                            fontsize=8,
+                            fontweight='bold'
+                        )
+                
                 canvas.axes.set_xticklabels(
                     canvas.axes.get_xticklabels(), 
                     rotation=45, 
@@ -2116,6 +2214,10 @@ class ColumnProfilerApp(QMainWindow):
             if feature_unique_count <= high_cardinality_threshold * 2:
                 # Use standard barplot for reasonable number of categories
                 order = working_df[feature].value_counts().nlargest(high_cardinality_threshold * 2).index
+                
+                # Calculate counts for each category for annotations
+                category_counts = working_df[feature].value_counts()
+                
                 sns.barplot(
                     x=feature, 
                     y=target, 
@@ -2128,16 +2230,22 @@ class ColumnProfilerApp(QMainWindow):
                 )
                 canvas.axes.set_title(f"Bar Plot: Average {target} by {feature}")
                 
-                # Add value labels on top of bars
-                for p in canvas.axes.patches:
-                    canvas.axes.annotate(
-                        f'{p.get_height():.1f}', 
-                        (p.get_x() + p.get_width() / 2., p.get_height()), 
-                        ha='center', 
-                        va='bottom', 
-                        fontsize=8, 
-                        rotation=0
-                    )
+                # Add value labels and counts on top of bars
+                for i, p in enumerate(canvas.axes.patches):
+                    # Get the category name for this bar
+                    if i < len(order):
+                        category = order[i]
+                        count = category_counts[category]
+                        
+                        # Add mean value and count
+                        canvas.axes.annotate(
+                            f'{p.get_height():.1f}\n(n={count})', 
+                            (p.get_x() + p.get_width() / 2., p.get_height()), 
+                            ha='center', 
+                            va='bottom', 
+                            fontsize=8, 
+                            rotation=0
+                        )
                 
                 # Rotate x-axis labels if needed
                 if feature_unique_count > 5:
@@ -2208,13 +2316,25 @@ class ColumnProfilerApp(QMainWindow):
                 ]
                 
                 # Create a grouped count plot
-                sns.countplot(
+                ax_plot = sns.countplot(
                     x=feature,
                     hue=target,
                     data=filtered_df,
                     ax=canvas.axes
                 )
                 canvas.axes.set_title(f"Count Plot: Top {len(feature_top)} {feature} by Top {len(target_top)} {target}")
+                
+                # Add count labels on top of bars
+                for p in canvas.axes.patches:
+                    if p.get_height() > 0:  # Only add labels for non-zero bars
+                        canvas.axes.annotate(
+                            f'{int(p.get_height())}', 
+                            (p.get_x() + p.get_width() / 2., p.get_height()), 
+                            ha='center', 
+                            va='bottom', 
+                            fontsize=8, 
+                            rotation=0
+                        )
                 
                 # Rotate x-axis labels
                 canvas.axes.set_xticklabels(
