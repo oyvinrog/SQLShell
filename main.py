@@ -129,6 +129,9 @@ class SQLShell(QMainWindow):
             if os.path.exists(main_logo_path):
                 self.setWindowIcon(QIcon(main_logo_path))
         
+        # Enable drag and drop for files
+        self.setAcceptDrops(True)
+        
         # Setup menus
         setup_menubar(self)
         
@@ -3896,6 +3899,151 @@ LIMIT 10
                 qualified_tables.add(table.split('.')[-1])
         tables.update(qualified_tables)
         return tables
+
+    # Drag and Drop Event Handlers
+    def dragEnterEvent(self, event):
+        """Handle drag enter events - accept if files are being dragged"""
+        if event.mimeData().hasUrls():
+            # Check if any of the dragged items are supported file types
+            supported_extensions = {'.xlsx', '.xls', '.csv', '.txt', '.parquet', '.sqlite', '.db', '.delta'}
+            urls = event.mimeData().urls()
+            
+            for url in urls:
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    file_ext = os.path.splitext(file_path)[1].lower()
+                    
+                    # Accept if it's a supported file type or a directory (for Delta tables)
+                    if file_ext in supported_extensions or os.path.isdir(file_path):
+                        event.acceptProposedAction()
+                        self.statusBar().showMessage("Drop files here to load them")
+                        return
+            
+            # If we get here, no supported files were found
+            event.ignore()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Handle drag move events - provide visual feedback"""
+        if event.mimeData().hasUrls():
+            # Check if any dragged items are supported
+            supported_extensions = {'.xlsx', '.xls', '.csv', '.txt', '.parquet', '.sqlite', '.db', '.delta'}
+            urls = event.mimeData().urls()
+            
+            supported_files = []
+            for url in urls:
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    file_ext = os.path.splitext(file_path)[1].lower()
+                    
+                    if file_ext in supported_extensions or os.path.isdir(file_path):
+                        supported_files.append(os.path.basename(file_path))
+            
+            if supported_files:
+                event.acceptProposedAction()
+                if len(supported_files) == 1:
+                    self.statusBar().showMessage(f"Drop to load: {supported_files[0]}")
+                else:
+                    self.statusBar().showMessage(f"Drop to load {len(supported_files)} files")
+            else:
+                event.ignore()
+                self.statusBar().showMessage("Unsupported file type(s)")
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Handle drag leave events - clear status message"""
+        self.statusBar().clearMessage()
+
+    def dropEvent(self, event):
+        """Handle drop events - load the dropped files"""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            local_files = []
+            
+            # Extract local file paths
+            for url in urls:
+                if url.isLocalFile():
+                    local_files.append(url.toLocalFile())
+            
+            if local_files:
+                try:
+                    self.process_dropped_files(local_files)
+                    event.acceptProposedAction()
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Error processing dropped files:\n\n{str(e)}")
+                    self.statusBar().showMessage(f"Error processing dropped files: {str(e)}")
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+        
+        # Clear the status message
+        self.statusBar().clearMessage()
+
+    def process_dropped_files(self, file_paths):
+        """Process the dropped files using existing file loading logic"""
+        supported_extensions = {'.xlsx', '.xls', '.csv', '.txt', '.parquet', '.sqlite', '.db', '.delta'}
+        
+        # Ensure database connection exists
+        if not self.db_manager.is_connected():
+            connection_info = self.db_manager.create_memory_connection()
+            self.db_info_label.setText(connection_info)
+        
+        loaded_files = []
+        errors = []
+        
+        for file_path in file_paths:
+            try:
+                file_ext = os.path.splitext(file_path)[1].lower()
+                
+                # Check if it's a Delta table directory
+                is_delta_table = (os.path.isdir(file_path) and 
+                                os.path.exists(os.path.join(file_path, '_delta_log'))) or file_ext == '.delta'
+                
+                if file_ext in {'.sqlite', '.db'}:
+                    # Database file - use the quick_open_file method
+                    self.quick_open_file(file_path)
+                    loaded_files.append(os.path.basename(file_path))
+                    
+                elif file_ext in {'.xlsx', '.xls', '.csv', '.txt', '.parquet'} or is_delta_table:
+                    # Data file - use the database manager to load
+                    table_name, df = self.db_manager.load_file(file_path)
+                    
+                    # Update UI
+                    self.tables_list.add_table_item(table_name, os.path.basename(file_path))
+                    loaded_files.append(f"{os.path.basename(file_path)} as table '{table_name}'")
+                    
+                    # Show preview of loaded data
+                    preview_df = df.head()
+                    current_tab = self.get_current_tab()
+                    if current_tab:
+                        self.populate_table(preview_df)
+                        current_tab.results_title.setText(f"PREVIEW: {table_name}")
+                    
+                    # Update completer
+                    self.update_completer()
+                    
+                    # Add to recent files
+                    self.add_recent_file(file_path)
+                    
+                else:
+                    errors.append(f"Unsupported file type: {os.path.basename(file_path)} ({file_ext})")
+                    
+            except Exception as e:
+                errors.append(f"Error loading {os.path.basename(file_path)}: {str(e)}")
+        
+        # Show results
+        if loaded_files:
+            if len(loaded_files) == 1:
+                self.statusBar().showMessage(f"Loaded: {loaded_files[0]}")
+            else:
+                self.statusBar().showMessage(f"Loaded {len(loaded_files)} files")
+        
+        if errors:
+            error_message = "Some files could not be loaded:\n\n" + "\n".join(errors)
+            QMessageBox.warning(self, "Loading Errors", error_message)
 
 def main():
     # Parse command line arguments
