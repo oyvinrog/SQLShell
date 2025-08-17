@@ -188,6 +188,12 @@ class SQLShell(QMainWindow):
         db_buttons_layout.addWidget(self.quick_access_btn)
         left_layout.addLayout(db_buttons_layout)
         
+        # Drag and drop info label
+        drag_drop_info = QLabel("💡 Drag and drop files here to load them instantly!\nSupported: Excel, CSV, Parquet, SQLite, and more")
+        drag_drop_info.setWordWrap(True)
+        drag_drop_info.setStyleSheet("color: #52C41A; font-size: 11px; margin-top: 8px; margin-bottom: 8px; background-color: rgba(82, 196, 26, 0.1); padding: 8px; border-radius: 4px; border-left: 3px solid #52C41A;")
+        left_layout.addWidget(drag_drop_info)
+        
         # Tables section
         tables_header = QLabel("TABLES")
         tables_header.setObjectName("header_label")
