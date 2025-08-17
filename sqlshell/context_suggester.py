@@ -698,7 +698,7 @@ class ContextSuggester:
         suggestions.extend(query_starters)
         
         # Add most-used tables and columns
-        top_used = [item for item, _ in self.usage_counts.most_common(10)]
+        top_used = [str(item) for item, _ in self.usage_counts.most_common(10)]
         suggestions.extend(top_used)
         
         return suggestions
@@ -725,6 +725,9 @@ class ContextSuggester:
         scored_suggestions = []
         
         for suggestion in suggestion_set:
+            # Ensure suggestion is a string (handles cases where DataFrame columns might be integers)
+            suggestion = str(suggestion)
+            
             # Base score from usage count (normalize to 0-10 range)
             count = self.usage_counts.get(suggestion, 0)
             max_count = max(self.usage_counts.values()) if self.usage_counts else 1

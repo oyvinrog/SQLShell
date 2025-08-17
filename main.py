@@ -1063,7 +1063,7 @@ LIMIT 10
             
             # Update tracking
             self.db_manager.loaded_tables[table_name] = file_name
-            self.db_manager.table_columns[table_name] = df.columns.tolist()
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
             
             # Update UI using new method
             self.tables_list.add_table_item(table_name, os.path.basename(file_name))
@@ -1121,7 +1121,7 @@ LIMIT 10
             
             # Update tracking
             self.db_manager.loaded_tables[table_name] = file_name
-            self.db_manager.table_columns[table_name] = df.columns.tolist()
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
             
             # Update UI using new method
             self.tables_list.add_table_item(table_name, os.path.basename(file_name))

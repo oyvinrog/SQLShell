@@ -48,7 +48,7 @@ class ExportManager:
             
             # Update tracking
             self.db_manager.loaded_tables[table_name] = file_name
-            self.db_manager.table_columns[table_name] = df.columns.tolist()
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
             
             return table_name, {
                 'file_path': file_name,
@@ -91,7 +91,7 @@ class ExportManager:
             
             # Update tracking
             self.db_manager.loaded_tables[table_name] = file_name
-            self.db_manager.table_columns[table_name] = df.columns.tolist()
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
             
             return table_name, {
                 'file_path': file_name,

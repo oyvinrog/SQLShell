@@ -533,7 +533,7 @@ class DatabaseManager:
             
             # Store information about the table
             self.loaded_tables[table_name] = file_path
-            self.table_columns[table_name] = df.columns.tolist()
+            self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
             
             return table_name, df
             
@@ -864,7 +864,7 @@ class DatabaseManager:
         
         # Track the table
         self.loaded_tables[table_name] = source
-        self.table_columns[table_name] = df.columns.tolist()
+        self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
         
         return table_name
     
