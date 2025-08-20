@@ -1439,6 +1439,10 @@ LIMIT 10
         profile_distributions_action = context_menu.addAction("Analyze Column Distributions")
         profile_distributions_action.setIcon(QIcon.fromTheme("accessories-calculator"))
         
+        # Add similarity profiler action
+        profile_similarity_action = context_menu.addAction("Analyze Row Similarity")
+        profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
+        
         # Check if table needs reloading and add appropriate action
         if table_name in self.tables_list.tables_needing_reload:
             reload_action = context_menu.addAction("Reload Table")
@@ -1531,6 +1535,9 @@ LIMIT 10
         elif action == profile_distributions_action:
             # Call the distributions profile method
             self.profile_distributions(table_name)
+        elif action == profile_similarity_action:
+            # Call the similarity profile method
+            self.profile_similarity(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -3671,6 +3678,55 @@ LIMIT 10
         except Exception as e:
             QMessageBox.critical(self, "Profile Error", f"Error analyzing distributions:\n\n{str(e)}")
             self.statusBar().showMessage(f'Error analyzing distributions: {str(e)}')
+
+    def profile_similarity(self, table_name):
+        """Analyze a table's row similarity to identify patterns and outliers"""
+        try:
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Analyzing row similarity for "{table_name}"...')
+            
+            # Get the table data
+            if table_name in self.db_manager.loaded_tables:
+                # Check if table needs reloading first
+                if table_name in self.tables_list.tables_needing_reload:
+                    # Reload the table immediately
+                    self.reload_selected_table(table_name)
+                
+                # Get the data as a dataframe
+                query = f'SELECT * FROM "{table_name}"'
+                df = self.db_manager.execute_query(query)
+                
+                if df is not None and not df.empty:
+                    # Sample the data if it's larger than 1,000 rows for performance
+                    row_count = len(df)
+                    if row_count > 1000:
+                        self.statusBar().showMessage(f'Sampling {table_name} (using 1,000 rows from {row_count} total)...')
+                        df = df.sample(n=1000, random_state=42)
+                    
+                    # Import the similarity profiler
+                    from sqlshell.utils.profile_similarity import visualize_profile
+                    
+                    # Create and show the visualization
+                    self.statusBar().showMessage(f'Generating similarity profile for "{table_name}"...')
+                    vis = visualize_profile(df)
+                    
+                    # Store a reference to prevent garbage collection
+                    self._similarity_window = vis
+                    
+                    if row_count > 1000:
+                        self.statusBar().showMessage(f'Similarity profile generated for "{table_name}" (sampled 1,000 rows from {row_count})')
+                    else:
+                        self.statusBar().showMessage(f'Similarity profile generated for "{table_name}"')
+                else:
+                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
+            else:
+                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                self.statusBar().showMessage(f'Table "{table_name}" not found')
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Profile Error", f"Error analyzing row similarity:\n\n{str(e)}")
+            self.statusBar().showMessage(f'Error analyzing similarity: {str(e)}')
 
     def explain_column(self, column_name):
         """Analyze a column to explain its relationship with other columns"""
