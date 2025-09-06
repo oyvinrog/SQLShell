@@ -4018,6 +4018,35 @@ LIMIT 10
             show_error_notification(f"Apply Prediction Error: Error applying predictions - {str(e)}")
             self.statusBar().showMessage(f'Error applying predictions: {str(e)}')
 
+    def load_and_apply_model(self):
+        """Load a saved prediction model and apply it to the current dataset"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please load some data first.")
+                return
+            
+            # Import the load model function
+            from sqlshell.utils.profile_prediction import show_load_model_dialog
+            
+            # Show loading indicator
+            self.statusBar().showMessage('Loading prediction model...')
+            
+            # Load and apply the model
+            predicted_df = show_load_model_dialog(current_tab.current_df, self)
+            
+            if predicted_df is not None:
+                # Apply the predictions using the existing method
+                self.apply_prediction_to_current_tab(predicted_df)
+                self.statusBar().showMessage('Model loaded and predictions applied successfully.')
+            else:
+                self.statusBar().showMessage('Model loading cancelled or failed.')
+                
+        except Exception as e:
+            show_error_notification(f"Load Model Error: Error loading prediction model - {str(e)}")
+            self.statusBar().showMessage(f'Error loading model: {str(e)}')
+
     def get_current_query_tab(self):
         """Get the currently active tab if it's a query tab (has query_edit attribute)"""
         current_tab = self.get_current_tab()

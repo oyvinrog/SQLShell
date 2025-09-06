@@ -13,12 +13,16 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import mean_squared_error, accuracy_score, r2_score
 import warnings
+import joblib
+import os
+import json
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
                             QTableView, QPushButton, QProgressBar, QComboBox, QCheckBox,
                             QTextEdit, QSplitter, QHeaderView, QMessageBox, QGroupBox,
-                            QFormLayout, QSpinBox, QDoubleSpinBox)
+                            QFormLayout, QSpinBox, QDoubleSpinBox, QFileDialog)
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor, QPalette, QBrush
 
@@ -295,6 +299,10 @@ class PredictionThread(QThread):
                 'feature_columns': list(X.columns),
                 'target_encoder': target_encoder,
                 'original_indices': combined_indices,  # Both test and null indices
+                # Store trained models and preprocessing objects for saving
+                'trained_models': models,
+                'scaler': scaler,
+                'label_encoders': label_encoders,
                 # Additional info to help detect data leakage
                 'data_breakdown': {
                     'total_rows': len(self.df),
@@ -434,12 +442,17 @@ class PredictionDialog(QMainWindow):
         self.apply_button.clicked.connect(self.apply_predictions)
         self.apply_button.setEnabled(False)
         
+        self.save_model_button = QPushButton("Save Model")
+        self.save_model_button.clicked.connect(self.save_model)
+        self.save_model_button.setEnabled(False)
+        
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
         
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.apply_button)
+        button_layout.addWidget(self.save_model_button)
         button_layout.addStretch()
         button_layout.addWidget(self.close_button)
         
@@ -570,6 +583,7 @@ High scores are good, but should be realistic for your data.
         
         self.results_text.setPlainText(summary)
         self.apply_button.setEnabled(True)
+        self.save_model_button.setEnabled(True)
     
     def handle_error(self, error_message):
         """Handle prediction errors"""
@@ -637,6 +651,60 @@ High scores are good, but should be realistic for your data.
             
         except Exception as e:
             QMessageBox.critical(self, "Apply Error", f"Failed to apply predictions: {str(e)}")
+    
+    def save_model(self):
+        """Save the trained prediction model and preprocessing objects"""
+        if not self.prediction_results:
+            QMessageBox.warning(self, "No Model", "No model available to save. Please run prediction first.")
+            return
+        
+        try:
+            # Get the best model and preprocessing objects
+            best_model_name = self.prediction_results['best_model']
+            best_model = self.prediction_results['trained_models'][best_model_name]
+            
+            # Open file dialog to choose save location
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Prediction Model",
+                f"{self.target_column}_prediction_model.pkl",
+                "Pickle Files (*.pkl);;All Files (*)"
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Create model package with all necessary components
+            model_package = {
+                'model': best_model,
+                'model_name': best_model_name,
+                'prediction_type': self.prediction_results['prediction_type'],
+                'target_column': self.prediction_results['target_column'],
+                'feature_columns': self.prediction_results['feature_columns'],
+                'scaler': self.prediction_results['scaler'],
+                'label_encoders': self.prediction_results['label_encoders'],
+                'target_encoder': self.prediction_results['target_encoder'],
+                'scores': self.prediction_results['scores'][best_model_name],
+                'created_date': datetime.now().isoformat(),
+                'sqlshell_version': '1.0',  # Could be made dynamic
+                'sklearn_version': None  # Will be filled by joblib
+            }
+            
+            # Save the model package
+            joblib.dump(model_package, file_path)
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Model Saved",
+                f"Model saved successfully to:\n{file_path}\n\n"
+                f"Model: {best_model_name}\n"
+                f"Target: {self.target_column}\n"
+                f"Features: {len(self.prediction_results['feature_columns'])} columns"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save model: {str(e)}")
 
 
 def create_prediction_dialog(df, target_column, parent=None):
@@ -664,3 +732,195 @@ def create_prediction_dialog(df, target_column, parent=None):
     # Create and return the dialog
     dialog = PredictionDialog(df, target_column, parent)
     return dialog
+
+
+def load_and_apply_model(df, parent=None):
+    """
+    Load a saved prediction model and apply it to a new dataset.
+    
+    Args:
+        df (pd.DataFrame): The dataframe to apply predictions to
+        parent: Parent window for dialogs
+    
+    Returns:
+        pd.DataFrame: DataFrame with predictions added, or None if cancelled/error
+    """
+    try:
+        # Open file dialog to select model file
+        file_path, _ = QFileDialog.getOpenFileName(
+            parent,
+            "Load Prediction Model",
+            "",
+            "Pickle Files (*.pkl);;All Files (*)"
+        )
+        
+        if not file_path:
+            return None  # User cancelled
+        
+        # Load the model package
+        try:
+            model_package = joblib.load(file_path)
+        except Exception as e:
+            QMessageBox.critical(parent, "Load Error", f"Failed to load model file:\n{str(e)}")
+            return None
+        
+        # Validate model package structure
+        required_keys = ['model', 'model_name', 'prediction_type', 'target_column', 
+                        'feature_columns', 'scaler', 'label_encoders']
+        missing_keys = [key for key in required_keys if key not in model_package]
+        if missing_keys:
+            QMessageBox.critical(
+                parent, 
+                "Invalid Model", 
+                f"Model file is missing required components: {missing_keys}"
+            )
+            return None
+        
+        # Check feature compatibility
+        model_features = set(model_package['feature_columns'])
+        df_columns = set(df.columns)
+        missing_features = model_features - df_columns
+        
+        if missing_features:
+            QMessageBox.critical(
+                parent,
+                "Feature Mismatch",
+                f"The current dataset is missing required features:\n{list(missing_features)}\n\n"
+                f"Model requires: {model_package['feature_columns']}\n"
+                f"Dataset has: {list(df.columns)}"
+            )
+            return None
+        
+        # Show model info and ask for confirmation
+        model_info = f"""Model Information:
+        
+Model Name: {model_package['model_name']}
+Original Target: {model_package['target_column']}
+Prediction Type: {model_package['prediction_type']}
+Features Required: {len(model_package['feature_columns'])} columns
+Created: {model_package.get('created_date', 'Unknown')}
+
+This will add a new 'Predict_{model_package['target_column']}' column to your dataset.
+
+Continue with prediction?"""
+        
+        reply = QMessageBox.question(
+            parent,
+            "Apply Model",
+            model_info,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return None
+        
+        # Apply the model
+        result_df = apply_loaded_model_to_dataframe(df, model_package)
+        
+        if result_df is not None:
+            QMessageBox.information(
+                parent,
+                "Predictions Applied",
+                f"Successfully applied '{model_package['model_name']}' model.\n"
+                f"Added 'Predict_{model_package['target_column']}' column with predictions."
+            )
+        
+        return result_df
+        
+    except Exception as e:
+        QMessageBox.critical(parent, "Error", f"Failed to apply model: {str(e)}")
+        return None
+
+
+def apply_loaded_model_to_dataframe(df, model_package):
+    """
+    Apply a loaded model package to a dataframe.
+    
+    Args:
+        df (pd.DataFrame): The dataframe to apply predictions to
+        model_package (dict): The loaded model package
+    
+    Returns:
+        pd.DataFrame: DataFrame with predictions added
+    """
+    try:
+        # Extract components from model package
+        model = model_package['model']
+        scaler = model_package['scaler']
+        label_encoders = model_package['label_encoders']
+        target_encoder = model_package.get('target_encoder')
+        feature_columns = model_package['feature_columns']
+        model_name = model_package['model_name']
+        target_column = model_package['target_column']
+        
+        # Prepare features using the same preprocessing as during training
+        X = df[feature_columns].copy()
+        
+        # Apply label encoders to categorical features
+        for col, encoder in label_encoders.items():
+            if col in X.columns:
+                # Handle unseen categories by replacing with 'unknown'
+                unique_train_values = set(encoder.classes_)
+                X[col] = X[col].astype(str)
+                X[col] = X[col].apply(lambda x: x if x in unique_train_values else 'unknown')
+                
+                # Add 'unknown' to encoder if not present
+                if 'unknown' not in encoder.classes_:
+                    # Create a new encoder with 'unknown' category
+                    new_classes = list(encoder.classes_) + ['unknown']
+                    encoder.classes_ = np.array(new_classes)
+                
+                X[col] = encoder.transform(X[col])
+        
+        # Handle missing values for numerical features
+        numerical_cols = X.select_dtypes(include=[np.number]).columns
+        for col in numerical_cols:
+            if X[col].isnull().any():
+                # Use median from the scaler's fitted data (approximate)
+                median_val = X[col].median()
+                X[col] = X[col].fillna(median_val)
+        
+        # Apply scaling
+        if 'Linear' in model_name or 'Logistic' in model_name:
+            X_processed = scaler.transform(X)
+        else:
+            X_processed = X.values
+        
+        # Make predictions
+        predictions = model.predict(X_processed)
+        
+        # Decode predictions if target encoder exists
+        if target_encoder is not None and len(predictions) > 0:
+            try:
+                predictions = target_encoder.inverse_transform(predictions.astype(int))
+            except:
+                # If decoding fails, keep numeric predictions
+                pass
+        
+        # Create result dataframe
+        result_df = df.copy()
+        predict_column_name = f"Predict_{target_column}"
+        result_df[predict_column_name] = predictions
+        
+        return result_df
+        
+    except Exception as e:
+        raise Exception(f"Failed to apply model: {str(e)}")
+
+
+def show_load_model_dialog(df, parent=None):
+    """
+    Convenience function to show load model dialog and apply predictions.
+    
+    Args:
+        df (pd.DataFrame): The dataframe to apply predictions to
+        parent: Parent window for dialogs
+    
+    Returns:
+        pd.DataFrame: DataFrame with predictions added, or None if cancelled/error
+    """
+    if df is None or df.empty:
+        QMessageBox.warning(parent, "No Data", "No data available. Please load some data first.")
+        return None
+    
+    return load_and_apply_model(df, parent)
