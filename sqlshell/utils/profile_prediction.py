@@ -566,7 +566,7 @@ Model Performance Summary:
             result_df = self.df.copy()
             
             # Create prediction column name
-            predict_column_name = f"Predict {self.target_column}"
+            predict_column_name = f"Predict_{self.target_column}"
             
             # Prepare prediction values
             predictions = self.prediction_results['predictions']
