@@ -18,7 +18,7 @@ import os
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
-from sqlshell.main import main
+from main import main
 
 def start():
     """Start the SQLShell application.

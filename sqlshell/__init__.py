@@ -5,9 +5,13 @@ SQLShell - A powerful SQL shell with GUI interface for data analysis
 __version__ = "0.3.0"
 __author__ = "SQLShell Team"
 
-from sqlshell.main import main, SQLShell
-from PyQt6.QtWidgets import QApplication
 import sys
+import os
+# Add the project root directory to Python path for main.py import
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+from main import main, SQLShell
+from PyQt6.QtWidgets import QApplication
 
 def start(database_path=None):
     """Start the SQLShell application.
