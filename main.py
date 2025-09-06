@@ -177,12 +177,7 @@ class SQLShell(QMainWindow):
         self.load_btn.setIcon(QIcon.fromTheme("document-open"))
         self.load_btn.clicked.connect(self.show_load_dialog)
         
-        self.quick_access_btn = QPushButton('Quick Access')
-        self.quick_access_btn.setIcon(QIcon.fromTheme("document-open-recent"))
-        self.quick_access_btn.clicked.connect(self.show_quick_access_menu)
-        
         db_buttons_layout.addWidget(self.load_btn)
-        db_buttons_layout.addWidget(self.quick_access_btn)
         left_layout.addLayout(db_buttons_layout)
         
         # Drag and drop info label
@@ -277,7 +272,7 @@ class SQLShell(QMainWindow):
         main_layout.addWidget(right_panel, 4)
 
         # Status bar
-        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab | Ctrl+Shift+O: Quick Access Files')
+        self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
         
     def create_tab_corner_widget(self):
         """Create a corner widget with a + button to add new tabs"""
@@ -1277,12 +1272,6 @@ LIMIT 10
                 self.clear_search()
                 return
         
-        # Show quick access menu with Ctrl+Shift+O
-        if (event.key() == Qt.Key.Key_O and 
-            (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and 
-            (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)):
-            self.show_quick_access_menu()
-            return
         
         super().keyPressEvent(event)
 
@@ -2704,9 +2693,6 @@ LIMIT 10
                 f"Failed to open file:\n\n{str(e)}")
             self.statusBar().showMessage(f"Error opening file: {os.path.basename(file_path)}")
 
-    def show_quick_access_menu(self):
-        """Show the quick access menu at cursor position"""
-        self.quick_access_btn.showMenu()
         
     def show_search_dialog(self):
         """Show search dialog and search in current results"""
