@@ -58,6 +58,7 @@ packages = [
     "sqlshell.ui",
     "sqlshell.utils"
 ]
+py_modules = ["main"]
 
 [tool.setuptools.package-data]
 sqlshell = [
