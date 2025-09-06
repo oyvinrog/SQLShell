@@ -313,6 +313,7 @@ class QueryTab(QWidget):
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction(f"Explain Column")
         encode_action = menu.addAction(f"One-Hot Encode")
+        predict_action = menu.addAction(f"Predict Column")
         
         # Execute the menu
         action = menu.exec(header.mapToGlobal(position))
@@ -331,6 +332,11 @@ class QueryTab(QWidget):
             # Call the encode text method on the parent
             if hasattr(self.parent, 'encode_text'):
                 self.parent.encode_text(col_name)
+        
+        elif action == predict_action:
+            # Call the predict column method on the parent
+            if hasattr(self.parent, 'predict_column'):
+                self.parent.predict_column(col_name)
         
         elif action == sort_asc_action:
             self.results_table.sortItems(idx, Qt.SortOrder.AscendingOrder)
@@ -579,6 +585,7 @@ class QueryTab(QWidget):
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction(f"Explain Column")
         encode_action = menu.addAction(f"One-Hot Encode")
+        predict_action = menu.addAction(f"Predict Column")
         
         # Execute the menu
         action = menu.exec(position)
@@ -597,6 +604,11 @@ class QueryTab(QWidget):
             # Call the encode text method on the parent
             if hasattr(self.parent, 'encode_text'):
                 self.parent.encode_text(col_name)
+        
+        elif action == predict_action:
+            # Call the predict column method on the parent
+            if hasattr(self.parent, 'predict_column'):
+                self.parent.predict_column(col_name)
         
         elif action == sort_asc_action:
             self.results_table.sortItems(idx, Qt.SortOrder.AscendingOrder)

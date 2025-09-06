@@ -3895,6 +3895,74 @@ LIMIT 10
             show_error_notification(f"Apply Encoding Error: Error applying encoding - {str(e)}")
             self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
 
+    def predict_column(self, column_name):
+        """Create a prediction model for a column and add predictions as new column"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available for prediction. Please load some data first.")
+                return
+                
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Preparing prediction model for "{column_name}"...')
+            
+            # Get the dataframe from the current tab
+            df = current_tab.current_df.copy()
+            
+            # Check if the column exists
+            if column_name not in df.columns:
+                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
+                return
+            
+            # Check if there are enough columns for prediction
+            if len(df.columns) < 2:
+                show_warning_notification("Need at least 2 columns for prediction (target + features).")
+                return
+            
+            # Import and use the create_prediction_dialog function from profile_prediction
+            from sqlshell.utils.profile_prediction import create_prediction_dialog
+            
+            # Create and show the prediction dialog with this window as parent
+            prediction_dialog = create_prediction_dialog(df, column_name, self)
+            
+            # Connect the predictionApplied signal to our handler
+            prediction_dialog.predictionApplied.connect(self.apply_prediction_to_current_tab)
+            
+            # Store reference to prevent garbage collection
+            self._current_prediction_dialog = prediction_dialog
+            
+            self.statusBar().showMessage(f'Prediction dialog ready for "{column_name}"')
+                
+        except Exception as e:
+            show_error_notification(f"Prediction Error: Error creating prediction model - {str(e)}")
+            self.statusBar().showMessage(f'Error predicting column: {str(e)}')
+
+    def apply_prediction_to_current_tab(self, predicted_df):
+        """Apply the predicted dataframe to the current tab"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                return
+            
+            # Update the current tab's dataframe with the predicted version
+            current_tab.current_df = predicted_df
+            
+            # Update the table display
+            self.populate_table(predicted_df)
+            
+            # Update status
+            new_columns = [col for col in predicted_df.columns if col.startswith('Predict ')]
+            if new_columns:
+                self.statusBar().showMessage(f'Applied predictions. Added column(s): {", ".join(new_columns)}')
+            else:
+                self.statusBar().showMessage(f'Applied predictions. Table has {len(predicted_df)} rows and {len(predicted_df.columns)} columns.')
+            
+        except Exception as e:
+            show_error_notification(f"Apply Prediction Error: Error applying predictions - {str(e)}")
+            self.statusBar().showMessage(f'Error applying predictions: {str(e)}')
+
     def get_current_query_tab(self):
         """Get the currently active tab if it's a query tab (has query_edit attribute)"""
         current_tab = self.get_current_tab()
