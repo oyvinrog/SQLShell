@@ -1577,10 +1577,14 @@ LIMIT 10
             cursor.insertText(table_name)
             current_tab.query_edit.setFocus()
         elif action == select_from_new_tab_action:
-            # Create a new tab with "SELECT * FROM table_name"
+            # Create a new tab with "SELECT * FROM table_name" and execute it with LIMIT 20
             new_tab = self.add_tab(f"Query {table_name}")
-            new_tab.set_query_text(f"SELECT * FROM {table_name}")
+            query_with_limit = f"SELECT * FROM {table_name} LIMIT 20"
+            new_tab.set_query_text(query_with_limit)
             new_tab.query_edit.setFocus()
+            
+            # Automatically execute the query
+            self.execute_query()
         elif action == reload_action:
             self.reload_selected_table(table_name)
         elif action == copy_path_action:
