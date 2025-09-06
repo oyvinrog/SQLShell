@@ -37,6 +37,7 @@ from sqlshell.styles import (get_application_stylesheet, get_tab_corner_styleshe
                            get_tables_header_stylesheet, get_row_count_label_stylesheet)
 from sqlshell.menus import setup_menubar
 from sqlshell.table_list import DraggableTablesList
+from sqlshell.notification_manager import init_notification_manager, show_error_notification, show_warning_notification, show_info_notification, show_success_notification
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -81,6 +82,9 @@ class SQLShell(QMainWindow):
         
         self.init_ui()
         self.apply_stylesheet()
+        
+        # Initialize notification manager
+        init_notification_manager(self)
         
         # Create initial tab
         self.add_tab()
@@ -719,7 +723,7 @@ class SQLShell(QMainWindow):
                 
             query = current_tab.get_query_text().strip()
             if not query:
-                QMessageBox.warning(self, "Empty Query", "Please enter a SQL query to execute.")
+                show_warning_notification("Please enter a SQL query to execute.")
                 return
 
             # Check if the query references any tables that need to be loaded
@@ -757,6 +761,12 @@ class SQLShell(QMainWindow):
                 self.populate_table(result)
                 self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
                 
+                # Show success notification for query execution
+                if len(result) > 0:
+                    show_success_notification(f"Query executed successfully! Retrieved {len(result):,} rows in {execution_time:.2f}s")
+                else:
+                    show_info_notification(f"Query completed successfully in {execution_time:.2f}s (no rows returned)")
+                
                 # Record query for context-aware suggestions
                 try:
                     from sqlshell.suggester_integration import get_suggestion_manager
@@ -770,18 +780,17 @@ class SQLShell(QMainWindow):
                 self._update_query_history(query)
                 
             except SyntaxError as e:
-                QMessageBox.critical(self, "SQL Syntax Error", str(e))
+                show_error_notification(f"SQL Syntax Error: {str(e)}")
                 self.statusBar().showMessage("Query execution failed: syntax error")
             except ValueError as e:
-                QMessageBox.critical(self, "Query Error", str(e))
+                show_error_notification(f"Query Error: {str(e)}")
                 self.statusBar().showMessage("Query execution failed")
             except Exception as e:
-                QMessageBox.critical(self, "Database Error", str(e))
+                show_error_notification(f"Database Error: {str(e)}")
                 self.statusBar().showMessage("Query execution failed")
                 
         except Exception as e:
-            QMessageBox.critical(self, "Unexpected Error",
-                f"An unexpected error occurred:\n\n{str(e)}")
+            show_error_notification(f"Unexpected Error: An unexpected error occurred - {str(e)}")
             self.statusBar().showMessage("Query execution failed")
 
     def execute_specific_query(self, query_text):
@@ -793,7 +802,7 @@ class SQLShell(QMainWindow):
         """
         try:
             if not query_text.strip():
-                QMessageBox.warning(self, "Empty Query", "Cannot execute empty statement.")
+                show_warning_notification("Cannot execute empty statement.")
                 return
 
             # Check if the query references any tables that need to be loaded
@@ -834,6 +843,12 @@ class SQLShell(QMainWindow):
                 query_preview = query_text[:50] + "..." if len(query_text) > 50 else query_text
                 self.statusBar().showMessage(f"Statement executed: {query_preview} | Time: {execution_time:.2f}s | Rows: {len(result)}")
                 
+                # Show success notification for statement execution
+                if len(result) > 0:
+                    show_success_notification(f"Statement executed successfully! Retrieved {len(result):,} rows in {execution_time:.2f}s")
+                else:
+                    show_info_notification(f"Statement completed successfully in {execution_time:.2f}s (no rows returned)")
+                
                 # Record query for context-aware suggestions
                 try:
                     from sqlshell.suggester_integration import get_suggestion_manager
@@ -847,18 +862,17 @@ class SQLShell(QMainWindow):
                 self._update_query_history(query_text)
                 
             except SyntaxError as e:
-                QMessageBox.critical(self, "SQL Syntax Error", str(e))
+                show_error_notification(f"SQL Syntax Error: {str(e)}")
                 self.statusBar().showMessage("Statement execution failed: syntax error")
             except ValueError as e:
-                QMessageBox.critical(self, "Query Error", str(e))
+                show_error_notification(f"Query Error: {str(e)}")
                 self.statusBar().showMessage("Statement execution failed")
             except Exception as e:
-                QMessageBox.critical(self, "Database Error", str(e))
+                show_error_notification(f"Database Error: {str(e)}")
                 self.statusBar().showMessage("Statement execution failed")
                 
         except Exception as e:
-            QMessageBox.critical(self, "Unexpected Error",
-                f"An unexpected error occurred:\n\n{str(e)}")
+            show_error_notification(f"Unexpected Error: An unexpected error occurred - {str(e)}")
             self.statusBar().showMessage("Statement execution failed")
 
     def _update_query_history(self, query):
@@ -977,13 +991,8 @@ class SQLShell(QMainWindow):
             current_tab.row_count_label.setText("")
             self.statusBar().showMessage('Error showing table preview')
             
-            # Show error message with modern styling
-            QMessageBox.critical(
-                self, 
-                "Error", 
-                f"Error showing preview: {str(e)}",
-                QMessageBox.StandardButton.Ok
-            )
+            # Show error notification
+            show_error_notification(f"Error showing preview: {str(e)}")
 
     def load_test_data(self):
         """Generate and load test data"""
@@ -1073,7 +1082,7 @@ LIMIT 10
             
         except Exception as e:
             self.statusBar().showMessage(f'Error loading test data: {str(e)}')
-            QMessageBox.critical(self, "Error", f"Failed to load test data: {str(e)}")
+            show_error_notification(f"Failed to load test data: {str(e)}")
 
     def export_to_excel(self):
         # Get the current tab
@@ -1082,7 +1091,7 @@ LIMIT 10
             return
             
         if current_tab.results_table.rowCount() == 0:
-            QMessageBox.warning(self, "No Data", "There is no data to export.")
+            show_warning_notification("There is no data to export.")
             return
         
         file_name, _ = QFileDialog.getSaveFileName(self, "Save as Excel", "", "Excel Files (*.xlsx);;All Files (*)")
@@ -1130,7 +1139,7 @@ LIMIT 10
                 QMessageBox.StandardButton.Ok
             )
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+            show_error_notification(f"Failed to export data: {str(e)}")
             self.statusBar().showMessage('Error exporting data')
 
     def export_to_parquet(self):
@@ -1188,7 +1197,7 @@ LIMIT 10
                 QMessageBox.StandardButton.Ok
             )
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to export data: {str(e)}")
+            show_error_notification(f"Failed to export data: {str(e)}")
             self.statusBar().showMessage('Error exporting data')
 
     def get_table_data_as_dataframe(self):
@@ -1738,7 +1747,7 @@ LIMIT 10
             self.statusBar().showMessage(f'Foreign key analysis complete for {len(dfs)} tables')
             
         except Exception as e:
-            QMessageBox.critical(self, "Analysis Error", f"Error analyzing foreign keys:\n\n{str(e)}")
+            show_error_notification(f"Analysis Error: Error analyzing foreign keys - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing foreign keys: {str(e)}')
 
     def reload_selected_table(self, table_name=None):
@@ -1773,12 +1782,11 @@ LIMIT 10
                     self.show_table_preview(table_item)
             else:
                 # Show error message
-                QMessageBox.warning(self, "Reload Failed", message)
+                show_warning_notification(f"Reload Failed: {message}")
                 self.statusBar().showMessage(f'Failed to reload table: {message}')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Error", 
-                f"Error reloading table:\n\n{str(e)}")
+            show_error_notification(f"Error reloading table: {str(e)}")
             self.statusBar().showMessage('Error reloading table')
 
     def new_project(self, skip_confirmation=False):
@@ -2369,7 +2377,7 @@ LIMIT 10
             return False
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to rename table:\n\n{str(e)}")
+            show_error_notification(f"Error: Failed to rename table - {str(e)}")
             return False
 
     def load_recent_projects(self):
@@ -2827,7 +2835,7 @@ LIMIT 10
             self.statusBar().showMessage(f"Search found {found_rows:,} of {total_rows:,} rows matching '{search_text}' (Ctrl+F to search again)")
             
         except Exception as e:
-            QMessageBox.critical(self, "Search Error", f"An error occurred while searching:\n{str(e)}")
+            show_error_notification(f"Search Error: An error occurred while searching - {str(e)}")
             self.statusBar().showMessage(f"Search failed: {str(e)}")
     
     def clear_search(self):
@@ -2849,7 +2857,7 @@ LIMIT 10
             self.statusBar().showMessage(f"Showing all {total_rows:,} rows")
             
         except Exception as e:
-            QMessageBox.critical(self, "Clear Search Error", f"An error occurred while clearing search:\n{str(e)}")
+            show_error_notification(f"Clear Search Error: An error occurred while clearing search - {str(e)}")
             self.statusBar().showMessage(f"Clear search failed: {str(e)}")
 
     def add_tab(self, title="Query 1"):
@@ -3635,14 +3643,14 @@ LIMIT 10
                     
                     self.statusBar().showMessage(f'Entropy profile generated for "{table_name}"')
                 else:
-                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    show_warning_notification(f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
             else:
-                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                show_warning_notification(f"Table '{table_name}' not found.")
                 self.statusBar().showMessage(f'Table "{table_name}" not found')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Analysis Error", f"Error analyzing table:\n\n{str(e)}")
+            show_error_notification(f"Analysis Error: Error analyzing table - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing table: {str(e)}')
             
     def profile_table_structure(self, table_name):
@@ -3678,14 +3686,14 @@ LIMIT 10
                     
                     self.statusBar().showMessage(f'Table structure profile generated for "{table_name}" ({row_count:,} rows)')
                 else:
-                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    show_warning_notification(f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
             else:
-                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                show_warning_notification(f"Table '{table_name}' not found.")
                 self.statusBar().showMessage(f'Table "{table_name}" not found')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Profile Error", f"Error profiling table structure:\n\n{str(e)}")
+            show_error_notification(f"Profile Error: Error profiling table structure - {str(e)}")
             self.statusBar().showMessage(f'Error profiling table: {str(e)}')
     
     def profile_distributions(self, table_name):
@@ -3727,14 +3735,14 @@ LIMIT 10
                     else:
                         self.statusBar().showMessage(f'Distribution profile generated for "{table_name}"')
                 else:
-                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    show_warning_notification(f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
             else:
-                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                show_warning_notification(f"Table '{table_name}' not found.")
                 self.statusBar().showMessage(f'Table "{table_name}" not found')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Profile Error", f"Error analyzing distributions:\n\n{str(e)}")
+            show_error_notification(f"Profile Error: Error analyzing distributions - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing distributions: {str(e)}')
 
     def profile_similarity(self, table_name):
@@ -3776,14 +3784,14 @@ LIMIT 10
                     else:
                         self.statusBar().showMessage(f'Similarity profile generated for "{table_name}"')
                 else:
-                    QMessageBox.warning(self, "Empty Table", f"Table '{table_name}' has no data to analyze.")
+                    show_warning_notification(f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
             else:
-                QMessageBox.warning(self, "Table Not Found", f"Table '{table_name}' not found.")
+                show_warning_notification(f"Table '{table_name}' not found.")
                 self.statusBar().showMessage(f'Table "{table_name}" not found')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Profile Error", f"Error analyzing row similarity:\n\n{str(e)}")
+            show_error_notification(f"Profile Error: Error analyzing row similarity - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing similarity: {str(e)}')
 
     def explain_column(self, column_name):
@@ -3821,11 +3829,11 @@ LIMIT 10
                 else:
                     self.statusBar().showMessage(f'Column profile generated for "{column_name}"')
             else:
-                QMessageBox.warning(self, "Empty Data", "No data available to analyze.")
+                show_warning_notification("No data available to analyze.")
                 self.statusBar().showMessage(f'No data to analyze')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Analysis Error", f"Error analyzing column:\n\n{str(e)}")
+            show_error_notification(f"Analysis Error: Error analyzing column - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing column: {str(e)}')
 
     def encode_text(self, column_name):
@@ -3848,7 +3856,7 @@ LIMIT 10
             
             # Check if the column exists
             if column_name not in df.columns:
-                QMessageBox.warning(self, "Column Not Found", f"Column '{column_name}' not found in the current dataset.")
+                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
                 return
             
             # Import and use the visualize_ohe function from profile_ohe
@@ -3863,7 +3871,7 @@ LIMIT 10
             self.statusBar().showMessage(f'One-hot encoding visualization ready for "{column_name}"')
                 
         except Exception as e:
-            QMessageBox.critical(self, "Encoding Error", f"Error creating one-hot encoding:\n\n{str(e)}")
+            show_error_notification(f"Encoding Error: Error creating one-hot encoding - {str(e)}")
             self.statusBar().showMessage(f'Error encoding column: {str(e)}')
 
     def apply_encoding_to_current_tab(self, encoded_df):
@@ -3884,7 +3892,7 @@ LIMIT 10
             self.statusBar().showMessage(f'Applied one-hot encoding. New table has {len(encoded_df)} rows and {len(encoded_df.columns)} columns.')
             
         except Exception as e:
-            QMessageBox.critical(self, "Apply Encoding Error", f"Error applying encoding:\n\n{str(e)}")
+            show_error_notification(f"Apply Encoding Error: Error applying encoding - {str(e)}")
             self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
 
     def get_current_query_tab(self):
@@ -4092,7 +4100,7 @@ LIMIT 10
                     self.process_dropped_files(local_files)
                     event.acceptProposedAction()
                 except Exception as e:
-                    QMessageBox.critical(self, "Error", f"Error processing dropped files:\n\n{str(e)}")
+                    show_error_notification(f"Error: Error processing dropped files - {str(e)}")
                     self.statusBar().showMessage(f"Error processing dropped files: {str(e)}")
             else:
                 event.ignore()

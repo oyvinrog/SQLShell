@@ -14,6 +14,16 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QTableWidget, QTableWidg
                              QVBoxLayout, QHBoxLayout, QLabel, QWidget, QComboBox, 
                              QPushButton, QSplitter, QHeaderView, QFrame, QProgressBar,
                              QMessageBox, QDialog)
+
+# Import notification manager (with fallback for cases where it's not available)
+try:
+    from sqlshell.notification_manager import show_error_notification, show_warning_notification
+except ImportError:
+    # Fallback functions for when notification manager is not available
+    def show_error_notification(message):
+        print(f"Error: {message}")
+    def show_warning_notification(message):
+        print(f"Warning: {message}")
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPalette, QColor, QBrush, QPainter, QPen
 from scipy.stats import chi2_contingency, pearsonr
@@ -979,14 +989,8 @@ class ExplainerThread(QThread):
         # Print error to console for debugging
         print(f"Error in column profiler: {error_message}")
         
-        # Show error message with more details
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle("Error")
-        msg_box.setText("An error occurred during analysis")
-        msg_box.setDetailedText(error_message)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msg_box.exec()
+        # Show error notification
+        show_error_notification(f"Analysis Error: {error_message.split(chr(10))[0] if chr(10) in error_message else error_message}")
         
         # Show a message in the UI as well
         self.importance_table.setRowCount(1)
@@ -1940,14 +1944,8 @@ class ColumnProfilerApp(QMainWindow):
         # Print error to console for debugging
         print(f"Error in column profiler: {error_message}")
         
-        # Show error message with more details
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle("Error")
-        msg_box.setText("An error occurred during analysis")
-        msg_box.setDetailedText(error_message)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msg_box.exec()
+        # Show error notification
+        show_error_notification(f"Analysis Error: {error_message.split(chr(10))[0] if chr(10) in error_message else error_message}")
         
         # Show a message in the UI as well
         self.importance_table.setRowCount(1)
@@ -2521,7 +2519,7 @@ def visualize_profile(df: pd.DataFrame, column: str = None) -> None:
         
         # Show error to user
         if QApplication.instance():
-            QMessageBox.critical(None, "Profile Error", f"Error creating column profile:\n\n{str(e)}")
+            show_error_notification(f"Profile Error: Error creating column profile - {str(e)}")
         return None
 
 def test_profile():
