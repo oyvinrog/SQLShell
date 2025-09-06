@@ -60,43 +60,54 @@ class PredictionThread(QThread):
     def prepare_features(self, df, target_column):
         """Prepare features for machine learning"""
         # Separate features and target
-        X = df.drop(columns=[target_column])
-        y = df[target_column]
+        X_all = df.drop(columns=[target_column])
+        y_all = df[target_column]
         
-        # Remove rows with missing target values
-        mask = ~pd.isna(y)
-        X = X[mask]
-        y = y[mask]
+        # Identify rows with non-null targets (for training/testing)
+        # and rows with null targets (for prediction)
+        non_null_mask = ~pd.isna(y_all)
+        null_mask = pd.isna(y_all)
         
-        if len(X) == 0:
-            raise ValueError("No valid data after removing missing target values")
+        # Get training data (non-null targets only)
+        X_train_data = X_all[non_null_mask]
+        y_train_data = y_all[non_null_mask]
         
-        # Handle categorical features
-        categorical_cols = X.select_dtypes(include=['object', 'category']).columns
-        numerical_cols = X.select_dtypes(include=[np.number]).columns
+        if len(X_train_data) == 0:
+            raise ValueError("No valid data with non-missing target values for training")
+        
+        # Handle categorical features for ALL data (including null targets)
+        categorical_cols = X_all.select_dtypes(include=['object', 'category']).columns
+        numerical_cols = X_all.select_dtypes(include=[np.number]).columns
+        
+        # Process features consistently across all data
+        X_processed = X_all.copy()
+        label_encoders = {}
         
         # Encode categorical variables
-        label_encoders = {}
         for col in categorical_cols:
             # Fill missing values with 'missing'
-            X[col] = X[col].fillna('missing')
+            X_processed[col] = X_processed[col].fillna('missing')
             
-            # Only encode if column has reasonable cardinality
-            if X[col].nunique() < len(X) * 0.5:  # Less than 50% unique values
+            # Only encode if column has reasonable cardinality (based on training data)
+            if X_train_data[col].fillna('missing').nunique() < len(X_train_data) * 0.5:
                 le = LabelEncoder()
-                X[col] = le.fit_transform(X[col].astype(str))
+                # Fit encoder on all data (including null targets) to handle unseen categories
+                le.fit(X_processed[col].astype(str))
+                X_processed[col] = le.transform(X_processed[col].astype(str))
                 label_encoders[col] = le
             else:
                 # Drop high cardinality categorical columns
-                X = X.drop(columns=[col])
+                X_processed = X_processed.drop(columns=[col])
         
         # Handle numerical features
         for col in numerical_cols:
-            if col in X.columns:  # Column might have been dropped
-                # Fill missing values with median
-                X[col] = X[col].fillna(X[col].median())
+            if col in X_processed.columns:  # Column might have been dropped
+                # Fill missing values with median (computed from training data)
+                median_val = X_train_data[col].median()
+                X_processed[col] = X_processed[col].fillna(median_val)
         
-        return X, y, label_encoders
+        # Return processed features for training and the target values
+        return X_processed[non_null_mask], y_train_data, label_encoders, X_processed, null_mask
     
     def run(self):
         try:
@@ -110,7 +121,7 @@ class PredictionThread(QThread):
                 raise ValueError(f"Target column '{self.target_column}' not found")
             
             # Prepare features
-            X, y, label_encoders = self.prepare_features(self.df, self.target_column)
+            X, y, label_encoders, X_all, null_mask = self.prepare_features(self.df, self.target_column)
             
             if self._is_canceled:
                 return
@@ -165,19 +176,32 @@ class PredictionThread(QThread):
                     if 'Linear' in name:
                         model.fit(X_train_scaled, y_train)
                         pred = model.predict(X_test_scaled)
-                        # Make predictions on full dataset
-                        full_pred = model.predict(scaler.transform(X))
+                        # Make predictions on test set + null target rows
+                        # Test set predictions for validation
+                        test_pred = pred
+                        # Null target predictions (the main goal)
+                        null_pred = model.predict(scaler.transform(X_all[null_mask])) if null_mask.any() else []
                     else:
                         model.fit(X_train, y_train)
                         pred = model.predict(X_test)
-                        # Make predictions on full dataset
-                        full_pred = model.predict(X)
+                        # Make predictions on test set + null target rows
+                        # Test set predictions for validation
+                        test_pred = pred
+                        # Null target predictions (the main goal)
+                        null_pred = model.predict(X_all[null_mask]) if null_mask.any() else []
                     
                     scores[name] = {
                         'mse': mean_squared_error(y_test, pred),
                         'r2': r2_score(y_test, pred)
                     }
-                    predictions[name] = full_pred
+                    # Combine test predictions and null predictions
+                    all_pred = {
+                        'test_predictions': test_pred,
+                        'test_indices': X_test.index.tolist(),
+                        'null_predictions': null_pred,
+                        'null_indices': X_all[null_mask].index.tolist()
+                    }
+                    predictions[name] = all_pred
             
             else:  # classification
                 # Train classification models
@@ -196,18 +220,31 @@ class PredictionThread(QThread):
                     if 'Logistic' in name:
                         model.fit(X_train_scaled, y_train)
                         pred = model.predict(X_test_scaled)
-                        # Make predictions on full dataset
-                        full_pred = model.predict(scaler.transform(X))
+                        # Make predictions on test set + null target rows
+                        # Test set predictions for validation
+                        test_pred = pred
+                        # Null target predictions (the main goal)
+                        null_pred = model.predict(scaler.transform(X_all[null_mask])) if null_mask.any() else []
                     else:
                         model.fit(X_train, y_train)
                         pred = model.predict(X_test)
-                        # Make predictions on full dataset
-                        full_pred = model.predict(X)
+                        # Make predictions on test set + null target rows
+                        # Test set predictions for validation
+                        test_pred = pred
+                        # Null target predictions (the main goal)
+                        null_pred = model.predict(X_all[null_mask]) if null_mask.any() else []
                     
                     scores[name] = {
                         'accuracy': accuracy_score(y_test, pred)
                     }
-                    predictions[name] = full_pred
+                    # Combine test predictions and null predictions
+                    all_pred = {
+                        'test_predictions': test_pred,
+                        'test_indices': X_test.index.tolist(),
+                        'null_predictions': null_pred,
+                        'null_indices': X_all[null_mask].index.tolist()
+                    }
+                    predictions[name] = all_pred
             
             if self._is_canceled:
                 return
@@ -220,12 +257,30 @@ class PredictionThread(QThread):
             else:
                 best_model = max(scores.keys(), key=lambda k: scores[k]['accuracy'])
             
+            # Get best predictions
+            best_pred_dict = predictions[best_model]
+            
+            # Combine test and null predictions into single arrays
+            combined_predictions = []
+            combined_indices = []
+            
+            # Add test predictions
+            test_preds = best_pred_dict['test_predictions']
+            test_indices = best_pred_dict['test_indices']
+            combined_predictions.extend(test_preds)
+            combined_indices.extend(test_indices)
+            
+            # Add null predictions
+            null_preds = best_pred_dict['null_predictions']
+            null_indices = best_pred_dict['null_indices']
+            combined_predictions.extend(null_preds)
+            combined_indices.extend(null_indices)
+            
             # Decode predictions if needed
-            best_predictions = predictions[best_model]
-            if target_encoder is not None:
+            if target_encoder is not None and len(combined_predictions) > 0:
                 # Convert to original labels
                 try:
-                    best_predictions = target_encoder.inverse_transform(best_predictions.astype(int))
+                    combined_predictions = target_encoder.inverse_transform(np.array(combined_predictions).astype(int))
                 except:
                     # If conversion fails, use numeric predictions
                     pass
@@ -235,11 +290,11 @@ class PredictionThread(QThread):
                 'prediction_type': prediction_type,
                 'target_column': self.target_column,
                 'best_model': best_model,
-                'predictions': best_predictions,
+                'predictions': combined_predictions,
                 'scores': scores,
                 'feature_columns': list(X.columns),
                 'target_encoder': target_encoder,
-                'original_indices': X.index.tolist()
+                'original_indices': combined_indices  # Both test and null indices
             }
             
             self.progress.emit(100, "Complete!")
@@ -520,7 +575,7 @@ Model Performance Summary:
             # Create prediction series with NaN values for all rows
             prediction_series = pd.Series([np.nan] * len(result_df), index=result_df.index, name=predict_column_name)
             
-            # Fill predictions for rows that were used in training
+            # Fill predictions for rows that were in the test set AND rows with null targets
             for i, idx in enumerate(original_indices):
                 if i < len(predictions) and idx in prediction_series.index:
                     prediction_series.loc[idx] = predictions[i]
