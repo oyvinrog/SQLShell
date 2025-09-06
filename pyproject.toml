@@ -46,7 +46,7 @@ dependencies = [
 Homepage = "https://github.com/oyvinrog/SQLShell"
 
 [project.scripts]
-sqls = "main:main"
+sqls = "sqlshell.__main__:main"
 
 [tool.setuptools]
 packages = [
@@ -58,7 +58,6 @@ packages = [
     "sqlshell.ui",
     "sqlshell.utils"
 ]
-py_modules = ["main"]
 
 [tool.setuptools.package-data]
 sqlshell = [
