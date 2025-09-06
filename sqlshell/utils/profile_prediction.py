@@ -513,16 +513,34 @@ Model Performance Summary:
             # Create prediction column name
             predict_column_name = f"Predict {self.target_column}"
             
-            # Initialize prediction column with NaN
-            result_df[predict_column_name] = np.nan
-            
-            # Fill predictions for rows that were used in training
+            # Prepare prediction values
             predictions = self.prediction_results['predictions']
             original_indices = self.prediction_results['original_indices']
             
+            # Create prediction series with NaN values for all rows
+            prediction_series = pd.Series([np.nan] * len(result_df), index=result_df.index, name=predict_column_name)
+            
+            # Fill predictions for rows that were used in training
             for i, idx in enumerate(original_indices):
-                if i < len(predictions):
-                    result_df.loc[idx, predict_column_name] = predictions[i]
+                if i < len(predictions) and idx in prediction_series.index:
+                    prediction_series.loc[idx] = predictions[i]
+            
+            # Find the position of the target column
+            target_column_index = result_df.columns.get_loc(self.target_column)
+            
+            # Insert the prediction column right after the target column
+            # Split the dataframe into before and after the target column
+            cols_before = result_df.columns[:target_column_index + 1].tolist()
+            cols_after = result_df.columns[target_column_index + 1:].tolist()
+            
+            # Create new column order with prediction column inserted
+            new_columns = cols_before + [predict_column_name] + cols_after
+            
+            # Add the prediction column to the dataframe
+            result_df[predict_column_name] = prediction_series
+            
+            # Reorder columns to place prediction column next to target column
+            result_df = result_df[new_columns]
             
             # Emit signal with the updated dataframe
             self.predictionApplied.emit(result_df)
