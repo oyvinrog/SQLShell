@@ -510,6 +510,55 @@ class SQLShell(QMainWindow):
             # Update completer
             self.update_completer()
 
+    def remove_multiple_selected_tables(self, table_items):
+        """Remove multiple selected tables from the database and UI"""
+        # Extract table names from items
+        table_names = []
+        for item in table_items:
+            table_name = self.tables_list.get_table_name_from_item(item)
+            if table_name:
+                table_names.append(table_name)
+        
+        if not table_names:
+            return
+        
+        # Remove tables from database
+        successful_removals, failed_removals = self.db_manager.remove_multiple_tables(table_names)
+        
+        # Remove successfully deleted items from UI
+        for item in table_items:
+            table_name = self.tables_list.get_table_name_from_item(item)
+            if table_name in successful_removals:
+                parent = item.parent()
+                if parent:
+                    parent.removeChild(item)
+                else:
+                    index = self.tables_list.indexOfTopLevelItem(item)
+                    if index >= 0:
+                        self.tables_list.takeTopLevelItem(index)
+        
+        # Update status message
+        if successful_removals and failed_removals:
+            self.statusBar().showMessage(
+                f'Removed {len(successful_removals)} tables successfully. '
+                f'Failed to remove {len(failed_removals)} tables: {", ".join(failed_removals)}'
+            )
+        elif successful_removals:
+            self.statusBar().showMessage(f'Successfully removed {len(successful_removals)} tables')
+        elif failed_removals:
+            self.statusBar().showMessage(f'Failed to remove tables: {", ".join(failed_removals)}')
+        
+        # Clear results table if needed
+        current_tab = self.get_current_tab()
+        if current_tab and successful_removals:
+            current_tab.results_table.setRowCount(0)
+            current_tab.results_table.setColumnCount(0)
+            current_tab.row_count_label.setText("")
+        
+        # Update completer
+        if successful_removals:
+            self.update_completer()
+
     def open_database(self):
         """Open a database connection with proper error handling and resource management"""
         try:
@@ -1376,11 +1425,34 @@ LIMIT 10
                 analyze_fk_action = context_menu.addAction(f"Analyze Foreign Keys Between {len(table_items)} Tables")
                 analyze_fk_action.setIcon(QIcon.fromTheme("system-search"))
                 
+                # Add separator and delete option
+                context_menu.addSeparator()
+                delete_multiple_action = context_menu.addAction(f"Delete {len(table_items)} Tables")
+                delete_multiple_action.setIcon(QIcon.fromTheme("edit-delete"))
+                
                 # Show menu and get selected action
                 action = context_menu.exec(self.tables_list.mapToGlobal(position))
                 
                 if action == analyze_fk_action:
                     self.analyze_foreign_keys_between_tables(table_items)
+                elif action == delete_multiple_action:
+                    # Show confirmation dialog
+                    table_names = [self.tables_list.get_table_name_from_item(item) for item in table_items]
+                    table_names = [name for name in table_names if name]  # Remove None values
+                    
+                    if table_names:
+                        reply = QMessageBox.question(
+                            self,
+                            "Delete Multiple Tables",
+                            f"Are you sure you want to delete these {len(table_names)} tables?\n\n" +
+                            "\n".join(f"• {name}" for name in table_names[:10]) +
+                            (f"\n... and {len(table_names) - 10} more" if len(table_names) > 10 else ""),
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.No
+                        )
+                        
+                        if reply == QMessageBox.StandardButton.Yes:
+                            self.remove_multiple_selected_tables(table_items)
                 
                 return
         

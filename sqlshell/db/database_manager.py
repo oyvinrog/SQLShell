@@ -571,6 +571,27 @@ class DatabaseManager:
         except Exception:
             return False
     
+    def remove_multiple_tables(self, table_names):
+        """
+        Remove multiple tables from the database.
+        
+        Args:
+            table_names: List of table names to remove
+            
+        Returns:
+            Tuple of (successful_removals, failed_removals) as lists of table names
+        """
+        successful_removals = []
+        failed_removals = []
+        
+        for table_name in table_names:
+            if self.remove_table(table_name):
+                successful_removals.append(table_name)
+            else:
+                failed_removals.append(table_name)
+        
+        return successful_removals, failed_removals
+    
     def get_table_preview(self, table_name, limit=5):
         """
         Get a preview of the data in a table.
