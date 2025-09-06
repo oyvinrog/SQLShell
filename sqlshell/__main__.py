@@ -758,6 +758,19 @@ class SQLShell(QMainWindow):
                 result = self.db_manager.execute_query(query)
                 
                 execution_time = (datetime.now() - start_time).total_seconds()
+                
+                # Try to determine the source table from the query and tag the dataframe
+                try:
+                    source_tables = self.extract_table_names_from_query(query)
+                    if source_tables:
+                        # Use the first table as the primary source
+                        primary_table = list(source_tables)[0]
+                        if primary_table in self.db_manager.loaded_tables:
+                            setattr(result, '_query_source', primary_table)
+                except Exception as e:
+                    # Don't let table detection errors affect query execution
+                    print(f"Warning: Could not determine source table: {e}")
+                
                 self.populate_table(result)
                 self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
                 
@@ -3946,11 +3959,49 @@ LIMIT 10
             if not current_tab:
                 return
             
+            # Try to find which table corresponds to this dataframe so we can update it
+            table_name = None
+            if hasattr(current_tab, 'current_df') and current_tab.current_df is not None:
+                # Check if the dataframe has a _query_source attribute
+                if hasattr(current_tab.current_df, '_query_source'):
+                    table_name = getattr(current_tab.current_df, '_query_source')
+                
+                # If no _query_source, try to find a table with matching columns
+                if not table_name:
+                    original_columns = [str(col) for col in current_tab.current_df.columns]
+                    for t_name, t_columns in self.db_manager.table_columns.items():
+                        if set(original_columns) == set(t_columns):
+                            table_name = t_name
+                            break
+            
             # Update the current tab's dataframe with the predicted version
             current_tab.current_df = predicted_df
             
+            # Copy the _query_source attribute to the new dataframe
+            if table_name:
+                setattr(predicted_df, '_query_source', table_name)
+            
             # Update the table display
             self.populate_table(predicted_df)
+            
+            # Update the database table registration if we found a corresponding table
+            if table_name and table_name in self.db_manager.loaded_tables:
+                try:
+                    # Update the table in the database with the new dataframe
+                    if self.db_manager.connection_type == 'sqlite':
+                        predicted_df.to_sql(table_name, self.db_manager.conn, index=False, if_exists='replace')
+                    else:  # duckdb
+                        # Re-register the DataFrame with updated columns
+                        self.db_manager.conn.register(table_name, predicted_df)
+                    
+                    # Update the column metadata
+                    self.db_manager.table_columns[table_name] = [str(col) for col in predicted_df.columns.tolist()]
+                    
+                    # Update the autocompletion system
+                    self.update_completer()
+                    
+                except Exception as e:
+                    print(f"Warning: Could not update database table '{table_name}': {str(e)}")
             
             # Update status
             new_columns = [col for col in predicted_df.columns if col.startswith('Predict ')]
