@@ -285,7 +285,7 @@ class PredictionThread(QThread):
                     # If conversion fails, use numeric predictions
                     pass
             
-            # Create results dictionary
+            # Create results dictionary with detailed breakdown
             results = {
                 'prediction_type': prediction_type,
                 'target_column': self.target_column,
@@ -294,7 +294,16 @@ class PredictionThread(QThread):
                 'scores': scores,
                 'feature_columns': list(X.columns),
                 'target_encoder': target_encoder,
-                'original_indices': combined_indices  # Both test and null indices
+                'original_indices': combined_indices,  # Both test and null indices
+                # Additional info to help detect data leakage
+                'data_breakdown': {
+                    'total_rows': len(self.df),
+                    'training_rows': len(X_train),
+                    'test_rows': len(X_test),
+                    'null_target_rows': null_mask.sum(),
+                    'predicted_rows': len(combined_indices),
+                    'test_size_percentage': self.test_size * 100
+                }
             }
             
             self.progress.emit(100, "Complete!")
@@ -527,20 +536,37 @@ class PredictionDialog(QMainWindow):
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
         # Update results text
+        breakdown = results['data_breakdown']
         summary = f"""Prediction Analysis Complete!
 
 Target Column: {results['target_column']}
 Prediction Type: {results['prediction_type']}
 Best Model: {results['best_model']}
 Features Used: {len(results['feature_columns'])} columns
-Training Data: {len(results['original_indices'])} rows
 
-Model Performance Summary:
+📊 DATA BREAKDOWN (for leak detection):
+Total Rows: {breakdown['total_rows']}
+Training Rows: {breakdown['training_rows']} ({breakdown['training_rows']/breakdown['total_rows']*100:.1f}%)
+Test Rows: {breakdown['test_rows']} ({breakdown['test_size_percentage']:.1f}%)
+NULL Target Rows: {breakdown['null_target_rows']}
+Predicted Rows: {breakdown['predicted_rows']} (test + null targets)
+
+⚠️  MODEL PERFORMANCE (on test set only):
+Note: Scores below are ONLY on {breakdown['test_rows']} unseen test rows.
+High scores are good, but should be realistic for your data.
 """
         for model_name, scores in results['scores'].items():
             summary += f"\n{model_name}:\n"
             for metric, score in scores.items():
                 summary += f"  {metric}: {score:.4f}\n"
+        
+        summary += f"""
+🔍 LEAK DETECTION GUIDE:
+✅ GOOD: R² between 0.3-0.9 (depending on your data)
+❌ SUSPICIOUS: R² > 0.95 (likely overfit or leakage)
+✅ TRAINING SIZE: {breakdown['training_rows']} rows ({breakdown['training_rows']/breakdown['total_rows']*100:.1f}%)
+✅ TEST SIZE: {breakdown['test_rows']} rows ({breakdown['test_size_percentage']:.1f}%)
+✅ PREDICTIONS: Made for {breakdown['null_target_rows']} missing values + {breakdown['test_rows']} test rows"""
         
         self.results_text.setPlainText(summary)
         self.apply_button.setEnabled(True)
