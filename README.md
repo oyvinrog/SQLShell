@@ -21,7 +21,7 @@
 
 ---
 
-## 🎯 What SQLShell Does
+##  What SQLShell Does
 
 **SQLShell is a desktop SQL interface specifically designed for analyzing data files.** It's not a database client - instead, it lets you load CSV, Parquet, Excel, and other data files and query them with SQL using DuckDB's fast analytical engine.
 

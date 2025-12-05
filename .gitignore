@@ -30,6 +30,7 @@ tests/data/*.csv
 tests/data/*.delta
 tests/data/*.duckdb
 tests/data/*.sqls
+tests/data
 
 # Sample data files - exclude CSV files but keep other sample files
 sample_data/*.csv
@@ -78,7 +79,6 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
-tests/
 
 # Distribution / packaging
 *.spec
