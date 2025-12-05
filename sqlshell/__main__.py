@@ -4271,6 +4271,26 @@ LIMIT 10
             connection_info = self.db_manager.create_memory_connection()
             self.db_info_label.setText(connection_info)
         
+        # Count data files (exclude database files as they don't create tables)
+        data_files = [fp for fp in file_paths 
+                      if os.path.splitext(fp)[1].lower() not in {'.sqlite', '.db'}]
+        
+        # Ask for prefix if multiple data files are being dropped
+        table_prefix = ""
+        if len(data_files) > 1:
+            prefix, ok = QInputDialog.getText(
+                self,
+                "Table Name Prefix",
+                f"You are loading {len(data_files)} files.\n"
+                "Enter a prefix for table names (or leave blank for no prefix):\n\n"
+                "Example: 'prod_' → tables will be named 'prod_sales', 'prod_orders', etc.",
+                QLineEdit.EchoMode.Normal,
+                ""
+            )
+            if ok:
+                table_prefix = prefix.strip()
+            # If user cancels the dialog, continue with no prefix
+        
         loaded_files = []
         errors = []
         
@@ -4289,7 +4309,7 @@ LIMIT 10
                     
                 elif file_ext in {'.xlsx', '.xls', '.csv', '.txt', '.parquet'} or is_delta_table:
                     # Data file - use the database manager to load
-                    table_name, df = self.db_manager.load_file(file_path)
+                    table_name, df = self.db_manager.load_file(file_path, table_prefix=table_prefix)
                     
                     # Update UI
                     self.tables_list.add_table_item(table_name, os.path.basename(file_path))

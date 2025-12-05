@@ -214,12 +214,13 @@ class DatabaseManager:
             else:
                 raise Exception(f"Database error: {str(e)}")
     
-    def load_file(self, file_path):
+    def load_file(self, file_path, table_prefix=""):
         """
         Load data from a file into the database.
         
         Args:
             file_path: Path to the data file (Excel, CSV, TXT, Parquet, Delta)
+            table_prefix: Optional prefix to prepend to the table name (e.g., "prod_")
             
         Returns:
             Tuple of (table_name, DataFrame) for the loaded data
@@ -497,6 +498,10 @@ class DatabaseManager:
             # For directories like Delta tables, use the directory name
             if os.path.isdir(file_path):
                 base_name = os.path.basename(file_path)
+            
+            # Apply prefix if provided
+            if table_prefix:
+                base_name = f"{table_prefix}{base_name}"
                 
             table_name = self.sanitize_table_name(base_name)
             
