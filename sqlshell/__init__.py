@@ -25,7 +25,7 @@ def start(database_path=None):
             
             # Update UI with tables from the database
             for table_name, source in window.db_manager.loaded_tables.items():
-                if source == 'database':
+                if source.startswith('database:'):
                     window.tables_list.add_table_item(table_name, "database")
             
             # Update the completer with table and column names

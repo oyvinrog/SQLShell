@@ -33,6 +33,7 @@ tests/data/*.sqls
 
 # Sample data files - exclude CSV files but keep other sample files
 sample_data/*.csv
+sample_data/*.db
 
 # IDE
 .idea/
