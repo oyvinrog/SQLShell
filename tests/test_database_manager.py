@@ -270,6 +270,174 @@ class TestDatabaseManagerDataTypes:
         assert 'float_col' in result.columns
 
 
+class TestTablePrefix:
+    """Tests for table prefix functionality when loading files."""
+
+    def test_load_file_with_prefix(self, db_manager, temp_dir, sample_df):
+        """Test loading a file with a table prefix."""
+        path = temp_dir / "sales.csv"
+        sample_df.to_csv(path, index=False)
+        
+        result = db_manager.load_file(str(path), table_prefix="prod_")
+        table_name, df = result
+        
+        # Table name should start with the prefix
+        assert table_name.startswith("prod_"), f"Table name should start with 'prod_', got: {table_name}"
+        assert table_name in db_manager.loaded_tables
+
+    def test_load_multiple_files_with_same_prefix(self, db_manager, temp_dir, sample_df):
+        """Test loading multiple files with the same prefix."""
+        files = ["orders.csv", "customers.csv", "products.csv"]
+        
+        for filename in files:
+            path = temp_dir / filename
+            sample_df.to_csv(path, index=False)
+            db_manager.load_file(str(path), table_prefix="staging_")
+        
+        # All tables should have the prefix
+        for table_name in db_manager.loaded_tables.keys():
+            assert table_name.startswith("staging_"), f"Table {table_name} should have staging_ prefix"
+        
+        assert len(db_manager.loaded_tables) == 3
+
+    def test_load_file_without_prefix(self, db_manager, temp_dir, sample_df):
+        """Test loading a file without a prefix (default behavior)."""
+        path = temp_dir / "data.csv"
+        sample_df.to_csv(path, index=False)
+        
+        result = db_manager.load_file(str(path), table_prefix="")
+        table_name, df = result
+        
+        # Table name should NOT have a prefix added
+        assert not table_name.startswith("_"), f"Table name shouldn't start with underscore: {table_name}"
+
+    def test_load_file_prefix_sanitization(self, db_manager, temp_dir, sample_df):
+        """Test that prefix is properly incorporated into sanitized table name."""
+        path = temp_dir / "my-data.csv"
+        sample_df.to_csv(path, index=False)
+        
+        result = db_manager.load_file(str(path), table_prefix="test_")
+        table_name, df = result
+        
+        assert table_name.startswith("test_"), f"Table should have prefix: {table_name}"
+        # Table should be queryable
+        query_result = db_manager.execute_query(f"SELECT COUNT(*) as cnt FROM {table_name}")
+        assert query_result['cnt'].iloc[0] == len(sample_df)
+
+
+class TestDatabaseAndFilesIntegration:
+    """Tests for working with databases and loaded files simultaneously."""
+
+    @pytest.mark.database
+    def test_load_file_then_attach_database(self, db_manager, temp_dir, sample_df, temp_sqlite_db):
+        """Test loading a file, then attaching a database - both should be queryable."""
+        # First, load a CSV file
+        csv_path = temp_dir / "loaded_data.csv"
+        sample_df.to_csv(csv_path, index=False)
+        result = db_manager.load_file(str(csv_path))
+        file_table, _ = result
+        
+        # Then attach a database
+        db_manager.open_database(str(temp_sqlite_db))
+        
+        # Both the file table and database tables should be accessible
+        assert file_table in db_manager.loaded_tables, "File table should still be loaded"
+        
+        # Should be able to query the file table
+        file_result = db_manager.execute_query(f"SELECT COUNT(*) as cnt FROM {file_table}")
+        assert file_result['cnt'].iloc[0] == len(sample_df)
+        
+        # Should be able to query the database table
+        db_result = db_manager.execute_query("SELECT COUNT(*) as cnt FROM db.users")
+        assert db_result['cnt'].iloc[0] > 0
+
+    @pytest.mark.database
+    def test_attach_database_then_load_file(self, db_manager, temp_dir, sample_df, temp_sqlite_db):
+        """Test attaching a database, then loading a file - both should be queryable."""
+        # First attach a database
+        db_manager.open_database(str(temp_sqlite_db))
+        
+        # Then load a CSV file
+        csv_path = temp_dir / "new_data.csv"
+        sample_df.to_csv(csv_path, index=False)
+        result = db_manager.load_file(str(csv_path))
+        file_table, _ = result
+        
+        # Both should be accessible
+        assert 'db' in db_manager.attached_databases, "Database should be attached"
+        assert file_table in db_manager.loaded_tables, "File table should be loaded"
+        
+        # Query both
+        db_result = db_manager.execute_query("SELECT * FROM db.users LIMIT 1")
+        file_result = db_manager.execute_query(f"SELECT * FROM {file_table} LIMIT 1")
+        
+        assert len(db_result) > 0
+        assert len(file_result) > 0
+
+    @pytest.mark.database
+    def test_join_file_and_database_tables(self, db_manager, temp_dir, temp_sqlite_db):
+        """Test joining data from a loaded file with data from an attached database."""
+        # Create a file with matching IDs
+        file_data = pd.DataFrame({
+            'user_id': [1, 2, 3, 4, 5],
+            'score': [100, 200, 300, 400, 500]
+        })
+        csv_path = temp_dir / "scores.csv"
+        file_data.to_csv(csv_path, index=False)
+        
+        # Attach database and load file
+        db_manager.open_database(str(temp_sqlite_db))
+        result = db_manager.load_file(str(csv_path))
+        scores_table, _ = result
+        
+        # Join file data with database data
+        join_query = f"""
+            SELECT u.name, s.score 
+            FROM db.users u 
+            JOIN {scores_table} s ON u.id = s.user_id
+        """
+        result = db_manager.execute_query(join_query)
+        
+        # Should have joined results
+        assert len(result) > 0
+        assert 'name' in result.columns
+        assert 'score' in result.columns
+
+    @pytest.mark.database
+    def test_attached_databases_tracking(self, db_manager, temp_sqlite_db):
+        """Test that attached databases are properly tracked."""
+        assert len(db_manager.attached_databases) == 0, "No databases attached initially"
+        
+        db_manager.open_database(str(temp_sqlite_db))
+        
+        assert 'db' in db_manager.attached_databases
+        assert db_manager.attached_databases['db']['type'] == 'sqlite'
+        assert db_manager.attached_databases['db']['path'] == str(temp_sqlite_db.absolute())
+
+    @pytest.mark.database
+    def test_detach_database_preserves_files(self, db_manager, temp_dir, sample_df, temp_sqlite_db):
+        """Test that detaching a database preserves loaded file tables."""
+        # Load a file
+        csv_path = temp_dir / "keep_me.csv"
+        sample_df.to_csv(csv_path, index=False)
+        result = db_manager.load_file(str(csv_path))
+        file_table, _ = result
+        
+        # Attach then detach database
+        db_manager.open_database(str(temp_sqlite_db))
+        
+        # Detach the database
+        if hasattr(db_manager, 'detach_database'):
+            db_manager.detach_database('db')
+        
+        # File table should still be there
+        assert file_table in db_manager.loaded_tables, "File table should be preserved after detach"
+        
+        # Should still be able to query it
+        result = db_manager.execute_query(f"SELECT * FROM {file_table}")
+        assert len(result) == len(sample_df)
+
+
 class TestDatabaseManagerEdgeCases:
     """Tests for edge cases and error handling."""
 
