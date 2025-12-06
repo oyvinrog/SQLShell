@@ -15,7 +15,7 @@
 
 <img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
-[🚀 Install Now](#-quick-install) • [📖 Examples](https://github.com/oyvinrog/SQLShell/wiki/SQL-Shell) • [🤝 Contribute](#-contributing)
+[🚀 Install Now](#-quick-install) • [📖 Examples](https://github.com/oyvinrog/SQLShell/wiki/Guides) • [🤝 Contribute](#-contributing)
 
 
 
