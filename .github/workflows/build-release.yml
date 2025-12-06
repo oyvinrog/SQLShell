@@ -50,12 +50,24 @@ jobs:
 
       - name: Build package
         run: |
-          python -m build
+          echo "=== Building package ==="
+          # Run from /tmp to avoid conflict with local build.py
+          cd /tmp && python -m build $GITHUB_WORKSPACE --outdir $GITHUB_WORKSPACE/dist 2>&1 || { echo "Build failed!"; exit 1; }
+          cd $GITHUB_WORKSPACE
           echo "=== Built packages ==="
           ls -la dist/
+          echo "=== Package contents ==="
+          ls dist/*.whl dist/*.tar.gz 2>/dev/null || echo "No packages found!"
 
       - name: Check package
-        run: twine check dist/*.whl dist/*.tar.gz
+        run: |
+          if ls dist/*.whl 1> /dev/null 2>&1; then
+            twine check dist/*.whl dist/*.tar.gz
+          else
+            echo "ERROR: No wheel files found in dist/"
+            ls -la dist/
+            exit 1
+          fi
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
