@@ -3,6 +3,7 @@ Integration module for context-aware SQL suggestions.
 
 This module provides the glue code needed to connect the ContextSuggester
 with the SQL editor component for seamless context-aware autocompletion.
+Also integrates AI-powered suggestions when configured.
 """
 
 from PyQt6.QtCore import QStringListModel, Qt
@@ -11,6 +12,7 @@ from typing import Dict, List, Any, Optional
 import re
 
 from sqlshell.context_suggester import ContextSuggester
+from sqlshell.ai_autocomplete import get_ai_autocomplete_manager
 
 
 class SuggestionManager:
@@ -19,6 +21,7 @@ class SuggestionManager:
     
     This class acts as a bridge between the database schema information,
     query history tracking, and the editor's autocompletion functionality.
+    Also integrates AI-powered suggestions when configured.
     """
     
     def __init__(self):
@@ -26,6 +29,13 @@ class SuggestionManager:
         self.suggester = ContextSuggester()
         self._completers = {}  # {editor_id: completer}
         self._editors = {}  # {editor_id: editor_instance}
+        self._ai_manager = get_ai_autocomplete_manager()
+        
+        # Connect AI suggestion signal to handler
+        self._ai_manager.suggestion_ready.connect(self._on_ai_suggestion_ready)
+        
+        # Track which editor requested AI suggestion
+        self._pending_ai_editor_id = None
     
     def register_editor(self, editor, editor_id=None):
         """
@@ -130,8 +140,15 @@ class SuggestionManager:
                             # Update the context in suggester
                             suggestion_mgr.suggester._context_cache[f"{text_before_cursor}:{current_word}"] = context
                 
-                # Get context-aware suggestions
+                # Get context-aware suggestions from the local suggester
                 suggestions = suggestion_mgr.get_suggestions(text_before_cursor, current_word)
+                
+                # Check if AI autocomplete is available and should be used
+                ai_manager = suggestion_mgr._ai_manager
+                use_ai = (
+                    ai_manager.is_available and 
+                    len(text_before_cursor.strip()) >= 3  # Only use AI for non-trivial context
+                )
                 
                 if suggestions and hasattr(editor_ref, 'show_ghost_text'):
                     # Find the best suggestion using the same logic as the editor's complete method
@@ -159,6 +176,23 @@ class SuggestionManager:
                     
                     # Show ghost text for the best suggestion
                     editor_ref.show_ghost_text(best_suggestion, position)
+                    
+                    # Also request AI suggestion in background (may override if better)
+                    if use_ai:
+                        suggestion_mgr._pending_ai_editor_id = id(editor_ref)
+                        ai_manager.request_suggestion(
+                            text_before_cursor, 
+                            current_word, 
+                            position
+                        )
+                elif use_ai:
+                    # No local suggestions, try AI
+                    suggestion_mgr._pending_ai_editor_id = id(editor_ref)
+                    ai_manager.request_suggestion(
+                        text_before_cursor, 
+                        current_word, 
+                        position
+                    )
                 else:
                     # Clear ghost text if no suggestions
                     if hasattr(editor_ref, 'clear_ghost_text'):
@@ -195,6 +229,27 @@ class SuggestionManager:
         if editor_id in self._completers:
             del self._completers[editor_id]
     
+    def _on_ai_suggestion_ready(self, suggestion: str, cursor_position: int):
+        """Handle AI suggestion ready signal."""
+        if not suggestion or not self._pending_ai_editor_id:
+            return
+        
+        # Find the editor that requested the suggestion
+        editor = self._editors.get(self._pending_ai_editor_id)
+        if not editor:
+            return
+        
+        # Verify cursor is still at the expected position
+        current_position = editor.textCursor().position()
+        if abs(current_position - cursor_position) > 5:  # Allow small tolerance
+            return  # Cursor moved too much, discard suggestion
+        
+        # Show the AI suggestion as ghost text
+        if hasattr(editor, 'show_ghost_text'):
+            # Mark this as an AI suggestion (could be used to show different styling)
+            editor._is_ai_suggestion = True
+            editor.show_ghost_text(suggestion, current_position)
+    
     def update_schema(self, tables, table_columns, column_types=None):
         """
         Update schema information for all registered editors.
@@ -206,6 +261,9 @@ class SuggestionManager:
         """
         # Update the context suggester with new schema information
         self.suggester.update_schema(tables, table_columns, column_types)
+        
+        # Also update AI manager with schema context
+        self._ai_manager.update_schema_context(list(tables), table_columns)
     
     def record_query(self, query_text):
         """
