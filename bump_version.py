@@ -52,7 +52,7 @@ def get_current_version() -> str:
     raise ValueError("Could not find version in pyproject.toml")
 
 
-def parse_version(version: str) -> tuple[int, int, int]:
+def parse_version(version: str) -> "tuple[int, int, int]":
     """Parse version string into (major, minor, patch)."""
     match = re.match(r'^(\d+)\.(\d+)\.(\d+)', version)
     if not match:
