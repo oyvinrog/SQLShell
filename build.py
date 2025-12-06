@@ -13,6 +13,7 @@ Usage:
 import argparse
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -20,9 +21,19 @@ from pathlib import Path
 
 # Configuration
 APP_NAME = "SQLShell"
-APP_VERSION = "0.3.3"
 APP_AUTHOR = "SQLShell Team"
 APP_DESCRIPTION = "A powerful SQL shell with GUI interface for data analysis"
+
+def get_version_from_pyproject() -> str:
+    """Read version from pyproject.toml (single source of truth)."""
+    pyproject_path = Path(__file__).parent / "pyproject.toml"
+    content = pyproject_path.read_text()
+    match = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    raise ValueError("Could not find version in pyproject.toml")
+
+APP_VERSION = get_version_from_pyproject()
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BUILD_DIR = SCRIPT_DIR / "build"

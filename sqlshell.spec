@@ -6,12 +6,25 @@ Build command: pyinstaller sqlshell.spec
 
 import sys
 import os
+import re
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
 # Get the project root directory
 SPEC_ROOT = os.path.dirname(os.path.abspath(SPEC))
+
+# Read version from pyproject.toml (single source of truth)
+def get_version():
+    pyproject_path = os.path.join(SPEC_ROOT, "pyproject.toml")
+    with open(pyproject_path, "r") as f:
+        content = f.read()
+    match = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    return "0.0.0"
+
+APP_VERSION = get_version()
 
 # Collect data files from various packages
 datas = [
@@ -224,8 +237,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName': 'SQLShell',
             'CFBundleDisplayName': 'SQLShell',
-            'CFBundleVersion': '0.3.3',
-            'CFBundleShortVersionString': '0.3.3',
+            'CFBundleVersion': APP_VERSION,
+            'CFBundleShortVersionString': APP_VERSION,
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,
         },
