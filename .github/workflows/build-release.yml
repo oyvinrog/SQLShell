@@ -97,7 +97,13 @@ jobs:
           sudo apt-get install -y dpkg-dev
 
       - name: Create .deb package
+        env:
+          RAW_VERSION: ${{ github.event.release.tag_name || github.event.inputs.version || '0.0.0' }}
         run: |
+          # Get version and strip 'v' prefix
+          VERSION="${RAW_VERSION#v}"
+          echo "Building .deb with version: ${VERSION}"
+          
           # Create directory structure
           mkdir -p deb-build/sqlshell/DEBIAN
           mkdir -p deb-build/sqlshell/opt/sqlshell
@@ -109,21 +115,11 @@ jobs:
           cp -r dist/SQLShell/* deb-build/sqlshell/opt/sqlshell/
           
           # Create launcher
-          echo '#!/bin/bash' > deb-build/sqlshell/usr/bin/sqlshell
-          echo 'exec /opt/sqlshell/SQLShell "$@"' >> deb-build/sqlshell/usr/bin/sqlshell
+          printf '#!/bin/bash\nexec /opt/sqlshell/SQLShell "$@"\n' > deb-build/sqlshell/usr/bin/sqlshell
           chmod +x deb-build/sqlshell/usr/bin/sqlshell
           
           # Create .desktop file
-          cat > deb-build/sqlshell/usr/share/applications/sqlshell.desktop << EOF
-          [Desktop Entry]
-          Type=Application
-          Name=SQLShell
-          Comment=A powerful SQL shell with GUI interface for data analysis
-          Exec=sqlshell
-          Icon=sqlshell
-          Categories=Development;Database;
-          Terminal=false
-          EOF
+          printf '[Desktop Entry]\nType=Application\nName=SQLShell\nComment=A powerful SQL shell with GUI interface for data analysis\nExec=sqlshell\nIcon=sqlshell\nCategories=Development;Database;\nTerminal=false\n' > deb-build/sqlshell/usr/share/applications/sqlshell.desktop
           
           # Copy icon
           cp sqlshell/resources/icon.png deb-build/sqlshell/usr/share/icons/hicolor/256x256/apps/sqlshell.png || true
@@ -131,20 +127,13 @@ jobs:
           # Calculate installed size
           SIZE=$(du -sk deb-build/sqlshell/opt | cut -f1)
           
-          # Create control file
-          cat > deb-build/sqlshell/DEBIAN/control << EOF
-          Package: sqlshell
-          Version: ${{ github.event.release.tag_name || github.event.inputs.version || '0.0.0' }}
-          Section: database
-          Priority: optional
-          Architecture: amd64
-          Installed-Size: ${SIZE}
-          Maintainer: SQLShell Team
-          Description: A powerful SQL shell with GUI interface for data analysis
-           SQLShell is a powerful SQL query tool with GUI interface
-           for data analysis. It supports DuckDB, SQLite, and various
-           file formats including CSV, Parquet, and Excel.
-          EOF
+          # Create control file (format is very strict - no leading spaces)
+          printf 'Package: sqlshell\nVersion: %s\nSection: database\nPriority: optional\nArchitecture: amd64\nInstalled-Size: %s\nMaintainer: SQLShell Team\nDescription: A powerful SQL shell with GUI interface for data analysis\n SQLShell supports DuckDB, SQLite, CSV, Parquet, and Excel.\n' "${VERSION}" "${SIZE}" > deb-build/sqlshell/DEBIAN/control
+          
+          # Show control file for debugging
+          echo "=== Control file ==="
+          cat deb-build/sqlshell/DEBIAN/control
+          echo "===================="
           
           # Build .deb
           dpkg-deb --build deb-build/sqlshell dist/sqlshell-linux-amd64.deb
