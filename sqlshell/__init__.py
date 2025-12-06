@@ -2,7 +2,7 @@
 SQLShell - A powerful SQL shell with GUI interface for data analysis
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __author__ = "SQLShell Team"
 
 from sqlshell.__main__ import main, SQLShell

@@ -12,7 +12,7 @@ def get_version():
         from sqlshell import __version__
         return __version__
     except ImportError:
-        return "0.3.2"
+        return "0.3.3"
 
 def create_file_menu(main_window):
     """Create the File menu with project management actions.

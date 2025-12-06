@@ -224,8 +224,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName': 'SQLShell',
             'CFBundleDisplayName': 'SQLShell',
-            'CFBundleVersion': '0.3.2',
-            'CFBundleShortVersionString': '0.3.2',
+            'CFBundleVersion': '0.3.3',
+            'CFBundleShortVersionString': '0.3.3',
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,
         },

@@ -20,7 +20,7 @@ from pathlib import Path
 
 # Configuration
 APP_NAME = "SQLShell"
-APP_VERSION = "0.3.2"
+APP_VERSION = "0.3.3"
 APP_AUTHOR = "SQLShell Team"
 APP_DESCRIPTION = "A powerful SQL shell with GUI interface for data analysis"
 
