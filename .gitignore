@@ -30,9 +30,11 @@ tests/data/*.csv
 tests/data/*.delta
 tests/data/*.duckdb
 tests/data/*.sqls
+tests/data
 
 # Sample data files - exclude CSV files but keep other sample files
 sample_data/*.csv
+sample_data/*.db
 
 # IDE
 .idea/
@@ -77,16 +79,27 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
-tests/
 
 # Distribution / packaging
-*.spec
 *.manifest
-*.spec 
 *.parquet 
 *.sqls
 sqlshell-0.2.0/
 TODO
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
+
+# Installer build artifacts (keep scripts, ignore generated content)
+installer/deb/
+installer/SQLShell.AppDir/
+installer/*.run
+installer/*.AppImage
+installer/*.deb
+installer/*.exe
+installer/*.dmg
 
 # Temporary files and directories
 temp/

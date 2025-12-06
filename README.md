@@ -15,13 +15,17 @@
 
 <img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
-[🚀 Install Now](#-quick-install) • [📖 Documentation](#-getting-started) • [💡 Examples](#-query-examples) • [🤝 Contribute](#-contributing)
+[🚀 Install Now](#-quick-install) • [📖 Examples](https://github.com/oyvinrog/SQLShell/wiki/SQL-Shell) • [🤝 Contribute](#-contributing)
+
+
 
 </div>
 
 ---
 
-## 🎯 What SQLShell Does
+
+
+##  What SQLShell Does
 
 **SQLShell is a desktop SQL interface specifically designed for analyzing data files.** It's not a database client - instead, it lets you load CSV, Parquet, Excel, and other data files and query them with SQL using DuckDB's fast analytical engine.
 

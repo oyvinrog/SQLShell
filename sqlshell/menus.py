@@ -3,6 +3,17 @@ Menu creation and management for SQLShell application.
 This module contains functions to create and manage the application's menus.
 """
 
+from PyQt6.QtWidgets import QMessageBox
+
+
+def get_version():
+    """Get the application version from pyproject.toml or __init__.py."""
+    try:
+        from sqlshell import __version__
+        return __version__
+    except ImportError:
+        return "0.3.2"
+
 def create_file_menu(main_window):
     """Create the File menu with project management actions.
     
@@ -158,6 +169,41 @@ def toggle_auto_load(main_window, checked):
     )
 
 
+def create_about_menu(main_window):
+    """Create the About menu with version info and Easter egg.
+    
+    Args:
+        main_window: The SQLShell main window instance
+        
+    Returns:
+        The created About menu
+    """
+    # Create About menu
+    about_menu = main_window.menuBar().addMenu('&About')
+    
+    # Version info action
+    version_action = about_menu.addAction(f'Version: {get_version()}')
+    version_action.setEnabled(False)  # Just display, not clickable
+    
+    about_menu.addSeparator()
+    
+    # About SQLShell action (opens Space Invaders!)
+    about_action = about_menu.addAction('About SQLShell...')
+    about_action.triggered.connect(lambda: show_about_dialog(main_window))
+    
+    return about_menu
+
+
+def show_about_dialog(main_window):
+    """Show the About dialog with Space Invaders game.
+    
+    Args:
+        main_window: The SQLShell main window instance
+    """
+    from sqlshell.space_invaders import show_space_invaders
+    show_space_invaders(main_window)
+
+
 def setup_menubar(main_window):
     """Set up the complete menu bar for the application.
     
@@ -172,7 +218,6 @@ def setup_menubar(main_window):
     view_menu = create_view_menu(main_window)
     tab_menu = create_tab_menu(main_window)
     preferences_menu = create_preferences_menu(main_window)
-    
-    # You can add more menus here in the future
+    about_menu = create_about_menu(main_window)
     
     return menubar 

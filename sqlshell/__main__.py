@@ -578,18 +578,20 @@ class SQLShell(QMainWindow):
                     # Add to recent files
                     self.add_recent_file(filename)
                     
-                    # Clear existing database tables from the list widget
+                    # Clear existing database tables from the list widget (tables that came from a database)
                     for i in range(self.tables_list.topLevelItemCount() - 1, -1, -1):
                         item = self.tables_list.topLevelItem(i)
                         if item and item.text(0).endswith('(database)'):
                             self.tables_list.takeTopLevelItem(i)
                     
                     # Use the database manager to open the database
+                    # This attaches the database while preserving loaded files
                     self.db_manager.open_database(filename, load_all_tables=True)
                     
                     # Update UI with tables from the database
                     for table_name, source in self.db_manager.loaded_tables.items():
-                        if source == 'database':
+                        # Check if this is a database table (source starts with 'database:')
+                        if source.startswith('database:'):
                             self.tables_list.add_table_item(table_name, "database")
                     
                     # Update the completer with table and column names
@@ -1963,9 +1965,10 @@ LIMIT 10
                     
                 file_path = self.db_manager.loaded_tables[table_name]
                 
-                # For database tables and query results, store the special identifier
-                if file_path in ['database', 'query_result']:
-                    source_path = file_path
+                # For database tables (including new format 'database:alias'), query results, store the identifier
+                if file_path == 'query_result' or file_path.startswith('database'):
+                    # Save as 'database' for backward compatibility with project files
+                    source_path = 'database' if file_path.startswith('database') else file_path
                 else:
                     # For file-based tables, store the absolute path
                     source_path = os.path.abspath(file_path)
@@ -2043,8 +2046,11 @@ LIMIT 10
                 
                 # Check if there's a database path in the project
                 has_database_path = 'database_path' in project_data and project_data['database_path']
-                has_database_tables = any(table_info.get('file_path') == 'database' 
-                                       for table_info in project_data.get('tables', {}).values())
+                has_database_tables = any(
+                    table_info.get('file_path') == 'database' or 
+                    (table_info.get('file_path') or '').startswith('database:')
+                    for table_info in project_data.get('tables', {}).values()
+                )
                 
                 # Connect to database if needed
                 progress.setLabelText("Connecting to database...")
@@ -2157,11 +2163,12 @@ LIMIT 10
                         folder_id = table_info.get('folder')
                         parent_folder = folder_items.get(folder_id) if folder_id else None
                         
-                        if file_path == 'database':
+                        if file_path == 'database' or file_path.startswith('database:'):
                             # Different handling based on whether database connection is active
                             if database_tables_loaded:
                                 # Store table info without loading data
-                                self.db_manager.loaded_tables[table_name] = 'database'
+                                # Use the new format 'database:db' for attached databases
+                                self.db_manager.loaded_tables[table_name] = 'database:db'
                                 if 'columns' in table_info:
                                     self.db_manager.table_columns[table_name] = table_info['columns']
                                     
@@ -2177,7 +2184,7 @@ LIMIT 10
                                     self.tables_list.add_table_item(table_name, "database", needs_reload=False)
                             else:
                                 # No active database connection, just register the table name
-                                self.db_manager.loaded_tables[table_name] = 'database'
+                                self.db_manager.loaded_tables[table_name] = 'database:db'
                                 if 'columns' in table_info:
                                     self.db_manager.table_columns[table_name] = table_info['columns']
                                 
@@ -2744,7 +2751,7 @@ LIMIT 10
                 
                 # Update UI with tables from the database using new method
                 for table_name, source in self.db_manager.loaded_tables.items():
-                    if source == 'database':
+                    if source.startswith('database:'):
                         self.tables_list.add_table_item(table_name, "database")
                 
                 # Update the completer with table and column names
@@ -4271,6 +4278,26 @@ LIMIT 10
             connection_info = self.db_manager.create_memory_connection()
             self.db_info_label.setText(connection_info)
         
+        # Count data files (exclude database files as they don't create tables)
+        data_files = [fp for fp in file_paths 
+                      if os.path.splitext(fp)[1].lower() not in {'.sqlite', '.db'}]
+        
+        # Ask for prefix if multiple data files are being dropped
+        table_prefix = ""
+        if len(data_files) > 1:
+            prefix, ok = QInputDialog.getText(
+                self,
+                "Table Name Prefix",
+                f"You are loading {len(data_files)} files.\n"
+                "Enter a prefix for table names (or leave blank for no prefix):\n\n"
+                "Example: 'prod_' → tables will be named 'prod_sales', 'prod_orders', etc.",
+                QLineEdit.EchoMode.Normal,
+                ""
+            )
+            if ok:
+                table_prefix = prefix.strip()
+            # If user cancels the dialog, continue with no prefix
+        
         loaded_files = []
         errors = []
         
@@ -4289,7 +4316,7 @@ LIMIT 10
                     
                 elif file_ext in {'.xlsx', '.xls', '.csv', '.txt', '.parquet'} or is_delta_table:
                     # Data file - use the database manager to load
-                    table_name, df = self.db_manager.load_file(file_path)
+                    table_name, df = self.db_manager.load_file(file_path, table_prefix=table_prefix)
                     
                     # Update UI
                     self.tables_list.add_table_item(table_name, os.path.basename(file_path))

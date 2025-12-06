@@ -7,16 +7,37 @@ from pathlib import Path
 class DatabaseManager:
     """
     Manages database connections and operations for SQLShell.
-    Handles both SQLite and DuckDB connections.
+    Uses an in-memory DuckDB as the primary connection and can attach external
+    SQLite and DuckDB databases for querying alongside loaded files.
     """
     
     def __init__(self):
-        """Initialize the database manager with no active connection."""
+        """Initialize the database manager with an in-memory DuckDB connection."""
         self.conn = None
-        self.connection_type = None
-        self.loaded_tables = {}  # Maps table_name to file_path or 'database'/'query_result'
+        self.connection_type = 'duckdb'
+        self.loaded_tables = {}  # Maps table_name to file_path or 'database:alias'/'query_result'
         self.table_columns = {}  # Maps table_name to list of column names
-        self.database_path = None  # Track the path to the current database file
+        self.database_path = None  # Track the path to the primary attached database (for display)
+        self.attached_databases = {}  # Maps alias to {'path': path, 'type': 'sqlite'/'duckdb', 'tables': []}
+        self._sqlite_scanner_loaded = False
+        
+        # Initialize the in-memory DuckDB connection
+        self._init_connection()
+    
+    def _init_connection(self):
+        """Initialize the in-memory DuckDB connection."""
+        self.conn = duckdb.connect(':memory:')
+        self.connection_type = 'duckdb'
+        
+    def _ensure_sqlite_scanner(self):
+        """Load the sqlite_scanner extension if not already loaded."""
+        if not self._sqlite_scanner_loaded:
+            try:
+                self.conn.execute("INSTALL sqlite_scanner")
+                self.conn.execute("LOAD sqlite_scanner")
+                self._sqlite_scanner_loaded = True
+            except Exception as e:
+                raise Exception(f"Failed to load sqlite_scanner extension: {str(e)}")
     
     def is_connected(self):
         """Check if there is an active database connection."""
@@ -27,31 +48,42 @@ class DatabaseManager:
         if not self.is_connected():
             return "No database connected"
         
-        if self.connection_type == "sqlite":
-            return "Connected to: SQLite database"
-        elif self.connection_type == "duckdb":
-            return "Connected to: DuckDB database"
-        return "Connected to: Unknown database type"
+        info_parts = ["In-memory DuckDB"]
+        
+        if self.attached_databases:
+            db_info = []
+            for alias, db_data in self.attached_databases.items():
+                db_type = db_data['type'].upper()
+                db_info.append(f"{alias} ({db_type})")
+            info_parts.append(f"Attached: {', '.join(db_info)}")
+        
+        return " | ".join(info_parts)
     
     def close_connection(self):
         """Close the current database connection if one exists."""
         if self.conn:
             try:
-                if self.connection_type == "duckdb":
-                    self.conn.close()
-                else:  # sqlite
-                    self.conn.close()
+                # Detach all attached databases first
+                for alias in list(self.attached_databases.keys()):
+                    try:
+                        self.conn.execute(f"DETACH {alias}")
+                    except Exception:
+                        pass
+                self.conn.close()
             except Exception:
                 pass  # Ignore errors when closing
             finally:
                 self.conn = None
                 self.connection_type = None
-                self.database_path = None  # Clear the database path
+                self.database_path = None
+                self.attached_databases = {}
+                self._sqlite_scanner_loaded = False
     
     def open_database(self, filename, load_all_tables=True):
         """
-        Open a database connection to the specified file.
+        Attach a database file to the in-memory connection.
         Detects whether it's a SQLite or DuckDB database.
+        This preserves any existing loaded files/tables.
         
         Args:
             filename: Path to the database file
@@ -63,40 +95,125 @@ class DatabaseManager:
         Raises:
             Exception: If there's an error opening the database
         """
-        # Close any existing connection
-        self.close_connection()
+        # Ensure we have a connection
+        if not self.is_connected():
+            self._init_connection()
         
-        # Clear any existing loaded tables
-        self.loaded_tables = {}
-        self.table_columns = {}
+        # First, detach any existing database with the same alias and remove its tables
+        if 'db' in self.attached_databases:
+            self.detach_database('db')
+        
+        abs_path = os.path.abspath(filename)
         
         try:
             if self.is_sqlite_db(filename):
-                self.conn = sqlite3.connect(filename)
-                self.connection_type = "sqlite"
+                # Attach SQLite database using sqlite_scanner
+                self._ensure_sqlite_scanner()
+                self.conn.execute(f"ATTACH '{abs_path}' AS db (TYPE SQLITE, READ_ONLY)")
+                db_type = 'sqlite'
             else:
-                self.conn = duckdb.connect(filename)
-                self.connection_type = "duckdb"
+                # Attach DuckDB database in read-only mode
+                self.conn.execute(f"ATTACH '{abs_path}' AS db (READ_ONLY)")
+                db_type = 'duckdb'
             
-            # Store the database path
-            self.database_path = os.path.abspath(filename)
+            # Store the database path for display
+            self.database_path = abs_path
+            
+            # Track this attached database
+            self.attached_databases['db'] = {
+                'path': abs_path,
+                'type': db_type,
+                'tables': []
+            }
             
             # Load tables from the database if requested
             if load_all_tables:
-                self.load_database_tables()
+                self._load_attached_database_tables('db')
+            
             return True
-        except (sqlite3.Error, duckdb.Error) as e:
-            self.conn = None
-            self.connection_type = None
-            self.database_path = None
+            
+        except Exception as e:
             raise Exception(f"Failed to open database: {str(e)}")
     
+    def _load_attached_database_tables(self, alias):
+        """
+        Load all tables from an attached database.
+        
+        Args:
+            alias: The alias of the attached database
+            
+        Returns:
+            A list of table names loaded
+        """
+        if alias not in self.attached_databases:
+            return []
+        
+        try:
+            table_names = []
+            
+            # Query for tables in the attached database using duckdb_tables()
+            # This works for attached databases unlike information_schema.tables
+            query = f"SELECT table_name FROM duckdb_tables() WHERE database_name='{alias}'"
+            result = self.conn.execute(query).fetchdf()
+            
+            for table_name in result['table_name']:
+                # Store with 'database:alias' as source
+                self.loaded_tables[table_name] = f'database:{alias}'
+                table_names.append(table_name)
+                
+                # Get column names for each table using duckdb_columns()
+                try:
+                    column_query = f"SELECT column_name FROM duckdb_columns() WHERE database_name='{alias}' AND table_name='{table_name}'"
+                    columns = self.conn.execute(column_query).fetchdf()
+                    self.table_columns[table_name] = columns['column_name'].tolist()
+                except Exception:
+                    self.table_columns[table_name] = []
+            
+            # Track which tables came from this database
+            self.attached_databases[alias]['tables'] = table_names
+            
+            return table_names
+            
+        except Exception as e:
+            raise Exception(f'Error loading tables from {alias}: {str(e)}')
+    
+    def detach_database(self, alias):
+        """
+        Detach a database and remove its tables from tracking.
+        
+        Args:
+            alias: The alias of the database to detach
+        """
+        if alias not in self.attached_databases:
+            return
+        
+        # Remove all tables that came from this database
+        tables_to_remove = self.attached_databases[alias].get('tables', [])
+        for table_name in tables_to_remove:
+            if table_name in self.loaded_tables:
+                del self.loaded_tables[table_name]
+            if table_name in self.table_columns:
+                del self.table_columns[table_name]
+        
+        # Detach the database
+        try:
+            self.conn.execute(f"DETACH {alias}")
+        except Exception:
+            pass
+        
+        # Remove from tracking
+        del self.attached_databases[alias]
+        
+        # Clear database_path if this was the main database
+        if alias == 'db':
+            self.database_path = None
+    
     def create_memory_connection(self):
-        """Create an in-memory DuckDB connection."""
+        """Create/reset the in-memory DuckDB connection, preserving nothing."""
         self.close_connection()
-        self.conn = duckdb.connect(':memory:')
-        self.connection_type = 'duckdb'
-        self.database_path = None  # No file path for in-memory database
+        self._init_connection()
+        self.loaded_tables = {}
+        self.table_columns = {}
         return "Connected to: in-memory DuckDB"
     
     def is_sqlite_db(self, filename):
@@ -118,58 +235,20 @@ class DatabaseManager:
     
     def load_database_tables(self):
         """
-        Load all tables from the current database connection.
+        Load all tables from the attached database (alias 'db').
+        This is a convenience method that calls _load_attached_database_tables.
         
         Returns:
             A list of table names loaded
         """
-        try:
-            if not self.is_connected():
-                return []
-            
-            table_names = []
-            
-            if self.connection_type == 'sqlite':
-                query = "SELECT name FROM sqlite_master WHERE type='table'"
-                cursor = self.conn.cursor()
-                tables = cursor.execute(query).fetchall()
-                
-                for (table_name,) in tables:
-                    self.loaded_tables[table_name] = 'database'
-                    table_names.append(table_name)
-                    
-                    # Get column names for each table
-                    try:
-                        column_query = f"PRAGMA table_info({table_name})"
-                        columns = cursor.execute(column_query).fetchall()
-                        self.table_columns[table_name] = [col[1] for col in columns]  # Column name is at index 1
-                    except Exception:
-                        self.table_columns[table_name] = []
-            
-            else:  # duckdb
-                query = "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
-                result = self.conn.execute(query).fetchdf()
-                
-                for table_name in result['table_name']:
-                    self.loaded_tables[table_name] = 'database'
-                    table_names.append(table_name)
-                    
-                    # Get column names for each table
-                    try:
-                        column_query = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND table_schema='main'"
-                        columns = self.conn.execute(column_query).fetchdf()
-                        self.table_columns[table_name] = columns['column_name'].tolist()
-                    except Exception:
-                        self.table_columns[table_name] = []
-            
-            return table_names
-            
-        except Exception as e:
-            raise Exception(f'Error loading tables: {str(e)}')
+        if 'db' in self.attached_databases:
+            return self._load_attached_database_tables('db')
+        return []
     
     def execute_query(self, query):
         """
         Execute a SQL query against the current database connection.
+        Tables from attached databases are automatically qualified with their alias.
         
         Args:
             query: SQL query string to execute
@@ -184,42 +263,90 @@ class DatabaseManager:
             raise ValueError("Empty query")
         
         if not self.is_connected():
-            raise ValueError("No database connection")
+            self._init_connection()
         
         try:
-            if self.connection_type == "duckdb":
-                result = self.conn.execute(query).fetchdf()
-            else:  # sqlite
-                result = pd.read_sql_query(query, self.conn)
-            
+            # Preprocess query to qualify table names from attached databases
+            processed_query = self._qualify_table_names(query)
+            result = self.conn.execute(processed_query).fetchdf()
             return result
-        except (duckdb.Error, sqlite3.Error) as e:
+            
+        except duckdb.Error as e:
             error_msg = str(e).lower()
             if "syntax error" in error_msg:
                 raise SyntaxError(f"SQL syntax error: {str(e)}")
-            elif "no such table" in error_msg:
+            elif "does not exist" in error_msg or "not found" in error_msg:
                 # Extract the table name from the error message when possible
                 import re
-                table_match = re.search(r"'([^']+)'", str(e))
-                table_name = table_match.group(1) if table_match else "unknown"
+                table_match = re.search(r"Table[^']*'([^']+)'|\"([^\"]+)\"", str(e), re.IGNORECASE)
+                table_name = (table_match.group(1) or table_match.group(2)) if table_match else "unknown"
                 
                 # Check if this table is in our loaded_tables dict but came from a database
-                if table_name in self.loaded_tables and self.loaded_tables[table_name] == 'database':
+                source = self.loaded_tables.get(table_name, '')
+                if source.startswith('database:'):
                     raise ValueError(f"Table '{table_name}' was part of a database but is not accessible. "
                                    f"Please reconnect to the original database using the 'Open Database' button.")
                 else:
                     raise ValueError(f"Table not found: {str(e)}")
-            elif "no such column" in error_msg:
+            elif "no such column" in error_msg or "column" in error_msg and "not found" in error_msg:
                 raise ValueError(f"Column not found: {str(e)}")
             else:
                 raise Exception(f"Database error: {str(e)}")
     
-    def load_file(self, file_path):
+    def _qualify_table_names(self, query):
+        """
+        Qualify unqualified table names in the query with their database alias.
+        This allows users to write 'SELECT * FROM customers' instead of 'SELECT * FROM db.customers'.
+        
+        Args:
+            query: The SQL query to process
+            
+        Returns:
+            The processed query with qualified table names
+        """
+        import re
+        
+        # Build a mapping of table names to their qualified names
+        table_qualifications = {}
+        for table_name, source in self.loaded_tables.items():
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                table_qualifications[table_name.lower()] = f"{alias}.{table_name}"
+        
+        if not table_qualifications:
+            return query
+        
+        # Pattern to match table names in common SQL contexts
+        # This is a simplified approach - handles most common cases
+        # Look for: FROM table, JOIN table, INTO table, UPDATE table
+        def replace_table(match):
+            keyword = match.group(1)
+            table = match.group(2)
+            rest = match.group(3) if match.lastindex >= 3 else ''
+            
+            # Don't replace if already qualified (contains a dot)
+            if '.' in table:
+                return match.group(0)
+            
+            # Check if this table needs qualification
+            qualified = table_qualifications.get(table.lower())
+            if qualified:
+                return f"{keyword}{qualified}{rest}"
+            return match.group(0)
+        
+        # Pattern for FROM, JOIN, INTO, UPDATE followed by table name
+        pattern = r'(FROM\s+|JOIN\s+|INTO\s+|UPDATE\s+)([a-zA-Z_][a-zA-Z0-9_]*)(\s|$|,|\))'
+        processed = re.sub(pattern, replace_table, query, flags=re.IGNORECASE)
+        
+        return processed
+    
+    def load_file(self, file_path, table_prefix=""):
         """
         Load data from a file into the database.
         
         Args:
             file_path: Path to the data file (Excel, CSV, TXT, Parquet, Delta)
+            table_prefix: Optional prefix to prepend to the table name (e.g., "prod_")
             
         Returns:
             Tuple of (table_name, DataFrame) for the loaded data
@@ -497,6 +624,10 @@ class DatabaseManager:
             # For directories like Delta tables, use the directory name
             if os.path.isdir(file_path):
                 base_name = os.path.basename(file_path)
+            
+            # Apply prefix if provided
+            if table_prefix:
+                base_name = f"{table_prefix}{base_name}"
                 
             table_name = self.sanitize_table_name(base_name)
             
@@ -507,29 +638,13 @@ class DatabaseManager:
                 table_name = f"{original_name}_{counter}"
                 counter += 1
             
-            # Register the table in the database
+            # Ensure we have a connection (always in-memory DuckDB)
             if not self.is_connected():
-                self.create_memory_connection()
-                
-            # Handle table creation based on database type
-            if self.connection_type == 'sqlite':
-                # For SQLite, create a table from the DataFrame
-                # For large dataframes, use a chunked approach to avoid memory issues
-                if len(df) > 10000:
-                    # Create the table with the first chunk
-                    df.iloc[:1000].to_sql(table_name, self.conn, index=False, if_exists='replace')
-                    
-                    # Append the rest in chunks
-                    chunk_size = 5000
-                    for i in range(1000, len(df), chunk_size):
-                        end = min(i + chunk_size, len(df))
-                        df.iloc[i:end].to_sql(table_name, self.conn, index=False, if_exists='append')
-                else:
-                    # For smaller dataframes, do it in one go
-                    df.to_sql(table_name, self.conn, index=False, if_exists='replace')
-            else:
-                # For DuckDB, register the DataFrame as a view
-                self.conn.register(table_name, df)
+                self._init_connection()
+            
+            # Register the DataFrame as a view in DuckDB
+            # This preserves any attached databases and their tables
+            self.conn.register(table_name, df)
             
             # Store information about the table
             self.loaded_tables[table_name] = file_path
@@ -556,11 +671,20 @@ class DatabaseManager:
             return False
         
         try:
-            # Remove from database
-            if self.connection_type == 'sqlite':
-                self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-            else:  # duckdb
+            source = self.loaded_tables[table_name]
+            
+            # For file-based tables (registered DataFrames), drop the view
+            if not source.startswith('database:'):
                 self.conn.execute(f'DROP VIEW IF EXISTS {table_name}')
+            else:
+                # For database tables, we just remove from tracking
+                # The actual table remains in the attached database
+                # Also remove from the attached database's table list
+                alias = source.split(':')[1]
+                if alias in self.attached_databases:
+                    tables = self.attached_databases[alias].get('tables', [])
+                    if table_name in tables:
+                        tables.remove(table_name)
             
             # Remove from tracking
             del self.loaded_tables[table_name]
@@ -607,9 +731,14 @@ class DatabaseManager:
             raise ValueError(f"Table '{table_name}' not found")
         
         try:
-            if self.connection_type == 'sqlite':
-                return pd.read_sql_query(f'SELECT * FROM "{table_name}" LIMIT {limit}', self.conn)
+            source = self.loaded_tables[table_name]
+            
+            # For database tables, use the qualified name
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                return self.conn.execute(f'SELECT * FROM {alias}.{table_name} LIMIT {limit}').fetchdf()
             else:
+                # For file-based tables (registered views)
                 return self.conn.execute(f'SELECT * FROM {table_name} LIMIT {limit}').fetchdf()
         except Exception as e:
             raise Exception(f"Error previewing table: {str(e)}")
@@ -799,6 +928,7 @@ class DatabaseManager:
     def rename_table(self, old_name, new_name):
         """
         Rename a table in the database.
+        Only file-based tables can be renamed; database tables are read-only.
         
         Args:
             old_name: Current name of the table
@@ -810,6 +940,12 @@ class DatabaseManager:
         if not old_name in self.loaded_tables:
             return False
         
+        source = self.loaded_tables[old_name]
+        
+        # Database tables cannot be renamed (read-only)
+        if source.startswith('database:'):
+            raise ValueError(f"Cannot rename table '{old_name}' because it's from an attached database (read-only)")
+        
         try:
             # Sanitize the new name
             new_name = self.sanitize_table_name(new_name)
@@ -817,18 +953,14 @@ class DatabaseManager:
             # Check if new name already exists
             if new_name in self.loaded_tables and new_name != old_name:
                 raise ValueError(f"Table '{new_name}' already exists")
-                
-            # Rename in database
-            if self.connection_type == 'sqlite':
-                self.conn.execute(f'ALTER TABLE "{old_name}" RENAME TO "{new_name}"')
-            else:  # duckdb
-                # For DuckDB, we need to:
-                # 1. Get the data from the old view/table
-                df = self.conn.execute(f'SELECT * FROM {old_name}').fetchdf()
-                # 2. Drop the old view
-                self.conn.execute(f'DROP VIEW IF EXISTS {old_name}')
-                # 3. Register the data under the new name
-                self.conn.register(new_name, df)
+            
+            # For file-based tables (registered views in DuckDB):
+            # 1. Get the data from the old view
+            df = self.conn.execute(f'SELECT * FROM {old_name}').fetchdf()
+            # 2. Drop the old view
+            self.conn.execute(f'DROP VIEW IF EXISTS {old_name}')
+            # 3. Register the data under the new name
+            self.conn.register(new_name, df)
             
             # Update tracking
             self.loaded_tables[new_name] = self.loaded_tables.pop(old_name)
@@ -868,6 +1000,10 @@ class DatabaseManager:
         Returns:
             The table name used (may be different if there was a conflict)
         """
+        # Ensure we have a connection
+        if not self.is_connected():
+            self._init_connection()
+        
         # Sanitize and ensure unique name
         table_name = self.sanitize_table_name(table_name)
         original_name = table_name
@@ -876,12 +1012,8 @@ class DatabaseManager:
             table_name = f"{original_name}_{counter}"
             counter += 1
         
-        # Register in database
-        if self.connection_type == 'sqlite':
-            df.to_sql(table_name, self.conn, index=False, if_exists='replace')
-        else:  # duckdb
-            # Register the DataFrame directly
-            self.conn.register(table_name, df)
+        # Register the DataFrame directly in DuckDB
+        self.conn.register(table_name, df)
         
         # Track the table
         self.loaded_tables[table_name] = source
@@ -1077,93 +1209,80 @@ class DatabaseManager:
             return
             
         try:
-            if self.connection_type == 'sqlite':
-                # Get column info from SQLite
-                cursor = self.conn.cursor()
-                cursor.execute(f"PRAGMA table_info({table})")
-                columns_info = cursor.fetchall()
-                
-                for column_info in columns_info:
-                    col_name = column_info[1]  # Column name is at index 1
-                    data_type = column_info[2]  # Data type is at index 2
-                    
-                    # Store as table.column: data_type for qualified lookups
-                    column_data_types[f"{table}.{col_name}"] = data_type
-                    # Also store just column: data_type for unqualified lookups
-                    column_data_types[col_name] = data_type
-                    
-            elif self.connection_type == 'duckdb':
-                # Get column info from DuckDB
+            # Determine the database to query
+            source = self.loaded_tables.get(table, '')
+            if source.startswith('database:'):
+                db_name = source.split(':')[1]
+                # Use duckdb_columns() for attached databases
+                query = f"""
+                SELECT column_name, data_type
+                FROM duckdb_columns()
+                WHERE database_name='{db_name}' AND table_name='{table}'
+                """
+            else:
+                # For in-memory tables, use information_schema
                 query = f"""
                 SELECT column_name, data_type
                 FROM information_schema.columns
                 WHERE table_name='{table}' AND table_schema='main'
                 """
-                result = self.conn.execute(query).fetchdf()
+            
+            result = self.conn.execute(query).fetchdf()
+            
+            for _, row in result.iterrows():
+                col_name = row['column_name']
+                data_type = row['data_type']
                 
-                for _, row in result.iterrows():
-                    col_name = row['column_name']
-                    data_type = row['data_type']
-                    
-                    # Store as table.column: data_type for qualified lookups
-                    column_data_types[f"{table}.{col_name}"] = data_type
-                    # Also store just column: data_type for unqualified lookups
-                    column_data_types[col_name] = data_type
+                # Store as table.column: data_type for qualified lookups
+                column_data_types[f"{table}.{col_name}"] = data_type
+                # Also store just column: data_type for unqualified lookups
+                column_data_types[col_name] = data_type
         except Exception:
             # Ignore errors in type detection - this is just for enhancement
             pass 
     
-    def load_specific_table(self, table_name):
+    def load_specific_table(self, table_name, database_alias='db'):
         """
-        Load metadata for a specific table from the database.
+        Load metadata for a specific table from an attached database.
         This is used when we know which tables we want to load rather than loading all tables.
         
         Args:
             table_name: Name of the table to load
+            database_alias: The alias of the attached database (default: 'db')
             
         Returns:
             Boolean indicating if the table was found and loaded
         """
         if not self.is_connected():
             return False
+        
+        if database_alias not in self.attached_databases:
+            return False
             
         try:
-            if self.connection_type == 'sqlite':
-                # Check if the table exists in SQLite
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-                result = cursor.fetchone()
+            # Check if the table exists in the attached database using duckdb_tables()
+            query = f"SELECT table_name FROM duckdb_tables() WHERE table_name='{table_name}' AND database_name='{database_alias}'"
+            result = self.conn.execute(query).fetchdf()
+            
+            if not result.empty:
+                # Get column names for the table using duckdb_columns()
+                try:
+                    column_query = f"SELECT column_name FROM duckdb_columns() WHERE table_name='{table_name}' AND database_name='{database_alias}'"
+                    columns = self.conn.execute(column_query).fetchdf()
+                    self.table_columns[table_name] = columns['column_name'].tolist()
+                except Exception:
+                    self.table_columns[table_name] = []
                 
-                if result:
-                    # Get column names for the table
-                    try:
-                        column_query = f"PRAGMA table_info({table_name})"
-                        columns = cursor.execute(column_query).fetchall()
-                        self.table_columns[table_name] = [col[1] for col in columns]  # Column name is at index 1
-                    except Exception:
-                        self.table_columns[table_name] = []
-                    
-                    # Register the table
-                    self.loaded_tables[table_name] = 'database'
-                    return True
-                    
-            else:  # duckdb
-                # Check if the table exists in DuckDB
-                query = f"SELECT table_name FROM information_schema.tables WHERE table_name='{table_name}' AND table_schema='main'"
-                result = self.conn.execute(query).fetchdf()
+                # Register the table
+                self.loaded_tables[table_name] = f'database:{database_alias}'
                 
-                if not result.empty:
-                    # Get column names for the table
-                    try:
-                        column_query = f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}' AND table_schema='main'"
-                        columns = self.conn.execute(column_query).fetchdf()
-                        self.table_columns[table_name] = columns['column_name'].tolist()
-                    except Exception:
-                        self.table_columns[table_name] = []
-                    
-                    # Register the table
-                    self.loaded_tables[table_name] = 'database'
-                    return True
+                # Add to the database's table list
+                if 'tables' not in self.attached_databases[database_alias]:
+                    self.attached_databases[database_alias]['tables'] = []
+                if table_name not in self.attached_databases[database_alias]['tables']:
+                    self.attached_databases[database_alias]['tables'].append(table_name)
+                
+                return True
             
             return False
             
