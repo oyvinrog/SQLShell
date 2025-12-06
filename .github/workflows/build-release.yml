@@ -39,6 +39,31 @@ jobs:
       - name: Clean dist folder
         run: rm -rf dist/
 
+      - name: Check if version already exists on PyPI
+        run: |
+          VERSION=$(grep -oP '^version = "\K[^"]+' pyproject.toml)
+          echo "Checking if sqlshell==${VERSION} exists on PyPI..."
+          
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/sqlshell/${VERSION}/json")
+          
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo ""
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║  ⚠️  ERROR: Version ${VERSION} already exists on PyPI!          ║"
+            echo "║                                                                ║"
+            echo "║  PyPI versions are IMMUTABLE - you cannot overwrite them.     ║"
+            echo "║                                                                ║"
+            echo "║  To fix this:                                                  ║"
+            echo "║  1. Update 'version' in pyproject.toml (e.g., to ${VERSION%.*}.$((${VERSION##*.}+1)))  ║"
+            echo "║  2. Commit and push the change                                 ║"
+            echo "║  3. Create a new release with the new version tag             ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            exit 1
+          else
+            echo "✓ Version ${VERSION} is available - proceeding with upload"
+          fi
+
       - name: Update version in pyproject.toml
         if: github.event_name == 'release'
         run: |
