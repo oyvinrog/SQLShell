@@ -6,10 +6,6 @@ import os
 # Set random seed for reproducibility
 np.random.seed(42)
 
-# Define output directory
-OUTPUT_DIR = 'test_data'
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 def create_california_housing_data(output_file='california_housing_data.parquet'):
     """Use the real world california housing dataset"""
     # Load the dataset
