@@ -1,0 +1,256 @@
+name: Build Release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.3.2)'
+        required: false
+        default: 'dev'
+
+env:
+  APP_NAME: SQLShell
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Create tarball
+        run: |
+          cd dist
+          tar -czvf SQLShell-linux-x64.tar.gz SQLShell/
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev
+
+      - name: Create .deb package
+        run: |
+          # Create directory structure
+          mkdir -p deb-build/sqlshell/DEBIAN
+          mkdir -p deb-build/sqlshell/opt/sqlshell
+          mkdir -p deb-build/sqlshell/usr/bin
+          mkdir -p deb-build/sqlshell/usr/share/applications
+          mkdir -p deb-build/sqlshell/usr/share/icons/hicolor/256x256/apps
+          
+          # Copy application
+          cp -r dist/SQLShell/* deb-build/sqlshell/opt/sqlshell/
+          
+          # Create launcher
+          echo '#!/bin/bash' > deb-build/sqlshell/usr/bin/sqlshell
+          echo 'exec /opt/sqlshell/SQLShell "$@"' >> deb-build/sqlshell/usr/bin/sqlshell
+          chmod +x deb-build/sqlshell/usr/bin/sqlshell
+          
+          # Create .desktop file
+          cat > deb-build/sqlshell/usr/share/applications/sqlshell.desktop << EOF
+          [Desktop Entry]
+          Type=Application
+          Name=SQLShell
+          Comment=A powerful SQL shell with GUI interface for data analysis
+          Exec=sqlshell
+          Icon=sqlshell
+          Categories=Development;Database;
+          Terminal=false
+          EOF
+          
+          # Copy icon
+          cp sqlshell/resources/icon.png deb-build/sqlshell/usr/share/icons/hicolor/256x256/apps/sqlshell.png || true
+          
+          # Calculate installed size
+          SIZE=$(du -sk deb-build/sqlshell/opt | cut -f1)
+          
+          # Create control file
+          cat > deb-build/sqlshell/DEBIAN/control << EOF
+          Package: sqlshell
+          Version: ${{ github.event.release.tag_name || github.event.inputs.version || '0.0.0' }}
+          Section: database
+          Priority: optional
+          Architecture: amd64
+          Installed-Size: ${SIZE}
+          Maintainer: SQLShell Team
+          Description: A powerful SQL shell with GUI interface for data analysis
+           SQLShell is a powerful SQL query tool with GUI interface
+           for data analysis. It supports DuckDB, SQLite, and various
+           file formats including CSV, Parquet, and Excel.
+          EOF
+          
+          # Build .deb
+          dpkg-deb --build deb-build/sqlshell dist/sqlshell-linux-amd64.deb
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            dist/SQLShell-linux-x64.tar.gz
+            dist/sqlshell-linux-amd64.deb
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pillow
+
+      - name: Create Windows icon
+        run: |
+          python -c "
+          from PIL import Image
+          import os
+          icon_path = 'sqlshell/resources/icon.png'
+          if os.path.exists(icon_path):
+              img = Image.open(icon_path)
+              sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+              icons = [img.resize(size, Image.Resampling.LANCZOS) for size in sizes]
+              icons[0].save('sqlshell/resources/icon.ico', format='ICO', sizes=sizes)
+          "
+
+      - name: Build executable
+        run: |
+          python -m PyInstaller --clean --noconfirm sqlshell.spec
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+
+      - name: Build installer
+        run: |
+          # Update version in .iss file
+          $version = "${{ github.event.release.tag_name || github.event.inputs.version || '0.0.0' }}"
+          $version = $version -replace '^v', ''
+          (Get-Content installer/windows/sqlshell_inno.iss) -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`"" | Set-Content installer/windows/sqlshell_inno.iss
+          
+          # Compile installer
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/sqlshell_inno.iss
+
+      - name: Rename installer with version
+        run: |
+          $version = "${{ github.event.release.tag_name || github.event.inputs.version || 'dev' }}"
+          $version = $version -replace '^v', ''
+          Move-Item -Path "dist/SQLShell-*-win64-setup.exe" -Destination "dist/SQLShell-$version-win64-setup.exe" -ErrorAction SilentlyContinue
+          Get-ChildItem dist/*.exe
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist/*.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pillow
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Create DMG
+        run: |
+          # Create a temporary directory for DMG contents
+          mkdir -p dmg-contents
+          cp -r dist/SQLShell dmg-contents/
+          
+          # Create DMG
+          hdiutil create -volname "SQLShell" -srcfolder dmg-contents -ov -format UDZO dist/SQLShell-macos-x64.dmg
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: dist/SQLShell-macos-x64.dmg
+
+  upload-release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Rename artifacts with version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # Rename Linux artifacts
+          mv artifacts/linux-build/SQLShell-linux-x64.tar.gz artifacts/SQLShell-${VERSION}-linux-x64.tar.gz || true
+          mv artifacts/linux-build/sqlshell-linux-amd64.deb artifacts/sqlshell_${VERSION}_amd64.deb || true
+          
+          # Rename macOS artifact
+          mv artifacts/macos-build/SQLShell-macos-x64.dmg artifacts/SQLShell-${VERSION}-macos-x64.dmg || true
+          
+          # Windows artifact (already versioned)
+          mv artifacts/windows-build/*.exe artifacts/ || true
+          
+          ls -la artifacts/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/SQLShell-*.tar.gz
+            artifacts/sqlshell_*.deb
+            artifacts/SQLShell-*.dmg
+            artifacts/SQLShell-*-setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
