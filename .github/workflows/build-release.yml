@@ -36,6 +36,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install build twine
 
+      - name: Clean dist folder
+        run: rm -rf dist/
+
       - name: Update version in pyproject.toml
         if: github.event_name == 'release'
         run: |
@@ -46,10 +49,13 @@ jobs:
           grep "^version" pyproject.toml
 
       - name: Build package
-        run: python -m build
+        run: |
+          python -m build
+          echo "=== Built packages ==="
+          ls -la dist/
 
       - name: Check package
-        run: twine check dist/*
+        run: twine check dist/*.whl dist/*.tar.gz
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
