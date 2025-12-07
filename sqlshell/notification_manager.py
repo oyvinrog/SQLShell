@@ -6,8 +6,8 @@ Provides non-blocking, toast-style notifications instead of modal dialogs.
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QGraphicsEffect, QGraphicsDropShadowEffect,
                              QApplication)
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty, QRect
-from PyQt6.QtGui import QPainter, QColor, QPalette, QFont, QIcon
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty, QRect, QPoint
+from PyQt6.QtGui import QPainter, QColor, QPalette, QFont, QIcon, QBrush, QPen, QPainterPath
 import time
 from typing import List, Optional
 from enum import Enum
@@ -46,6 +46,10 @@ class NotificationWidget(QWidget):
                            Qt.WindowType.WindowStaysOnTopHint |
                            Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        # Store colors for painting
+        self._bg_color = QColor('#E3F2FD')
+        self._border_color = QColor('#2196F3')
         
         # Main layout
         layout = QHBoxLayout(self)
@@ -93,7 +97,7 @@ class NotificationWidget(QWidget):
                 'icon': 'ℹ'
             },
             NotificationType.SUCCESS: {
-                'bg_color': '#E8F5E8',  # Light green background
+                'bg_color': '#E8F5E9',  # Light green background
                 'text_color': '#1B5E20',  # Dark green text
                 'border_color': '#4CAF50',
                 'icon': '✓'
@@ -114,6 +118,10 @@ class NotificationWidget(QWidget):
         
         style = styles[self.notification_type]
         
+        # Store colors for custom painting (solid background)
+        self._bg_color = QColor(style['bg_color'])
+        self._border_color = QColor(style['border_color'])
+        
         # Set icon with improved visibility
         self.icon_label.setText(style['icon'])
         self.icon_label.setStyleSheet(f"""
@@ -122,6 +130,7 @@ class NotificationWidget(QWidget):
                 font-size: 18px;
                 font-weight: bold;
                 font-family: "Arial", "Helvetica", sans-serif;
+                background: transparent;
             }}
         """)
         
@@ -156,14 +165,23 @@ class NotificationWidget(QWidget):
             }}
         """)
         
-        # Set main widget styling with improved contrast
-        self.setStyleSheet(f"""
-            NotificationWidget {{
-                background-color: {style['bg_color']};
-                border-radius: 8px;
-                border: 3px solid {style['border_color']};
-            }}
-        """)
+    def paintEvent(self, event):
+        """Paint a solid opaque background with rounded corners"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Create rounded rectangle path
+        path = QPainterPath()
+        rect = self.rect().adjusted(2, 2, -2, -2)  # Leave room for border
+        path.addRoundedRect(float(rect.x()), float(rect.y()), 
+                           float(rect.width()), float(rect.height()), 8, 8)
+        
+        # Fill with solid opaque background
+        painter.fillPath(path, QBrush(self._bg_color))
+        
+        # Draw border
+        painter.setPen(QPen(self._border_color, 3))
+        painter.drawPath(path)
         
     def setup_animations(self):
         """Setup slide-in and fade-out animations"""
@@ -186,10 +204,11 @@ class NotificationWidget(QWidget):
             
     def show_notification(self, position: QRect):
         """Show the notification with slide-in animation"""
-        # Set initial position (off-screen to the right)
-        start_rect = QRect(position.x() + position.width(), position.y(), 
+        # Position is already in global screen coordinates
+        # Start position: slide in from the right (off screen)
+        start_rect = QRect(position.x() + 400, position.y(), 
                           self.width(), self.height())
-        end_rect = QRect(position.x() - self.width() - 20, position.y(),
+        end_rect = QRect(position.x(), position.y(),
                         self.width(), self.height())
         
         self.setGeometry(start_rect)
@@ -279,12 +298,15 @@ class NotificationManager:
         return self.show_notification(message, NotificationType.ERROR, duration)
         
     def _calculate_position(self, notification: NotificationWidget) -> QRect:
-        """Calculate the position for a new notification"""
-        parent_rect = self.parent_widget.geometry()
+        """Calculate the position for a new notification (in global screen coordinates)"""
+        # Get the parent widget's global position on screen
+        parent_global_pos = self.parent_widget.mapToGlobal(QPoint(0, 0))
+        parent_width = self.parent_widget.width()
         
-        # Start from top-right corner with some margin
-        x = parent_rect.width() - 20
-        y = 80  # Start below any toolbar/menubar
+        # Calculate position relative to parent's right edge (in screen coordinates)
+        # Position notification inside the parent window's right side
+        x = parent_global_pos.x() + parent_width - notification.width() - 20
+        y = parent_global_pos.y() + 80  # Start below any toolbar/menubar
         
         # Stack notifications vertically
         for existing in self.notifications:
