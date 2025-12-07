@@ -158,14 +158,14 @@ class SQLShell(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Left panel for table list
-        left_panel = QFrame()
-        left_panel.setObjectName("sidebar")
-        left_panel.setMinimumWidth(300)
-        left_panel.setMaximumWidth(400)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(16, 16, 16, 16)
-        left_layout.setSpacing(12)
+        # Left panel for table list (stored as instance var for toggle)
+        self.left_panel = QFrame()
+        self.left_panel.setObjectName("sidebar")
+        self.left_panel.setMinimumWidth(220)
+        self.left_panel.setMaximumWidth(350)
+        left_layout = QVBoxLayout(self.left_panel)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
         
         # Database info section
         db_header = QLabel("DATABASE")
@@ -220,38 +220,38 @@ class SQLShell(QMainWindow):
         right_panel = QFrame()
         right_panel.setObjectName("content_panel")
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(16, 16, 16, 16)
-        right_layout.setSpacing(16)
+        right_layout.setContentsMargins(8, 8, 8, 8)
+        right_layout.setSpacing(4)
         
-        # Query section header
-        query_header = QLabel("SQL QUERY")
-        query_header.setObjectName("header_label")
-        right_layout.addWidget(query_header)
+        # Query section header (stored for toggle, hidden by default in favor of tabs)
+        self.query_header = QLabel("SQL QUERY")
+        self.query_header.setObjectName("header_label")
+        self.query_header.setVisible(False)  # Tabs provide context, header is redundant
+        right_layout.addWidget(self.query_header)
         
-        # Create a drop area for tables above the tab widget
+        # Create a compact drop area for tables above the tab widget
         self.tab_drop_area = QFrame()
-        self.tab_drop_area.setFixedHeight(30)
+        self.tab_drop_area.setFixedHeight(22)
         self.tab_drop_area.setObjectName("tab_drop_area")
         
         # Add a label with hint text
         drop_area_layout = QHBoxLayout(self.tab_drop_area)
-        drop_area_layout.setContentsMargins(10, 0, 10, 0)
-        self.drop_hint_label = QLabel("Drag tables here to create new query tabs")
-        self.drop_hint_label.setStyleSheet("color: #95a5a6; font-size: 11px;")
+        drop_area_layout.setContentsMargins(8, 0, 8, 0)
+        self.drop_hint_label = QLabel("📂 Drop tables here to create new query tabs")
+        self.drop_hint_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
         self.drop_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         drop_area_layout.addWidget(self.drop_hint_label)
         
         self.tab_drop_area.setStyleSheet("""
             #tab_drop_area {
-                background-color: #f8f9fa;
-                border: 1px dashed #BDC3C7;
-                border-radius: 4px;
-                margin: 0 0 5px 0;
+                background-color: #fafbfc;
+                border: 1px dashed #d0d7de;
+                border-radius: 3px;
             }
             
             #tab_drop_area:hover {
-                background-color: #E5F7FF;
-                border: 1px dashed #3498DB;
+                background-color: #ddf4ff;
+                border: 1px dashed #0969da;
             }
         """)
         self.tab_drop_area.setAcceptDrops(True)
@@ -275,9 +275,9 @@ class SQLShell(QMainWindow):
         
         right_layout.addWidget(self.tab_widget)
 
-        # Add panels to main layout
-        main_layout.addWidget(left_panel, 1)
-        main_layout.addWidget(right_panel, 4)
+        # Add panels to main layout (sidebar:content ratio 1:5 gives more space to queries)
+        main_layout.addWidget(self.left_panel, 1)
+        main_layout.addWidget(right_panel, 5)
 
         # Status bar
         self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
@@ -3119,6 +3119,48 @@ LIMIT 10
         else:
             self.showMaximized()
             self.was_maximized = True
+    
+    def toggle_sidebar(self, checked=None):
+        """Toggle sidebar visibility (Ctrl+B)"""
+        if hasattr(self, 'left_panel'):
+            if checked is None:
+                # Toggle based on current state
+                self.left_panel.setVisible(not self.left_panel.isVisible())
+            else:
+                self.left_panel.setVisible(checked)
+            
+            # Update menu action state
+            if hasattr(self, 'toggle_sidebar_action'):
+                self.toggle_sidebar_action.setChecked(self.left_panel.isVisible())
+            
+            status = "shown" if self.left_panel.isVisible() else "hidden"
+            self.statusBar().showMessage(f"Sidebar {status} (Ctrl+B to toggle)", 2000)
+    
+    def toggle_compact_mode(self, checked=None):
+        """Toggle compact mode to maximize query/results space (Ctrl+Shift+C)"""
+        if checked is None:
+            checked = not getattr(self, '_compact_mode', False)
+        
+        self._compact_mode = checked
+        
+        # Update all tabs to use compact mode
+        for i in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(i)
+            if hasattr(tab, 'set_compact_mode'):
+                tab.set_compact_mode(checked)
+        
+        # Toggle secondary UI elements in main window
+        if hasattr(self, 'query_header'):
+            self.query_header.setVisible(not checked)
+        if hasattr(self, 'tab_drop_area'):
+            self.tab_drop_area.setVisible(not checked)
+        
+        # Update menu action state
+        if hasattr(self, 'compact_mode_action'):
+            self.compact_mode_action.setChecked(checked)
+        
+        status = "enabled" if checked else "disabled"
+        self.statusBar().showMessage(f"Compact mode {status} (Ctrl+Shift+C to toggle)", 2000)
             
     def change_zoom(self, factor):
         """Change the zoom level of the application by adjusting font sizes"""
