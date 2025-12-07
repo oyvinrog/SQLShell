@@ -202,6 +202,32 @@ class SQLShell(QMainWindow):
         self.tables_list.customContextMenuRequested.connect(self.show_tables_context_menu)
         left_layout.addWidget(self.tables_list)
         
+        # Browse button for quick file selection
+        self.browse_button = QPushButton("📂 Browse...")
+        self.browse_button.setToolTip("Open data files (Excel, CSV, Parquet) or databases (SQLite, DuckDB)")
+        self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.browse_button.clicked.connect(self.browse_files)
+        self.browse_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.15);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.25);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
+        left_layout.addWidget(self.browse_button)
+        
         # Add spacer at the bottom
         left_layout.addStretch()
         
@@ -436,12 +462,21 @@ class SQLShell(QMainWindow):
             # Create a default in-memory DuckDB connection if none exists
             connection_info = self.db_manager.create_memory_connection()
             self.db_info_label.setText(connection_info)
+        
+        # Database file extensions
+        db_extensions = {'.db', '.sqlite', '.sqlite3', '.duckdb'}
             
         file_names, _ = QFileDialog.getOpenFileNames(
             self,
-            "Open Data Files",
+            "Open Files",
             "",
-            "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;Text Files (*.txt);;Parquet Files (*.parquet);;All Files (*)"
+            "All Supported Files (*.xlsx *.xls *.csv *.txt *.parquet *.db *.sqlite *.sqlite3 *.duckdb);;"
+            "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;"
+            "Database Files (*.db *.sqlite *.sqlite3 *.duckdb);;"
+            "Excel Files (*.xlsx *.xls);;"
+            "CSV Files (*.csv);;"
+            "Parquet Files (*.parquet);;"
+            "All Files (*)"
         )
         
         for file_name in file_names:
@@ -449,32 +484,65 @@ class SQLShell(QMainWindow):
                 # Add to recent files
                 self.add_recent_file(file_name)
                 
-                # Use the database manager to load the file
-                table_name, df = self.db_manager.load_file(file_name)
-                
-                # Update UI using new method
-                self.tables_list.add_table_item(table_name, os.path.basename(file_name))
-                self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
-                
-                # Show preview of loaded data
-                preview_df = df.head()
-                self.populate_table(preview_df)
-                
-                # Update results title to show preview
-                results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
-                if results_title and results_title.text() == "RESULTS":
-                    results_title.setText(f"PREVIEW: {table_name}")
-                
-                # Update completer with new table and column names
-                self.update_completer()
+                # Check if this is a database file
+                file_ext = os.path.splitext(file_name)[1].lower()
+                if file_ext in db_extensions:
+                    # Handle database file
+                    self._load_database_file(file_name)
+                else:
+                    # Handle data file (Excel, CSV, Parquet, etc.)
+                    self._load_data_file(file_name)
                 
             except Exception as e:
                 error_msg = f'Error loading file {os.path.basename(file_name)}: {str(e)}'
                 self.statusBar().showMessage(error_msg)
                 QMessageBox.critical(self, "Error", error_msg)
-                self.results_table.setRowCount(0)
-                self.results_table.setColumnCount(0)
-                self.row_count_label.setText("")
+    
+    def _load_data_file(self, file_name):
+        """Load a data file (Excel, CSV, Parquet, etc.)"""
+        # Use the database manager to load the file
+        table_name, df = self.db_manager.load_file(file_name)
+        
+        # Update UI using new method
+        self.tables_list.add_table_item(table_name, os.path.basename(file_name))
+        self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
+        
+        # Show preview of loaded data
+        preview_df = df.head()
+        self.populate_table(preview_df)
+        
+        # Update results title to show preview
+        results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
+        if results_title and results_title.text() == "RESULTS":
+            results_title.setText(f"PREVIEW: {table_name}")
+        
+        # Update completer with new table and column names
+        self.update_completer()
+    
+    def _load_database_file(self, file_name):
+        """Load a database file (SQLite, DuckDB, etc.)"""
+        # Clear existing database tables from the list widget (tables that came from a database)
+        for i in range(self.tables_list.topLevelItemCount() - 1, -1, -1):
+            item = self.tables_list.topLevelItem(i)
+            if item and item.text(0).endswith('(database)'):
+                self.tables_list.takeTopLevelItem(i)
+        
+        # Use the database manager to open the database
+        # This attaches the database while preserving loaded files
+        self.db_manager.open_database(file_name, load_all_tables=True)
+        
+        # Update UI with tables from the database
+        for table_name, source in self.db_manager.loaded_tables.items():
+            # Check if this is a database table (source starts with 'database:')
+            if source.startswith('database:'):
+                self.tables_list.add_table_item(table_name, "database")
+        
+        # Update the completer with table and column names
+        self.update_completer()
+        
+        # Update status bar
+        self.statusBar().showMessage(f"Connected to database: {file_name}")
+        self.db_info_label.setText(self.db_manager.get_connection_info())
 
     def remove_selected_table(self):
         current_item = self.tables_list.currentItem()
