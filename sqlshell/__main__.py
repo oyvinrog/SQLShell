@@ -176,7 +176,7 @@ class SQLShell(QMainWindow):
         self.db_info_label = QLabel("No database connected")
         self.db_info_label.setStyleSheet(get_db_info_label_stylesheet())
         left_layout.addWidget(self.db_info_label)
-./        
+        
         # Drag and drop info label
         drag_drop_info = QLabel("💡 Drag and drop files here to load them instantly!\nSupported: Excel, CSV, Parquet, SQLite, and more")
         drag_drop_info.setWordWrap(True)
@@ -1529,6 +1529,14 @@ LIMIT 10
             reload_action = context_menu.addAction("Refresh")
             reload_action.setIcon(QIcon.fromTheme("view-refresh"))
         
+        # Add change source action for file-based tables
+        change_source_action = None
+        if table_name in self.db_manager.loaded_tables:
+            source_path = self.db_manager.loaded_tables[table_name]
+            if source_path not in ['database', 'query_result']:
+                change_source_action = context_menu.addAction("Change Table Source...")
+                change_source_action.setIcon(QIcon.fromTheme("document-open"))
+        
         # Add move to folder submenu
         move_menu = context_menu.addMenu("Move to Folder")
         move_menu.setIcon(QIcon.fromTheme("folder"))
@@ -1582,6 +1590,8 @@ LIMIT 10
             self.execute_query()
         elif action == reload_action:
             self.reload_selected_table(table_name)
+        elif change_source_action and action == change_source_action:
+            self.change_table_source(table_name, item)
         elif action == copy_path_action:
             # Get the full path from the table source
             if table_name in self.db_manager.loaded_tables:
@@ -1800,6 +1810,80 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Error reloading table: {str(e)}")
             self.statusBar().showMessage('Error reloading table')
+
+    def change_table_source(self, table_name, item):
+        """Change the source file for a table (useful when files have been moved)"""
+        try:
+            # Get the current file path
+            if table_name not in self.db_manager.loaded_tables:
+                show_warning_notification("Table source not found")
+                return
+            
+            current_path = self.db_manager.loaded_tables[table_name]
+            
+            # Determine the starting directory for the file dialog
+            if os.path.exists(current_path):
+                start_dir = os.path.dirname(current_path)
+            else:
+                start_dir = ""
+            
+            # Get the file extension to filter by same type
+            current_ext = os.path.splitext(current_path)[1].lower()
+            
+            # Build file filter based on current file type
+            if current_ext in ['.xlsx', '.xls']:
+                file_filter = "Excel Files (*.xlsx *.xls);;All Files (*)"
+            elif current_ext in ['.csv', '.txt']:
+                file_filter = "CSV/Text Files (*.csv *.txt);;All Files (*)"
+            elif current_ext == '.parquet':
+                file_filter = "Parquet Files (*.parquet);;All Files (*)"
+            else:
+                file_filter = "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;All Files (*)"
+            
+            # Open file dialog
+            new_path, _ = QFileDialog.getOpenFileName(
+                self,
+                f"Select new source file for '{table_name}'",
+                start_dir,
+                file_filter
+            )
+            
+            if not new_path:
+                return  # User cancelled
+            
+            # Verify the file exists
+            if not os.path.exists(new_path):
+                show_warning_notification("Selected file does not exist")
+                return
+            
+            # Update the source path in the database manager
+            self.db_manager.loaded_tables[table_name] = new_path
+            
+            # Update the item text in the tree widget
+            new_source = os.path.basename(new_path)
+            item.setText(0, f"{table_name} ({new_source})")
+            
+            # Mark as needing reload so user knows data needs to be refreshed
+            self.tables_list.mark_table_needs_reload(table_name)
+            
+            # Show success message
+            self.statusBar().showMessage(f'Changed source for "{table_name}" to {new_source}. Reload to update data.')
+            
+            # Ask if they want to reload now
+            reply = QMessageBox.question(
+                self,
+                "Reload Table?",
+                f"Source file for '{table_name}' has been changed.\n\nWould you like to reload the table now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.reload_selected_table(table_name)
+                
+        except Exception as e:
+            show_error_notification(f"Error changing table source: {str(e)}")
+            self.statusBar().showMessage('Error changing table source')
 
     def new_project(self, skip_confirmation=False):
         """Create a new project by clearing current state"""
