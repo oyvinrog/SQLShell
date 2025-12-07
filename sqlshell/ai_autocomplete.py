@@ -240,6 +240,8 @@ class AIAutocompleteManager(QObject):
         
         text_before_cursor, current_word, cursor_position, callback = self._last_context
         
+        print(f"[AI] Executing request, context length: {len(text_before_cursor)}")
+        
         # Run API request in background thread
         thread = threading.Thread(
             target=self._fetch_suggestion,
@@ -293,6 +295,8 @@ class AIAutocompleteManager(QObject):
                 # Cache the result
                 cache_key = f"{text_before_cursor}|{current_word}"
                 self._add_to_cache(cache_key, suggestion)
+                
+                print(f"[AI] Got suggestion: '{suggestion[:50]}...' at position {cursor_position}")
                 
                 # Emit signal (Qt will handle thread safety)
                 self.suggestion_ready.emit(suggestion, cursor_position)
