@@ -176,18 +176,7 @@ class SQLShell(QMainWindow):
         self.db_info_label = QLabel("No database connected")
         self.db_info_label.setStyleSheet(get_db_info_label_stylesheet())
         left_layout.addWidget(self.db_info_label)
-        
-        # Database action buttons
-        db_buttons_layout = QHBoxLayout()
-        db_buttons_layout.setSpacing(8)
-        
-        self.load_btn = QPushButton('Load')
-        self.load_btn.setIcon(QIcon.fromTheme("document-open"))
-        self.load_btn.clicked.connect(self.show_load_dialog)
-        
-        db_buttons_layout.addWidget(self.load_btn)
-        left_layout.addLayout(db_buttons_layout)
-        
+./        
         # Drag and drop info label
         drag_drop_info = QLabel("💡 Drag and drop files here to load them instantly!\nSupported: Excel, CSV, Parquet, SQLite, and more")
         drag_drop_info.setWordWrap(True)

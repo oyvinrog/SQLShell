@@ -53,6 +53,13 @@ def create_file_menu(main_window):
     
     file_menu.addSeparator()
     
+    # Load data action (databases, CSV, Excel, Parquet, etc.)
+    load_data_action = file_menu.addAction('Load Data...')
+    load_data_action.setShortcut('Ctrl+L')
+    load_data_action.triggered.connect(main_window.show_load_dialog)
+    
+    file_menu.addSeparator()
+    
     exit_action = file_menu.addAction('Exit')
     exit_action.setShortcut('Ctrl+Q')
     exit_action.triggered.connect(main_window.close)
