@@ -92,6 +92,10 @@ class SQLShell(QMainWindow):
         # Load most recent project if enabled and available
         if self.auto_load_recent_project:
             self.load_most_recent_project()
+        
+        # Ensure AI autocomplete is properly set up for all editors
+        # This must happen after any project loading to register the correct editors
+        QTimer.singleShot(100, self.update_completer)
 
     def apply_stylesheet(self):
         """Apply custom stylesheet to the application"""

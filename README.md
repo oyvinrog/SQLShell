@@ -8,6 +8,7 @@
 
 *Query CSV, Parquet, Excel files with SQL • DuckDB powered • No database setup required*
 
+[![GitHub Release](https://img.shields.io/github/v/release/oyvinrog/SQLShell)](https://github.com/oyvinrog/SQLShell/releases/latest)
 [![PyPI version](https://badge.fury.io/py/sqlshell.svg)](https://badge.fury.io/py/sqlshell)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,7 +16,7 @@
 
 <img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png" alt="SQLShell Interface" width="80%" height="auto">
 
-[🚀 Install Now](#-quick-install) • [📖 Examples](https://github.com/oyvinrog/SQLShell/wiki/Guides) • [🤝 Contribute](#-contributing)
+[📥 Download](https://github.com/oyvinrog/SQLShell/releases/latest) • [🚀 Install](#-quick-install) • [📖 Examples](https://github.com/oyvinrog/SQLShell/wiki/Guides) • [🤝 Contribute](#-contributing)
 
 
 
@@ -77,7 +78,22 @@ Context-aware suggestions that understand your loaded tables and column names.
 
 ## 🚀 Quick Install
 
-Get up and running in 30 seconds:
+### 📥 Download (Recommended)
+
+Pre-built executables — **no Python installation required**:
+
+| Platform | Download | Install |
+|----------|----------|---------|
+| 🪟 **Windows** | [SQLShell Installer (.exe)](https://github.com/oyvinrog/SQLShell/releases/latest) | Run the installer |
+| 🐧 **Linux (Debian/Ubuntu)** | [SQLShell (.deb)](https://github.com/oyvinrog/SQLShell/releases/latest) | `sudo dpkg -i sqlshell_*.deb` |
+
+👉 [**View all releases**](https://github.com/oyvinrog/SQLShell/releases)
+
+---
+
+### 🐍 Install via pip
+
+Alternatively, install with pip if you have Python:
 
 ```bash
 pip install sqlshell
@@ -378,13 +394,15 @@ MIT License - feel free to use SQLShell in your projects!
 
 **Ready to analyze your data files with SQL?**
 
+[📥 **Download for Windows/Linux**](https://github.com/oyvinrog/SQLShell/releases/latest) or install via pip:
+
 ```bash
 pip install sqlshell && sqls
 ```
 
 ⭐ **Star us on GitHub** if SQLShell helps with your data analysis!
 
-[🚀 Get Started Now](#-quick-install) • [📖 Documentation](#-getting-started) • [🐛 Report Issues](https://github.com/oyvinrog/SQLShell/issues)
+[📥 Download](https://github.com/oyvinrog/SQLShell/releases/latest) • [🚀 Get Started](#-quick-install) • [📖 Documentation](#-getting-started) • [🐛 Report Issues](https://github.com/oyvinrog/SQLShell/issues)
 
 *A simple tool for SQL-based file analysis*
 

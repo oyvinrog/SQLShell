@@ -14,9 +14,13 @@ xgboost
 scikit-learn
 seaborn>=0.13.0  # For enhanced statistical visualizations in column profiler
 nltk>=3.8.1  # For text processing and stopwords
+openai>=1.0.0  # For AI-powered SQL autocomplete (optional)
 
 # Testing dependencies
 pytest>=7.0.0  # Testing framework
 pytest-cov>=4.0.0  # Coverage reporting
 pytest-xdist>=3.0.0  # Parallel test execution
 pytest-timeout>=2.0.0  # Test timeout support
+psutil>=5.9.0  # For memory profiling in tests
+openai>=1.0.0  # For AI-powered SQL autocomplete (optional)
+

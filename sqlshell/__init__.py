@@ -2,7 +2,33 @@
 SQLShell - A powerful SQL shell with GUI interface for data analysis
 """
 
-__version__ = "0.3.3"
+import sys
+
+def _get_version() -> str:
+    """Get version from pyproject.toml (single source of truth)."""
+    # First, try to read from pyproject.toml (for development mode)
+    try:
+        from pathlib import Path
+        import re
+        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        if pyproject.exists():
+            content = pyproject.read_text()
+            match = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+            if match:
+                return match.group(1)
+    except Exception:
+        pass
+    
+    # Fallback: read from installed package metadata
+    try:
+        from importlib.metadata import version
+        return version("sqlshell")
+    except Exception:
+        pass
+    
+    return "0.0.0"  # Last resort fallback
+
+__version__ = _get_version()
 __author__ = "SQLShell Team"
 
 from sqlshell.__main__ import main, SQLShell

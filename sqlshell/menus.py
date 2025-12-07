@@ -151,7 +151,23 @@ def create_preferences_menu(main_window):
     auto_load_action.setChecked(main_window.auto_load_recent_project)
     auto_load_action.triggered.connect(lambda checked: toggle_auto_load(main_window, checked))
     
+    preferences_menu.addSeparator()
+    
+    # AI Autocomplete settings
+    ai_settings_action = preferences_menu.addAction('🤖 AI Autocomplete Settings...')
+    ai_settings_action.triggered.connect(lambda: show_ai_settings(main_window))
+    
     return preferences_menu
+
+
+def show_ai_settings(main_window):
+    """Show the AI autocomplete settings dialog.
+    
+    Args:
+        main_window: The SQLShell main window instance
+    """
+    from sqlshell.ai_settings_dialog import show_ai_settings_dialog
+    show_ai_settings_dialog(main_window)
 
 
 def toggle_auto_load(main_window, checked):

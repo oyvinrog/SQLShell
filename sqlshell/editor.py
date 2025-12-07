@@ -516,6 +516,8 @@ class SQLEditor(QPlainTextEdit):
         """Show ghost text completion instead of popup"""
         import re
         
+        print(f"[EDITOR DEBUG] complete() called")
+        
         # Get the text under cursor
         prefix = self.text_under_cursor()
         current_word = self.get_word_under_cursor()
