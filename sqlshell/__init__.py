@@ -6,10 +6,25 @@ import sys
 
 def _get_version() -> str:
     """Get version from pyproject.toml (single source of truth)."""
-    # First, try to read from pyproject.toml (for development mode)
+    from pathlib import Path
+    import re
+    
+    # For PyInstaller frozen executables, check bundled pyproject.toml
+    if getattr(sys, 'frozen', False):
+        try:
+            # PyInstaller stores data files in sys._MEIPASS
+            bundle_dir = Path(sys._MEIPASS)
+            pyproject = bundle_dir / "pyproject.toml"
+            if pyproject.exists():
+                content = pyproject.read_text()
+                match = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+                if match:
+                    return match.group(1)
+        except Exception:
+            pass
+    
+    # Development mode: read from pyproject.toml relative to package
     try:
-        from pathlib import Path
-        import re
         pyproject = Path(__file__).parent.parent / "pyproject.toml"
         if pyproject.exists():
             content = pyproject.read_text()
@@ -19,7 +34,7 @@ def _get_version() -> str:
     except Exception:
         pass
     
-    # Fallback: read from installed package metadata
+    # Fallback: read from installed package metadata (pip install)
     try:
         from importlib.metadata import version
         return version("sqlshell")
