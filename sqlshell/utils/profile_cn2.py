@@ -10,6 +10,7 @@ The algorithm supports:
 - Supervised discretization for numeric features
 - Multiple quality measures (likelihood_ratio, entropy)
 - Laplace-smoothed probability estimates
+- Automatic discretization of numeric target variables using academic methods
 
 Example usage:
     from sqlshell.utils.profile_cn2 import CN2Classifier, visualize_cn2_rules
@@ -26,6 +27,605 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional, Any, Union
 from collections import Counter
 import warnings
+
+
+# =============================================================================
+# Numeric Target Discretization
+# =============================================================================
+
+class NumericTargetDiscretizer:
+    """
+    Discretizes continuous numeric target variables into meaningful categorical bins.
+    
+    This class implements several academically-grounded binning methods for converting
+    continuous numeric variables into discrete categories suitable for classification.
+    
+    Supported Methods:
+    -----------------
+    1. **jenks** (Fisher-Jenks Natural Breaks):
+       - Minimizes within-class variance while maximizing between-class variance
+       - Based on Fisher (1958) and Jenks (1967)
+       - Best for data with natural clusters or multimodal distributions
+       - Reference: Jenks, G.F. (1967). "The Data Model Concept in Statistical Mapping"
+       
+    2. **quantile** (Equal-Frequency Binning):
+       - Creates bins with equal number of observations
+       - Robust to outliers and skewed distributions
+       - Based on standard statistical quantile theory
+       
+    3. **freedman_diaconis** (Freedman-Diaconis Rule):
+       - Bin width = 2 * IQR / n^(1/3)
+       - Optimal for normally distributed data
+       - Reference: Freedman, D. & Diaconis, P. (1981). "On the histogram as a 
+         density estimator: L2 theory"
+       
+    4. **sturges** (Sturges' Rule):
+       - Number of bins = 1 + log2(n)
+       - Classic rule, best for symmetric distributions
+       - Reference: Sturges, H.A. (1926). "The Choice of a Class Interval"
+       
+    5. **equal_width** (Equal-Width Binning):
+       - Creates bins of equal range
+       - Simple but may create empty bins with skewed data
+       
+    6. **auto** (Automatic Selection):
+       - Automatically selects the best method based on data characteristics
+       - Uses skewness and distribution analysis to choose optimal method
+    
+    Parameters:
+    ----------
+    method : str, default='auto'
+        The binning method to use. One of: 'auto', 'jenks', 'quantile', 
+        'freedman_diaconis', 'sturges', 'equal_width'
+    
+    n_bins : int, optional
+        Number of bins to create. If None, determined automatically based on method.
+        For 'freedman_diaconis' and 'sturges', this is computed from the data.
+    
+    min_bin_size : int, default=5
+        Minimum number of samples per bin. Bins smaller than this are merged.
+    
+    max_bins : int, default=10
+        Maximum number of bins to create (for automatic methods).
+    
+    Attributes:
+    ----------
+    bin_edges_ : np.ndarray
+        The computed bin edges after fitting.
+    
+    bin_labels_ : List[str]
+        Human-readable labels for each bin (e.g., "1-1000", "1001-5000").
+    
+    method_used_ : str
+        The actual method used (relevant when method='auto').
+    
+    n_bins_ : int
+        The number of bins created.
+    
+    Example:
+    -------
+    >>> discretizer = NumericTargetDiscretizer(method='jenks', n_bins=5)
+    >>> df['income_category'] = discretizer.fit_transform(df['income'])
+    >>> print(discretizer.bin_labels_)
+    ['0-25000', '25001-50000', '50001-100000', '100001-250000', '250001+']
+    """
+    
+    def __init__(
+        self,
+        method: str = 'auto',
+        n_bins: Optional[int] = None,
+        min_bin_size: int = 5,
+        max_bins: int = 10
+    ):
+        valid_methods = {'auto', 'jenks', 'quantile', 'freedman_diaconis', 
+                        'sturges', 'equal_width'}
+        if method not in valid_methods:
+            raise ValueError(f"method must be one of {valid_methods}, got '{method}'")
+        
+        self.method = method
+        self.n_bins = n_bins
+        self.min_bin_size = min_bin_size
+        self.max_bins = max_bins
+        
+        # Set after fitting
+        self.bin_edges_: np.ndarray = None
+        self.bin_labels_: List[str] = []
+        self.method_used_: str = None
+        self.n_bins_: int = 0
+        self._is_fitted: bool = False
+    
+    def fit(self, data: Union[pd.Series, np.ndarray]) -> "NumericTargetDiscretizer":
+        """
+        Compute bin edges from the data.
+        
+        Parameters:
+        ----------
+        data : array-like
+            The numeric data to fit.
+        
+        Returns:
+        -------
+        self : NumericTargetDiscretizer
+        """
+        # Convert to numpy array and remove NaN
+        if isinstance(data, pd.Series):
+            values = data.dropna().values
+        else:
+            values = np.asarray(data)
+            values = values[~np.isnan(values)]
+        
+        if len(values) == 0:
+            raise ValueError("Cannot fit on empty data")
+        
+        n_unique = len(np.unique(values))
+        if n_unique <= 1:
+            raise ValueError("Need at least 2 unique values to discretize")
+        
+        # Select method if auto
+        if self.method == 'auto':
+            self.method_used_ = self._select_method(values)
+        else:
+            self.method_used_ = self.method
+        
+        # Compute number of bins if not specified
+        if self.n_bins is not None:
+            n_bins = min(self.n_bins, n_unique, self.max_bins)
+        else:
+            n_bins = self._compute_n_bins(values, self.method_used_)
+            n_bins = min(n_bins, n_unique, self.max_bins)
+        
+        # Ensure we have at least 2 bins
+        n_bins = max(2, n_bins)
+        
+        # Compute bin edges using selected method
+        if self.method_used_ == 'jenks':
+            self.bin_edges_ = self._jenks_breaks(values, n_bins)
+        elif self.method_used_ == 'quantile':
+            self.bin_edges_ = self._quantile_breaks(values, n_bins)
+        elif self.method_used_ == 'freedman_diaconis':
+            self.bin_edges_ = self._freedman_diaconis_breaks(values, n_bins)
+        elif self.method_used_ == 'sturges':
+            self.bin_edges_ = self._equal_width_breaks(values, n_bins)
+        elif self.method_used_ == 'equal_width':
+            self.bin_edges_ = self._equal_width_breaks(values, n_bins)
+        
+        # Merge small bins
+        self.bin_edges_ = self._merge_small_bins(values, self.bin_edges_)
+        
+        # Generate human-readable labels
+        self.bin_labels_ = self._generate_labels(self.bin_edges_, values)
+        self.n_bins_ = len(self.bin_labels_)
+        self._is_fitted = True
+        
+        return self
+    
+    def transform(self, data: Union[pd.Series, np.ndarray]) -> np.ndarray:
+        """
+        Transform numeric values to categorical bin labels.
+        
+        Parameters:
+        ----------
+        data : array-like
+            The numeric data to transform.
+        
+        Returns:
+        -------
+        labels : np.ndarray
+            Array of string labels for each value.
+        """
+        if not self._is_fitted:
+            raise RuntimeError("NumericTargetDiscretizer not fitted. Call fit() first.")
+        
+        if isinstance(data, pd.Series):
+            values = data.values
+        else:
+            values = np.asarray(data)
+        
+        # Digitize values into bins
+        # np.digitize returns indices 1 to n_bins, we want 0 to n_bins-1
+        bin_indices = np.digitize(values, self.bin_edges_[1:-1])
+        
+        # Map indices to labels, handle NaN
+        labels = np.empty(len(values), dtype=object)
+        for i, (val, idx) in enumerate(zip(values, bin_indices)):
+            if np.isnan(val) if isinstance(val, float) else pd.isna(val):
+                labels[i] = "Missing"
+            else:
+                labels[i] = self.bin_labels_[min(idx, len(self.bin_labels_) - 1)]
+        
+        return labels
+    
+    def fit_transform(self, data: Union[pd.Series, np.ndarray]) -> np.ndarray:
+        """Fit and transform in one step."""
+        return self.fit(data).transform(data)
+    
+    def _select_method(self, values: np.ndarray) -> str:
+        """
+        Automatically select the best binning method based on data characteristics.
+        
+        Selection criteria (based on statistical theory):
+        - Jenks: For multimodal or clustered distributions
+        - Quantile: For highly skewed distributions (|skewness| > 1)
+        - Freedman-Diaconis: For moderate distributions
+        """
+        from scipy import stats
+        
+        n = len(values)
+        
+        # Calculate skewness
+        skewness = stats.skew(values)
+        
+        # Calculate kurtosis (excess kurtosis)
+        kurtosis = stats.kurtosis(values)
+        
+        # Check for multimodality using dip test approximation
+        # Simple heuristic: check if histogram has multiple peaks
+        try:
+            hist, _ = np.histogram(values, bins='auto')
+            # Count local maxima
+            peaks = 0
+            for i in range(1, len(hist) - 1):
+                if hist[i] > hist[i-1] and hist[i] > hist[i+1]:
+                    peaks += 1
+            is_multimodal = peaks >= 2
+        except Exception:
+            is_multimodal = False
+        
+        # Selection logic
+        if is_multimodal:
+            # Jenks is best for multimodal distributions
+            return 'jenks'
+        elif abs(skewness) > 1.5:
+            # Highly skewed: quantile binning handles outliers better
+            return 'quantile'
+        elif abs(skewness) > 0.5:
+            # Moderately skewed: Freedman-Diaconis is robust
+            return 'freedman_diaconis'
+        else:
+            # Symmetric distribution: quantile works well
+            return 'quantile'
+    
+    def _compute_n_bins(self, values: np.ndarray, method: str) -> int:
+        """Compute optimal number of bins based on method."""
+        n = len(values)
+        
+        if method == 'sturges':
+            # Sturges' rule: k = 1 + log2(n)
+            return int(1 + np.log2(n))
+        
+        elif method == 'freedman_diaconis':
+            # Freedman-Diaconis: bin width = 2 * IQR / n^(1/3)
+            q75, q25 = np.percentile(values, [75, 25])
+            iqr = q75 - q25
+            if iqr == 0:
+                return 5  # Default if no spread
+            bin_width = 2 * iqr / (n ** (1/3))
+            data_range = values.max() - values.min()
+            return max(1, int(np.ceil(data_range / bin_width)))
+        
+        elif method in ('jenks', 'quantile', 'equal_width'):
+            # Use square root rule as default: k = sqrt(n)
+            k = int(np.sqrt(n))
+            return min(max(3, k), self.max_bins)
+        
+        return 5  # Default
+    
+    def _jenks_breaks(self, values: np.ndarray, n_bins: int) -> np.ndarray:
+        """
+        Compute Jenks natural breaks (Fisher-Jenks algorithm).
+        
+        This minimizes the sum of squared deviations within each class.
+        Based on: Fisher, W.D. (1958). "On Grouping for Maximum Homogeneity"
+        """
+        # Sort values
+        sorted_vals = np.sort(values)
+        n = len(sorted_vals)
+        
+        # Limit to n_bins - 1 breaks for n_bins bins
+        n_classes = min(n_bins, n)
+        
+        if n_classes <= 1:
+            return np.array([sorted_vals[0], sorted_vals[-1]])
+        
+        # Initialize matrices for dynamic programming
+        # mat1[i][j] = minimum sum of squared deviations for first i values in j classes
+        # mat2[i][j] = index of last break for optimal solution
+        
+        # For efficiency, we use a simplified version
+        # that finds breaks by minimizing within-class variance
+        
+        # Use k-means style approach for large datasets
+        if n > 500:
+            return self._jenks_kmeans_approx(sorted_vals, n_classes)
+        
+        # Full Jenks algorithm for smaller datasets
+        mat1 = np.zeros((n + 1, n_classes + 1))
+        mat2 = np.zeros((n + 1, n_classes + 1), dtype=int)
+        
+        # Initialize
+        mat1[:, 0] = np.inf
+        mat1[0, :] = np.inf
+        mat1[0, 0] = 0
+        
+        # Compute variance for all intervals [i, j]
+        variance_combinations = {}
+        for i in range(n):
+            sums = 0.0
+            sum_squares = 0.0
+            for j in range(i, n):
+                sums += sorted_vals[j]
+                sum_squares += sorted_vals[j] ** 2
+                count = j - i + 1
+                mean = sums / count
+                variance = sum_squares / count - mean ** 2
+                variance_combinations[(i, j)] = variance * count
+        
+        # Fill DP table
+        for i in range(1, n + 1):
+            for j in range(1, min(i, n_classes) + 1):
+                if j == 1:
+                    mat1[i, j] = variance_combinations[(0, i - 1)]
+                    mat2[i, j] = 0
+                else:
+                    min_cost = np.inf
+                    min_idx = 0
+                    for k in range(j - 1, i):
+                        cost = mat1[k, j - 1] + variance_combinations[(k, i - 1)]
+                        if cost < min_cost:
+                            min_cost = cost
+                            min_idx = k
+                    mat1[i, j] = min_cost
+                    mat2[i, j] = min_idx
+        
+        # Backtrack to find breaks
+        breaks = [n]
+        k = n_classes
+        while k > 1:
+            breaks.append(mat2[breaks[-1], k])
+            k -= 1
+        breaks.reverse()
+        
+        # Convert to actual values
+        bin_edges = [sorted_vals[0]]
+        for b in breaks[1:]:
+            if b > 0 and b < n:
+                bin_edges.append(sorted_vals[b - 1])
+        bin_edges.append(sorted_vals[-1])
+        
+        return np.unique(bin_edges)
+    
+    def _jenks_kmeans_approx(self, sorted_vals: np.ndarray, n_bins: int) -> np.ndarray:
+        """
+        Approximates Jenks using 1D k-means clustering.
+        More efficient for large datasets.
+        """
+        try:
+            from scipy.cluster.vq import kmeans
+            
+            # Run k-means on 1D data
+            centroids, _ = kmeans(sorted_vals.astype(float), n_bins)
+            centroids = np.sort(centroids)
+            
+            # Find breakpoints between centroids
+            breaks = [sorted_vals[0]]
+            for i in range(len(centroids) - 1):
+                midpoint = (centroids[i] + centroids[i + 1]) / 2
+                breaks.append(midpoint)
+            breaks.append(sorted_vals[-1])
+            
+            return np.array(breaks)
+        except Exception:
+            # Fallback to quantile
+            return self._quantile_breaks(sorted_vals, n_bins)
+    
+    def _quantile_breaks(self, values: np.ndarray, n_bins: int) -> np.ndarray:
+        """Compute quantile-based breaks (equal frequency binning)."""
+        quantiles = np.linspace(0, 100, n_bins + 1)
+        breaks = np.percentile(values, quantiles)
+        return np.unique(breaks)
+    
+    def _equal_width_breaks(self, values: np.ndarray, n_bins: int) -> np.ndarray:
+        """Compute equal-width breaks."""
+        return np.linspace(values.min(), values.max(), n_bins + 1)
+    
+    def _freedman_diaconis_breaks(self, values: np.ndarray, n_bins: int) -> np.ndarray:
+        """Compute breaks using Freedman-Diaconis rule for bin width."""
+        q75, q25 = np.percentile(values, [75, 25])
+        iqr = q75 - q25
+        
+        if iqr == 0:
+            # No spread, fall back to equal width
+            return self._equal_width_breaks(values, n_bins)
+        
+        bin_width = 2 * iqr / (len(values) ** (1/3))
+        min_val = values.min()
+        max_val = values.max()
+        
+        # Generate breaks
+        breaks = [min_val]
+        current = min_val + bin_width
+        while current < max_val:
+            breaks.append(current)
+            current += bin_width
+        breaks.append(max_val)
+        
+        # Limit to max_bins
+        if len(breaks) - 1 > n_bins:
+            return self._equal_width_breaks(values, n_bins)
+        
+        return np.array(breaks)
+    
+    def _merge_small_bins(self, values: np.ndarray, breaks: np.ndarray) -> np.ndarray:
+        """Merge bins that have fewer than min_bin_size samples."""
+        if len(breaks) <= 2:
+            return breaks
+        
+        # Count samples per bin
+        bin_indices = np.digitize(values, breaks[1:-1])
+        counts = np.bincount(bin_indices, minlength=len(breaks) - 1)
+        
+        # Iteratively merge small bins
+        new_breaks = list(breaks)
+        merged = True
+        while merged and len(new_breaks) > 2:
+            merged = False
+            bin_indices = np.digitize(values, new_breaks[1:-1])
+            counts = np.bincount(bin_indices, minlength=len(new_breaks) - 1)
+            
+            for i in range(len(counts)):
+                if counts[i] < self.min_bin_size and len(new_breaks) > 2:
+                    # Merge with neighbor that has fewer samples
+                    if i == 0:
+                        # Merge with next bin (remove break at index 1)
+                        if len(new_breaks) > 2:
+                            new_breaks.pop(1)
+                            merged = True
+                            break
+                    elif i == len(counts) - 1:
+                        # Merge with previous bin (remove second to last break)
+                        if len(new_breaks) > 2:
+                            new_breaks.pop(-2)
+                            merged = True
+                            break
+                    else:
+                        # Merge with smaller neighbor
+                        if counts[i - 1] <= counts[i + 1]:
+                            new_breaks.pop(i)
+                        else:
+                            new_breaks.pop(i + 1)
+                        merged = True
+                        break
+        
+        return np.array(new_breaks)
+    
+    def _generate_labels(self, breaks: np.ndarray, values: np.ndarray) -> List[str]:
+        """Generate human-readable bin labels."""
+        labels = []
+        
+        # Determine formatting based on value range
+        min_val, max_val = values.min(), values.max()
+        val_range = max_val - min_val
+        
+        # Determine number of decimal places
+        if val_range > 1000:
+            fmt = lambda x: f"{int(round(x)):,}"
+        elif val_range > 10:
+            fmt = lambda x: f"{x:.1f}"
+        elif val_range > 1:
+            fmt = lambda x: f"{x:.2f}"
+        else:
+            fmt = lambda x: f"{x:.3f}"
+        
+        for i in range(len(breaks) - 1):
+            low = breaks[i]
+            high = breaks[i + 1]
+            
+            if i == 0:
+                # First bin: "≤ X"
+                labels.append(f"≤ {fmt(high)}")
+            elif i == len(breaks) - 2:
+                # Last bin: "> X"
+                labels.append(f"> {fmt(low)}")
+            else:
+                # Middle bins: "X - Y"
+                labels.append(f"{fmt(low)} - {fmt(high)}")
+        
+        # If we only have 2 breaks, create clearer labels
+        if len(labels) == 1:
+            mid = (breaks[0] + breaks[1]) / 2
+            labels = [f"≤ {fmt(mid)}", f"> {fmt(mid)}"]
+            self.bin_edges_ = np.array([breaks[0], mid, breaks[1]])
+        
+        return labels
+    
+    def get_bin_summary(self, data: Union[pd.Series, np.ndarray]) -> pd.DataFrame:
+        """
+        Get a summary of the discretization.
+        
+        Parameters:
+        ----------
+        data : array-like
+            The original numeric data.
+        
+        Returns:
+        -------
+        summary : pd.DataFrame
+            DataFrame with bin ranges, counts, and percentages.
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Not fitted. Call fit() first.")
+        
+        labels = self.transform(data)
+        counts = Counter(labels)
+        
+        records = []
+        for label in self.bin_labels_:
+            count = counts.get(label, 0)
+            pct = count / len(labels) * 100 if len(labels) > 0 else 0
+            records.append({
+                'bin': label,
+                'count': count,
+                'percentage': f"{pct:.1f}%"
+            })
+        
+        return pd.DataFrame(records)
+
+
+def discretize_numeric_target(
+    df: pd.DataFrame, 
+    target_column: str,
+    method: str = 'auto',
+    n_bins: Optional[int] = None,
+    inplace: bool = False
+) -> Tuple[pd.DataFrame, NumericTargetDiscretizer]:
+    """
+    Discretize a numeric target column for use with CN2 classification.
+    
+    This is a convenience function that creates a new categorical column
+    from a numeric column using intelligent binning methods.
+    
+    Parameters:
+    ----------
+    df : pd.DataFrame
+        The dataframe containing the target column.
+    
+    target_column : str
+        Name of the numeric column to discretize.
+    
+    method : str, default='auto'
+        Binning method. One of: 'auto', 'jenks', 'quantile', 
+        'freedman_diaconis', 'sturges', 'equal_width'
+    
+    n_bins : int, optional
+        Number of bins. If None, determined automatically.
+    
+    inplace : bool, default=False
+        If True, modify the dataframe in place. Otherwise, return a copy.
+    
+    Returns:
+    -------
+    df : pd.DataFrame
+        DataFrame with the target column replaced by discretized values.
+    
+    discretizer : NumericTargetDiscretizer
+        The fitted discretizer (useful for inspecting bin edges).
+    
+    Example:
+    -------
+    >>> df_discrete, disc = discretize_numeric_target(df, 'income', method='jenks')
+    >>> print(disc.bin_labels_)
+    ['≤ 25000', '25001 - 50000', '50001 - 100000', '> 100000']
+    """
+    if not inplace:
+        df = df.copy()
+    
+    if target_column not in df.columns:
+        raise ValueError(f"Column '{target_column}' not found in DataFrame")
+    
+    discretizer = NumericTargetDiscretizer(method=method, n_bins=n_bins)
+    df[target_column] = discretizer.fit_transform(df[target_column])
+    
+    return df, discretizer
 
 
 # =============================================================================

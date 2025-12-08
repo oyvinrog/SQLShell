@@ -4191,7 +4191,31 @@ LIMIT 10
             
             # Check if target column has reasonable number of unique values
             n_unique = df[target_column].dropna().nunique()
-            if n_unique > 50:
+            
+            # Check if target is numeric with many unique values - auto-discretize
+            discretizer = None
+            is_numeric = pd.api.types.is_numeric_dtype(df[target_column])
+            
+            if is_numeric and n_unique > 15:
+                # Auto-discretize numeric targets with many distinct values
+                # Uses academically-grounded binning methods
+                from sqlshell.utils.profile_cn2 import discretize_numeric_target
+                
+                self.statusBar().showMessage(
+                    f'Discretizing numeric column "{target_column}" ({n_unique} unique values)...'
+                )
+                
+                df, discretizer = discretize_numeric_target(
+                    df, 
+                    target_column, 
+                    method='auto',  # Auto-selects best method based on distribution
+                    n_bins=None     # Auto-compute optimal number of bins
+                )
+                
+                # Update unique count after discretization
+                n_unique = df[target_column].dropna().nunique()
+            elif n_unique > 50:
+                # Non-numeric column with too many values
                 show_warning_notification(
                     f"Column '{target_column}' has {n_unique} unique values. "
                     "CN2 works best with categorical targets (fewer distinct values)."
@@ -4210,6 +4234,14 @@ LIMIT 10
             
             # Create and show the CN2 rules visualization
             vis = visualize_cn2_rules(df, target_column, beam_width=5, min_covered_examples=5)
+            
+            # If we discretized, add info about the binning to the visualization
+            if discretizer is not None:
+                vis.setWindowTitle(
+                    f"CN2 Rule Induction - {target_column} (Discretized: {discretizer.method_used_})"
+                )
+                # Store discretizer info for reference
+                vis._discretizer = discretizer
             
             # Store reference to prevent garbage collection
             self._current_cn2_vis = vis

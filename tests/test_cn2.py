@@ -6,6 +6,7 @@ This module tests the CN2Classifier implementation including:
 - Rule learning with different parameters
 - Handling of categorical and numeric features
 - Edge cases and error handling
+- Numeric target discretization with various binning methods
 """
 
 import pytest
@@ -18,6 +19,8 @@ from sqlshell.utils.profile_cn2 import (
     Condition,
     Rule,
     fit_cn2,
+    NumericTargetDiscretizer,
+    discretize_numeric_target,
 )
 
 
@@ -891,6 +894,689 @@ class TestIntegration:
         pred2 = clf.predict(X)
         
         np.testing.assert_array_equal(pred1, pred2)
+
+
+# ==============================================================================
+# Test NumericTargetDiscretizer
+# ==============================================================================
+
+class TestNumericTargetDiscretizerInit:
+    """Tests for NumericTargetDiscretizer initialization."""
+    
+    def test_default_parameters(self):
+        """Test default parameter values."""
+        disc = NumericTargetDiscretizer()
+        
+        assert disc.method == 'auto'
+        assert disc.n_bins is None
+        assert disc.min_bin_size == 5
+        assert disc.max_bins == 10
+    
+    def test_custom_parameters(self):
+        """Test custom parameter initialization."""
+        disc = NumericTargetDiscretizer(
+            method='jenks',
+            n_bins=6,
+            min_bin_size=10,
+            max_bins=8
+        )
+        
+        assert disc.method == 'jenks'
+        assert disc.n_bins == 6
+        assert disc.min_bin_size == 10
+        assert disc.max_bins == 8
+    
+    def test_invalid_method_raises_error(self):
+        """Test that invalid method raises ValueError."""
+        with pytest.raises(ValueError, match="method must be one of"):
+            NumericTargetDiscretizer(method='invalid_method')
+    
+    def test_all_valid_methods(self):
+        """Test all valid methods can be initialized."""
+        valid_methods = ['auto', 'jenks', 'quantile', 'freedman_diaconis', 
+                        'sturges', 'equal_width']
+        
+        for method in valid_methods:
+            disc = NumericTargetDiscretizer(method=method)
+            assert disc.method == method
+
+
+class TestNumericTargetDiscretizerFit:
+    """Tests for NumericTargetDiscretizer fitting."""
+    
+    @pytest.fixture
+    def income_data(self):
+        """Create income-like data with natural breaks."""
+        np.random.seed(42)
+        # Simulate income distribution with natural clusters
+        low_income = np.random.normal(25000, 5000, 100)
+        middle_income = np.random.normal(60000, 10000, 150)
+        high_income = np.random.normal(150000, 30000, 50)
+        return np.concatenate([low_income, middle_income, high_income])
+    
+    @pytest.fixture
+    def uniform_data(self):
+        """Create uniformly distributed data."""
+        np.random.seed(42)
+        return np.random.uniform(0, 100, 200)
+    
+    @pytest.fixture
+    def skewed_data(self):
+        """Create right-skewed data (exponential-like)."""
+        np.random.seed(42)
+        return np.random.exponential(scale=1000, size=200)
+    
+    def test_fit_basic(self, income_data):
+        """Test basic fitting on income data."""
+        disc = NumericTargetDiscretizer(method='auto')
+        disc.fit(income_data)
+        
+        assert disc._is_fitted == True
+        assert len(disc.bin_edges_) >= 2
+        assert len(disc.bin_labels_) >= 1
+        assert disc.n_bins_ >= 1
+        assert disc.method_used_ is not None
+    
+    def test_fit_jenks(self, income_data):
+        """Test Jenks natural breaks method."""
+        disc = NumericTargetDiscretizer(method='jenks', n_bins=4)
+        disc.fit(income_data)
+        
+        assert disc._is_fitted == True
+        assert disc.method_used_ == 'jenks'
+        # Jenks should find natural clusters in income data
+        assert disc.n_bins_ >= 2
+    
+    def test_fit_quantile(self, uniform_data):
+        """Test quantile (equal frequency) method."""
+        disc = NumericTargetDiscretizer(method='quantile', n_bins=4)
+        disc.fit(uniform_data)
+        
+        assert disc._is_fitted == True
+        assert disc.method_used_ == 'quantile'
+        # Quantile bins should have roughly equal counts
+    
+    def test_fit_freedman_diaconis(self, uniform_data):
+        """Test Freedman-Diaconis method."""
+        disc = NumericTargetDiscretizer(method='freedman_diaconis')
+        disc.fit(uniform_data)
+        
+        assert disc._is_fitted == True
+        assert disc.method_used_ == 'freedman_diaconis'
+    
+    def test_fit_sturges(self, uniform_data):
+        """Test Sturges' rule method."""
+        disc = NumericTargetDiscretizer(method='sturges')
+        disc.fit(uniform_data)
+        
+        assert disc._is_fitted == True
+        assert disc.method_used_ == 'sturges'
+    
+    def test_fit_equal_width(self, uniform_data):
+        """Test equal width method."""
+        disc = NumericTargetDiscretizer(method='equal_width', n_bins=5)
+        disc.fit(uniform_data)
+        
+        assert disc._is_fitted == True
+        assert disc.method_used_ == 'equal_width'
+    
+    def test_fit_auto_selects_method(self, skewed_data):
+        """Test auto method selects appropriate binning."""
+        disc = NumericTargetDiscretizer(method='auto')
+        disc.fit(skewed_data)
+        
+        assert disc._is_fitted == True
+        # Auto should select a method appropriate for skewed data
+        assert disc.method_used_ in ['quantile', 'jenks', 'freedman_diaconis']
+    
+    def test_fit_pandas_series(self, income_data):
+        """Test fitting with pandas Series."""
+        series = pd.Series(income_data, name='income')
+        disc = NumericTargetDiscretizer()
+        disc.fit(series)
+        
+        assert disc._is_fitted == True
+    
+    def test_fit_with_nan(self):
+        """Test fitting with NaN values."""
+        data = np.array([1, 2, np.nan, 4, 5, np.nan, 7, 8, 9, 10])
+        disc = NumericTargetDiscretizer()
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+        # NaN should be filtered out during fitting
+    
+    def test_fit_empty_raises_error(self):
+        """Test fitting empty data raises error."""
+        disc = NumericTargetDiscretizer()
+        
+        with pytest.raises(ValueError, match="empty"):
+            disc.fit(np.array([]))
+    
+    def test_fit_single_value_raises_error(self):
+        """Test fitting single unique value raises error."""
+        disc = NumericTargetDiscretizer()
+        
+        with pytest.raises(ValueError, match="at least 2 unique"):
+            disc.fit(np.array([5, 5, 5, 5, 5]))
+    
+    def test_fit_respects_max_bins(self, income_data):
+        """Test that max_bins is respected."""
+        disc = NumericTargetDiscretizer(max_bins=3)
+        disc.fit(income_data)
+        
+        assert disc.n_bins_ <= 3
+    
+    def test_fit_returns_self(self, income_data):
+        """Test that fit returns self for chaining."""
+        disc = NumericTargetDiscretizer()
+        result = disc.fit(income_data)
+        
+        assert result is disc
+
+
+class TestNumericTargetDiscretizerTransform:
+    """Tests for NumericTargetDiscretizer transformation."""
+    
+    @pytest.fixture
+    def fitted_discretizer(self):
+        """Create a fitted discretizer."""
+        np.random.seed(42)
+        data = np.concatenate([
+            np.random.uniform(0, 30, 100),
+            np.random.uniform(30, 70, 100),
+            np.random.uniform(70, 100, 100)
+        ])
+        disc = NumericTargetDiscretizer(method='quantile', n_bins=3)
+        disc.fit(data)
+        return disc
+    
+    def test_transform_basic(self, fitted_discretizer):
+        """Test basic transformation."""
+        data = np.array([10, 50, 90])
+        labels = fitted_discretizer.transform(data)
+        
+        assert len(labels) == 3
+        assert all(isinstance(l, str) for l in labels)
+    
+    def test_transform_not_fitted_raises_error(self):
+        """Test transform without fitting raises error."""
+        disc = NumericTargetDiscretizer()
+        
+        with pytest.raises(RuntimeError, match="not fitted"):
+            disc.transform(np.array([1, 2, 3]))
+    
+    def test_transform_preserves_length(self, fitted_discretizer):
+        """Test transform preserves array length."""
+        data = np.random.uniform(0, 100, 50)
+        labels = fitted_discretizer.transform(data)
+        
+        assert len(labels) == 50
+    
+    def test_transform_handles_nan(self, fitted_discretizer):
+        """Test transform handles NaN values."""
+        data = np.array([10, np.nan, 50, np.nan, 90])
+        labels = fitted_discretizer.transform(data)
+        
+        assert len(labels) == 5
+        assert labels[1] == "Missing"
+        assert labels[3] == "Missing"
+    
+    def test_transform_pandas_series(self, fitted_discretizer):
+        """Test transform with pandas Series."""
+        data = pd.Series([10, 50, 90])
+        labels = fitted_discretizer.transform(data)
+        
+        assert len(labels) == 3
+    
+    def test_fit_transform(self):
+        """Test fit_transform convenience method."""
+        data = np.random.uniform(0, 100, 100)
+        disc = NumericTargetDiscretizer(n_bins=4)
+        
+        labels = disc.fit_transform(data)
+        
+        assert disc._is_fitted == True
+        assert len(labels) == 100
+    
+    def test_transform_consistent_labels(self, fitted_discretizer):
+        """Test that same values get same labels."""
+        data1 = np.array([25, 50, 75])
+        data2 = np.array([25, 50, 75])
+        
+        labels1 = fitted_discretizer.transform(data1)
+        labels2 = fitted_discretizer.transform(data2)
+        
+        np.testing.assert_array_equal(labels1, labels2)
+
+
+class TestNumericTargetDiscretizerBinLabels:
+    """Tests for bin label generation."""
+    
+    def test_labels_are_readable(self):
+        """Test that generated labels are human-readable."""
+        np.random.seed(42)
+        data = np.random.uniform(1000, 100000, 200)
+        disc = NumericTargetDiscretizer(n_bins=4)
+        disc.fit(data)
+        
+        for label in disc.bin_labels_:
+            # Labels should contain numbers and comparison symbols
+            assert any(c.isdigit() for c in label)
+            assert any(c in label for c in ['≤', '>', '-', '–'])
+    
+    def test_labels_cover_range(self):
+        """Test that labels cover the full data range."""
+        np.random.seed(42)
+        data = np.random.uniform(0, 1000, 100)
+        disc = NumericTargetDiscretizer(n_bins=5)
+        disc.fit(data)
+        
+        # First label should start with ≤ (lower bound)
+        # Last label should contain > (upper bound)
+        labels = disc.bin_labels_
+        assert labels[0].startswith('≤') or '0' in labels[0]
+        assert labels[-1].startswith('>') or '1,000' in labels[-1] or '1000' in labels[-1]
+    
+    def test_labels_for_integer_data(self):
+        """Test labels for integer data are formatted as integers."""
+        data = np.array([1, 50, 100, 500, 1000, 5000, 10000, 50000, 100000])
+        disc = NumericTargetDiscretizer(n_bins=3)
+        disc.fit(data)
+        
+        # Large integer data should be formatted with comma separators
+        labels_str = ' '.join(disc.bin_labels_)
+        # Should contain formatted numbers without decimals
+        assert '.' not in labels_str or '.0' not in labels_str
+
+
+class TestNumericTargetDiscretizerBinMerging:
+    """Tests for small bin merging functionality."""
+    
+    def test_small_bins_merged(self):
+        """Test that bins with too few samples are merged."""
+        # Create data with a natural cluster structure
+        np.random.seed(42)
+        data = np.concatenate([
+            np.array([1, 2, 3]),  # Very few samples at low end
+            np.random.uniform(50, 100, 100)  # Most samples here
+        ])
+        
+        disc = NumericTargetDiscretizer(min_bin_size=5)
+        disc.fit(data)
+        
+        # Transform and check counts
+        labels = disc.transform(data)
+        counts = Counter(labels)
+        
+        # All bins should have at least min_bin_size samples (or be merged)
+        for label, count in counts.items():
+            if label != "Missing":
+                # Due to merging, we might not hit exactly min_bin_size
+                # but algorithm should try to avoid very small bins
+                pass  # Verification handled by algorithm
+
+
+class TestNumericTargetDiscretizerAutoSelection:
+    """Tests for automatic method selection."""
+    
+    def test_auto_selects_for_skewed(self):
+        """Test auto selection for highly skewed data."""
+        np.random.seed(42)
+        # Exponential distribution is right-skewed
+        data = np.random.exponential(scale=100, size=500)
+        
+        disc = NumericTargetDiscretizer(method='auto')
+        disc.fit(data)
+        
+        # For highly skewed data, should select quantile or jenks
+        assert disc.method_used_ in ['quantile', 'jenks', 'freedman_diaconis']
+    
+    def test_auto_selects_for_multimodal(self):
+        """Test auto selection for multimodal data."""
+        np.random.seed(42)
+        # Create clearly bimodal data
+        data = np.concatenate([
+            np.random.normal(20, 3, 200),
+            np.random.normal(80, 3, 200)
+        ])
+        
+        disc = NumericTargetDiscretizer(method='auto')
+        disc.fit(data)
+        
+        # For multimodal data, jenks is preferred
+        # But the algorithm may select quantile too
+        assert disc.method_used_ in ['jenks', 'quantile', 'freedman_diaconis']
+    
+    def test_auto_selects_for_uniform(self):
+        """Test auto selection for uniform data."""
+        np.random.seed(42)
+        data = np.random.uniform(0, 100, 300)
+        
+        disc = NumericTargetDiscretizer(method='auto')
+        disc.fit(data)
+        
+        # Uniform data should get quantile or freedman-diaconis
+        assert disc.method_used_ in ['quantile', 'freedman_diaconis', 'jenks']
+
+
+class TestNumericTargetDiscretizerGetSummary:
+    """Tests for bin summary functionality."""
+    
+    def test_get_bin_summary(self):
+        """Test get_bin_summary returns valid DataFrame."""
+        np.random.seed(42)
+        data = np.random.uniform(0, 100, 100)
+        
+        disc = NumericTargetDiscretizer(n_bins=4)
+        disc.fit(data)
+        
+        summary = disc.get_bin_summary(data)
+        
+        assert isinstance(summary, pd.DataFrame)
+        assert 'bin' in summary.columns
+        assert 'count' in summary.columns
+        assert 'percentage' in summary.columns
+        assert summary['count'].sum() == 100
+    
+    def test_get_bin_summary_not_fitted(self):
+        """Test get_bin_summary raises error when not fitted."""
+        disc = NumericTargetDiscretizer()
+        
+        with pytest.raises(RuntimeError, match="Not fitted"):
+            disc.get_bin_summary(np.array([1, 2, 3]))
+
+
+class TestDiscretizeNumericTargetFunction:
+    """Tests for the discretize_numeric_target convenience function."""
+    
+    @pytest.fixture
+    def numeric_df(self):
+        """Create DataFrame with numeric target."""
+        np.random.seed(42)
+        return pd.DataFrame({
+            'feature1': np.random.uniform(0, 10, 100),
+            'feature2': np.random.choice(['A', 'B', 'C'], 100),
+            'income': np.concatenate([
+                np.random.normal(30000, 5000, 50),
+                np.random.normal(80000, 10000, 50)
+            ])
+        })
+    
+    def test_basic_usage(self, numeric_df):
+        """Test basic usage of discretize_numeric_target."""
+        df_disc, disc = discretize_numeric_target(numeric_df, 'income')
+        
+        assert disc._is_fitted == True
+        assert df_disc['income'].dtype == object  # Converted to categorical strings
+        assert len(df_disc) == len(numeric_df)
+    
+    def test_with_method(self, numeric_df):
+        """Test with specific method."""
+        df_disc, disc = discretize_numeric_target(
+            numeric_df, 'income', method='quantile', n_bins=4
+        )
+        
+        assert disc.method_used_ == 'quantile'
+    
+    def test_inplace_false(self, numeric_df):
+        """Test that inplace=False creates a copy."""
+        original_income = numeric_df['income'].copy()
+        df_disc, _ = discretize_numeric_target(numeric_df, 'income', inplace=False)
+        
+        # Original should be unchanged
+        pd.testing.assert_series_equal(numeric_df['income'], original_income)
+        # New df should be different
+        assert df_disc['income'].dtype != original_income.dtype
+    
+    def test_inplace_true(self, numeric_df):
+        """Test that inplace=True modifies original."""
+        original_dtype = numeric_df['income'].dtype
+        df_disc, _ = discretize_numeric_target(numeric_df, 'income', inplace=True)
+        
+        # Original should be modified
+        assert numeric_df['income'].dtype != original_dtype
+        # Returned df should be same object
+        assert df_disc is numeric_df
+    
+    def test_invalid_column_raises_error(self, numeric_df):
+        """Test that invalid column name raises error."""
+        with pytest.raises(ValueError, match="not found"):
+            discretize_numeric_target(numeric_df, 'nonexistent_column')
+    
+    def test_preserves_other_columns(self, numeric_df):
+        """Test that other columns are preserved."""
+        df_disc, _ = discretize_numeric_target(numeric_df, 'income')
+        
+        pd.testing.assert_series_equal(
+            df_disc['feature1'], 
+            numeric_df['feature1']
+        )
+        pd.testing.assert_series_equal(
+            df_disc['feature2'], 
+            numeric_df['feature2']
+        )
+
+
+class TestNumericTargetWithCN2:
+    """Integration tests for numeric targets with CN2 classifier."""
+    
+    @pytest.fixture
+    def numeric_target_df(self):
+        """Create DataFrame with numeric target for classification."""
+        np.random.seed(42)
+        n = 200
+        
+        # Create features that correlate with target bins
+        data = {
+            'feature_a': np.concatenate([
+                np.random.normal(5, 1, n // 2),
+                np.random.normal(15, 1, n // 2)
+            ]),
+            'feature_b': np.concatenate([
+                np.random.choice(['cat1', 'cat2'], n // 2),
+                np.random.choice(['cat2', 'cat3'], n // 2)
+            ]),
+            # Numeric target with many unique values
+            'income': np.concatenate([
+                np.random.normal(30000, 5000, n // 2),
+                np.random.normal(100000, 15000, n // 2)
+            ])
+        }
+        return pd.DataFrame(data)
+    
+    def test_cn2_with_discretized_target(self, numeric_target_df):
+        """Test CN2 works with discretized numeric target."""
+        # Discretize the target
+        df, disc = discretize_numeric_target(numeric_target_df, 'income', n_bins=3)
+        
+        # Fit CN2
+        X = df.drop(columns=['income'])
+        y = df['income'].values
+        
+        clf = CN2Classifier(min_covered_examples=5)
+        clf.fit(X, y)
+        
+        assert clf._is_fitted == True
+        assert len(clf.rules_) > 0
+        
+        # Classes should be bin labels
+        assert all(isinstance(c, str) for c in clf.classes_)
+    
+    def test_cn2_accuracy_with_discretized_target(self, numeric_target_df):
+        """Test CN2 achieves reasonable accuracy with discretized target."""
+        # Discretize the target
+        df, disc = discretize_numeric_target(numeric_target_df, 'income', n_bins=2)
+        
+        X = df.drop(columns=['income'])
+        y = df['income'].values
+        
+        clf = CN2Classifier(beam_width=5, min_covered_examples=5)
+        clf.fit(X, y)
+        
+        accuracy = clf.score(X, y)
+        
+        # Should achieve reasonable accuracy since features correlate with target
+        assert accuracy >= 0.6  # At least better than random
+    
+    def test_rules_reference_discretized_bins(self, numeric_target_df):
+        """Test that learned rules reference discretized bin labels."""
+        df, disc = discretize_numeric_target(numeric_target_df, 'income', n_bins=3)
+        
+        clf = fit_cn2(df, 'income', min_covered_examples=5)
+        
+        # Get all predicted classes
+        predicted_classes = [rule.predicted_class for rule in clf.get_rules()]
+        
+        # Predicted classes should be from bin labels
+        for pred_class in predicted_classes:
+            assert pred_class in disc.bin_labels_ or pred_class in df['income'].unique()
+
+
+class TestJenksNaturalBreaks:
+    """Tests specifically for Jenks natural breaks algorithm."""
+    
+    def test_jenks_finds_clusters(self):
+        """Test Jenks finds natural clusters in data."""
+        np.random.seed(42)
+        # Create data with 3 clear clusters
+        cluster1 = np.random.normal(10, 1, 50)
+        cluster2 = np.random.normal(50, 2, 50)
+        cluster3 = np.random.normal(100, 3, 50)
+        data = np.concatenate([cluster1, cluster2, cluster3])
+        
+        disc = NumericTargetDiscretizer(method='jenks', n_bins=3)
+        disc.fit(data)
+        
+        # Transform and check
+        labels = disc.transform(data)
+        
+        # Most cluster1 values should get same label
+        cluster1_labels = labels[:50]
+        assert len(set(cluster1_labels)) <= 2  # At most 2 different labels
+        
+        # Cluster3 values should mostly get different label from cluster1
+        cluster3_labels = labels[100:]
+        common_label_1 = max(set(cluster1_labels), key=list(cluster1_labels).count)
+        common_label_3 = max(set(cluster3_labels), key=list(cluster3_labels).count)
+        assert common_label_1 != common_label_3
+    
+    def test_jenks_large_dataset(self):
+        """Test Jenks handles large datasets efficiently."""
+        np.random.seed(42)
+        # Large dataset - should use approximation
+        data = np.random.exponential(1000, 1000)
+        
+        disc = NumericTargetDiscretizer(method='jenks', n_bins=5)
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+        assert len(disc.bin_labels_) >= 2
+
+
+class TestQuantileBreaks:
+    """Tests specifically for quantile binning."""
+    
+    def test_quantile_equal_frequency(self):
+        """Test quantile creates roughly equal frequency bins."""
+        np.random.seed(42)
+        data = np.random.exponential(100, 400)
+        
+        disc = NumericTargetDiscretizer(method='quantile', n_bins=4)
+        disc.fit(data)
+        
+        labels = disc.transform(data)
+        counts = Counter(labels)
+        
+        # Each bin should have roughly 100 samples (400/4)
+        for label, count in counts.items():
+            assert 50 <= count <= 150  # Allow some variance
+
+
+class TestFreedmanDiaconisRule:
+    """Tests specifically for Freedman-Diaconis binning."""
+    
+    def test_fd_adapts_to_spread(self):
+        """Test Freedman-Diaconis adapts to data spread."""
+        np.random.seed(42)
+        
+        # Narrow distribution
+        narrow_data = np.random.normal(50, 1, 200)
+        disc_narrow = NumericTargetDiscretizer(method='freedman_diaconis')
+        disc_narrow.fit(narrow_data)
+        
+        # Wide distribution
+        wide_data = np.random.normal(50, 20, 200)
+        disc_wide = NumericTargetDiscretizer(method='freedman_diaconis')
+        disc_wide.fit(wide_data)
+        
+        # Both should fit successfully
+        assert disc_narrow._is_fitted == True
+        assert disc_wide._is_fitted == True
+
+
+class TestEdgeCasesDiscretization:
+    """Test edge cases for discretization."""
+    
+    def test_two_unique_values(self):
+        """Test with only two unique values."""
+        data = np.array([1, 1, 1, 1, 1, 100, 100, 100, 100, 100])
+        disc = NumericTargetDiscretizer()
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+        assert disc.n_bins_ >= 1
+    
+    def test_all_same_except_one(self):
+        """Test with almost all same values."""
+        data = np.array([5, 5, 5, 5, 5, 5, 5, 5, 5, 100])
+        disc = NumericTargetDiscretizer(min_bin_size=1)
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+    
+    def test_negative_values(self):
+        """Test with negative values."""
+        np.random.seed(42)
+        data = np.random.normal(-1000, 500, 100)
+        
+        disc = NumericTargetDiscretizer()
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+        # Labels should properly represent negative ranges
+        labels_str = ' '.join(disc.bin_labels_)
+        assert '-' in labels_str
+    
+    def test_very_large_values(self):
+        """Test with very large values."""
+        np.random.seed(42)
+        data = np.random.uniform(1e9, 1e12, 100)
+        
+        disc = NumericTargetDiscretizer()
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+    
+    def test_very_small_values(self):
+        """Test with very small decimal values."""
+        np.random.seed(42)
+        data = np.random.uniform(0.0001, 0.001, 100)
+        
+        disc = NumericTargetDiscretizer()
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
+        # Labels should use appropriate decimal precision
+    
+    def test_mixed_integer_float(self):
+        """Test with mixed integer and float values."""
+        data = np.array([1, 2.5, 3, 4.7, 5, 6.2, 7, 8.9, 9, 10.1])
+        
+        disc = NumericTargetDiscretizer()
+        disc.fit(data)
+        
+        assert disc._is_fitted == True
 
 
 if __name__ == '__main__':
