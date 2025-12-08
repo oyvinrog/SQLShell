@@ -743,6 +743,32 @@ class DatabaseManager:
         except Exception as e:
             raise Exception(f"Error previewing table: {str(e)}")
     
+    def get_full_table(self, table_name):
+        """
+        Get all data from a table (no row limit).
+        
+        Args:
+            table_name: Name of the table to retrieve
+            
+        Returns:
+            Pandas DataFrame with all the table data
+        """
+        if not table_name in self.loaded_tables:
+            raise ValueError(f"Table '{table_name}' not found")
+        
+        try:
+            source = self.loaded_tables[table_name]
+            
+            # For database tables, use the qualified name
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                return self.conn.execute(f'SELECT * FROM {alias}.{table_name}').fetchdf()
+            else:
+                # For file-based tables (registered views)
+                return self.conn.execute(f'SELECT * FROM {table_name}').fetchdf()
+        except Exception as e:
+            raise Exception(f"Error getting table data: {str(e)}")
+    
     def reload_table(self, table_name):
         """
         Reload a table's data from its source file.

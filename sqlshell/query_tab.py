@@ -22,6 +22,9 @@ class QueryTab(QWidget):
         self.current_df = None
         self.filter_widgets = []
         self.results_title_text = results_title
+        # Track preview mode - when True, tools should use full table data
+        self.is_preview_mode = False
+        self.preview_table_name = None  # Name of table being previewed
         self.init_ui()
         
     def init_ui(self):
