@@ -401,6 +401,7 @@ class QueryTab(QWidget):
         explain_action = menu.addAction(f"Explain Column")
         encode_action = menu.addAction(f"One-Hot Encode")
         predict_action = menu.addAction(f"Predict Column")
+        discover_rules_action = menu.addAction(f"Discover Classification Rules (CN2)")
         
         # Execute the menu
         action = menu.exec(header.mapToGlobal(position))
@@ -424,6 +425,11 @@ class QueryTab(QWidget):
             # Call the predict column method on the parent
             if hasattr(self.parent, 'predict_column'):
                 self.parent.predict_column(col_name)
+        
+        elif action == discover_rules_action:
+            # Call the discover classification rules method on the parent
+            if hasattr(self.parent, 'discover_classification_rules'):
+                self.parent.discover_classification_rules(col_name)
         
         elif action == sort_asc_action:
             self.results_table.sortItems(idx, Qt.SortOrder.AscendingOrder)
@@ -673,6 +679,7 @@ class QueryTab(QWidget):
         explain_action = menu.addAction(f"Explain Column")
         encode_action = menu.addAction(f"One-Hot Encode")
         predict_action = menu.addAction(f"Predict Column")
+        discover_rules_action = menu.addAction(f"Discover Classification Rules (CN2)")
         
         # Execute the menu
         action = menu.exec(position)
@@ -696,6 +703,11 @@ class QueryTab(QWidget):
             # Call the predict column method on the parent
             if hasattr(self.parent, 'predict_column'):
                 self.parent.predict_column(col_name)
+        
+        elif action == discover_rules_action:
+            # Call the discover classification rules method on the parent
+            if hasattr(self.parent, 'discover_classification_rules'):
+                self.parent.discover_classification_rules(col_name)
         
         elif action == sort_asc_action:
             self.results_table.sortItems(idx, Qt.SortOrder.AscendingOrder)

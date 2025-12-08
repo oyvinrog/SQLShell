@@ -4106,6 +4106,73 @@ LIMIT 10
             show_error_notification(f"Apply Encoding Error: Error applying encoding - {str(e)}")
             self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
 
+    def discover_classification_rules(self, target_column):
+        """Discover classification rules (IF-THEN rules) using CN2 algorithm"""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please load some data first.")
+                return
+                
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Discovering classification rules for "{target_column}"...')
+            
+            # Get the dataframe from the current tab
+            df = current_tab.current_df.copy()
+            
+            # Check if the column exists
+            if target_column not in df.columns:
+                show_warning_notification(f"Column '{target_column}' not found in the current dataset.")
+                return
+            
+            # Check if there are enough columns for rule learning
+            if len(df.columns) < 2:
+                show_warning_notification("Need at least 2 columns (target + features) for rule discovery.")
+                return
+            
+            # Check for NaN values in target
+            n_nan = df[target_column].isna().sum()
+            if n_nan > 0:
+                # Will be handled by filtering, just warn
+                if n_nan == len(df):
+                    show_warning_notification(
+                        f"Column '{target_column}' contains only missing values. "
+                        "Cannot discover rules."
+                    )
+                    return
+            
+            # Check if target column has reasonable number of unique values
+            n_unique = df[target_column].dropna().nunique()
+            if n_unique > 50:
+                show_warning_notification(
+                    f"Column '{target_column}' has {n_unique} unique values. "
+                    "CN2 works best with categorical targets (fewer distinct values)."
+                )
+                return
+            
+            if n_unique < 2:
+                show_warning_notification(
+                    f"Column '{target_column}' has only {n_unique} unique value(s). "
+                    "Need at least 2 distinct classes for classification."
+                )
+                return
+            
+            # Import and use the visualize_cn2_rules function
+            from sqlshell.utils.profile_cn2 import visualize_cn2_rules
+            
+            # Create and show the CN2 rules visualization
+            vis = visualize_cn2_rules(df, target_column, beam_width=5, min_covered_examples=5)
+            
+            # Store reference to prevent garbage collection
+            self._current_cn2_vis = vis
+            
+            self.statusBar().showMessage(f'Classification rules discovered for "{target_column}"')
+                
+        except Exception as e:
+            show_error_notification(f"Rule Discovery Error: {str(e)}")
+            self.statusBar().showMessage(f'Error discovering rules: {str(e)}')
+
     def predict_column(self, column_name):
         """Create a prediction model for a column and add predictions as new column"""
         try:
