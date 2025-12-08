@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize, sent_tokenize
-import nltk
+import os
+import sys
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation, NMF
 from sklearn.cluster import KMeans, DBSCAN
@@ -19,21 +18,96 @@ try:
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
-    print("Note: spaCy not available. Install with: python -m pip install spacy && python -m spacy download en_core_web_sm")
 
-# Download required NLTK data
+# Flag to track if NLTK is available
+NLTK_AVAILABLE = False
+
+def _setup_nltk_data_path():
+    """Configure NLTK to find data in bundled location (for PyInstaller builds)"""
+    import nltk
+    
+    # Check if running from a PyInstaller bundle
+    if getattr(sys, 'frozen', False):
+        # Running in a PyInstaller bundle
+        bundle_dir = sys._MEIPASS
+        nltk_data_path = os.path.join(bundle_dir, 'nltk_data')
+        if os.path.exists(nltk_data_path):
+            nltk.data.path.insert(0, nltk_data_path)
+    
+    # Also check relative to the application
+    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    possible_paths = [
+        os.path.join(app_dir, 'nltk_data'),
+        os.path.join(os.path.dirname(app_dir), 'nltk_data'),
+    ]
+    for path in possible_paths:
+        if os.path.exists(path) and path not in nltk.data.path:
+            nltk.data.path.insert(0, path)
+
+
+def _simple_tokenize(text):
+    """Simple fallback tokenizer when NLTK is not available"""
+    # Simple word tokenization using regex
+    return re.findall(r'\b[a-zA-Z]+\b', text.lower())
+
+
+def _get_simple_stopwords():
+    """Return a basic set of English stopwords when NLTK is not available"""
+    return {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare', 'ought',
+        'used', 'it', 'its', 'this', 'that', 'these', 'those', 'i', 'me', 'my',
+        'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
+        'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her',
+        'hers', 'herself', 'they', 'them', 'their', 'theirs', 'themselves',
+        'what', 'which', 'who', 'whom', 'when', 'where', 'why', 'how', 'all',
+        'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such',
+        'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+        'just', 'also', 'now', 'here', 'there', 'then', 'once', 'if', 'because',
+        'while', 'although', 'though', 'after', 'before', 'since', 'until', 'unless'
+    }
+
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
-try:
-    nltk.data.find('tokenizers/punkt_tab/english')
-except LookupError:
-    nltk.download('punkt_tab')
+    import nltk
+    _setup_nltk_data_path()
+    from nltk.corpus import stopwords
+    from nltk.tokenize import word_tokenize, sent_tokenize
+    
+    # Try to find required NLTK data, download if missing
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        try:
+            nltk.download('punkt', quiet=True)
+        except Exception:
+            pass
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        try:
+            nltk.download('stopwords', quiet=True)
+        except Exception:
+            pass
+    try:
+        nltk.data.find('tokenizers/punkt_tab/english')
+    except LookupError:
+        try:
+            nltk.download('punkt_tab', quiet=True)
+        except Exception:
+            pass
+    
+    # Test if NLTK is actually working
+    try:
+        _ = stopwords.words('english')
+        _ = word_tokenize("test")
+        NLTK_AVAILABLE = True
+    except Exception:
+        NLTK_AVAILABLE = False
+        
+except ImportError:
+    NLTK_AVAILABLE = False
 
 class AdvancedTextAnalyzer:
     """
@@ -48,7 +122,12 @@ class AdvancedTextAnalyzer:
         Args:
             model_name (str): Spacy model name for NER and advanced processing
         """
-        self.stop_words = set(stopwords.words('english'))
+        # Get stopwords (use NLTK if available, otherwise fallback)
+        if NLTK_AVAILABLE:
+            self.stop_words = set(stopwords.words('english'))
+        else:
+            self.stop_words = _get_simple_stopwords()
+        
         self.tfidf_vectorizer = None
         self.lda_model = None
         self.nmf_model = None
@@ -60,7 +139,6 @@ class AdvancedTextAnalyzer:
             try:
                 self.nlp = spacy.load(model_name)
             except OSError:
-                print(f"Warning: spaCy model '{model_name}' not found. Install with: python -m spacy download {model_name}")
                 self.nlp = None
         else:
             self.nlp = None
@@ -128,8 +206,11 @@ class AdvancedTextAnalyzer:
         # Remove special characters but keep important punctuation
         text = re.sub(r'[^\w\s\-\.]', ' ', text)
         
-        # Tokenize
-        tokens = word_tokenize(text)
+        # Tokenize (use NLTK if available, otherwise fallback)
+        if NLTK_AVAILABLE:
+            tokens = word_tokenize(text)
+        else:
+            tokens = _simple_tokenize(text)
         
         # Remove stopwords and short tokens
         tokens = [token for token in tokens if token not in self.stop_words and len(token) > 2]
