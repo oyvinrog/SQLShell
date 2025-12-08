@@ -1,0 +1,23 @@
+# SQLShell GitHub Pages Configuration
+title: SQLShell
+description: A fast SQL interface for analyzing data files. Query CSV, Parquet, Excel with SQL. DuckDB powered.
+url: https://oyvinrog.github.io
+baseurl: /SQLShell
+
+# Theme settings (optional - page is self-contained)
+theme: null
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+
+# Exclude files from build
+exclude:
+  - F5_F9_FUNCTIONALITY.md
+  - IMPLEMENTATION_SUMMARY.md
+  - README.md
+
+# Include these files
+include:
+  - index.html
+
