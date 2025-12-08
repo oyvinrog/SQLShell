@@ -12,7 +12,7 @@
 set -e
 
 APP_NAME="SQLShell"
-APP_VERSION="0.3.5"
+APP_VERSION="0.3.6"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 BUILD_DIR="$PROJECT_ROOT/dist/$APP_NAME"
