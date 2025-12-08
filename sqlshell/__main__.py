@@ -158,14 +158,14 @@ class SQLShell(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Left panel for table list
-        left_panel = QFrame()
-        left_panel.setObjectName("sidebar")
-        left_panel.setMinimumWidth(300)
-        left_panel.setMaximumWidth(400)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(16, 16, 16, 16)
-        left_layout.setSpacing(12)
+        # Left panel for table list (stored as instance var for toggle)
+        self.left_panel = QFrame()
+        self.left_panel.setObjectName("sidebar")
+        self.left_panel.setMinimumWidth(220)
+        self.left_panel.setMaximumWidth(350)
+        left_layout = QVBoxLayout(self.left_panel)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
         
         # Database info section
         db_header = QLabel("DATABASE")
@@ -176,17 +176,6 @@ class SQLShell(QMainWindow):
         self.db_info_label = QLabel("No database connected")
         self.db_info_label.setStyleSheet(get_db_info_label_stylesheet())
         left_layout.addWidget(self.db_info_label)
-        
-        # Database action buttons
-        db_buttons_layout = QHBoxLayout()
-        db_buttons_layout.setSpacing(8)
-        
-        self.load_btn = QPushButton('Load')
-        self.load_btn.setIcon(QIcon.fromTheme("document-open"))
-        self.load_btn.clicked.connect(self.show_load_dialog)
-        
-        db_buttons_layout.addWidget(self.load_btn)
-        left_layout.addLayout(db_buttons_layout)
         
         # Drag and drop info label
         drag_drop_info = QLabel("💡 Drag and drop files here to load them instantly!\nSupported: Excel, CSV, Parquet, SQLite, and more")
@@ -213,6 +202,32 @@ class SQLShell(QMainWindow):
         self.tables_list.customContextMenuRequested.connect(self.show_tables_context_menu)
         left_layout.addWidget(self.tables_list)
         
+        # Browse button for quick file selection
+        self.browse_button = QPushButton("📂 Browse...")
+        self.browse_button.setToolTip("Open data files (Excel, CSV, Parquet) or databases (SQLite, DuckDB)")
+        self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.browse_button.clicked.connect(self.browse_files)
+        self.browse_button.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.15);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.25);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        """)
+        left_layout.addWidget(self.browse_button)
+        
         # Add spacer at the bottom
         left_layout.addStretch()
         
@@ -220,38 +235,38 @@ class SQLShell(QMainWindow):
         right_panel = QFrame()
         right_panel.setObjectName("content_panel")
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(16, 16, 16, 16)
-        right_layout.setSpacing(16)
+        right_layout.setContentsMargins(8, 8, 8, 8)
+        right_layout.setSpacing(4)
         
-        # Query section header
-        query_header = QLabel("SQL QUERY")
-        query_header.setObjectName("header_label")
-        right_layout.addWidget(query_header)
+        # Query section header (stored for toggle, hidden by default in favor of tabs)
+        self.query_header = QLabel("SQL QUERY")
+        self.query_header.setObjectName("header_label")
+        self.query_header.setVisible(False)  # Tabs provide context, header is redundant
+        right_layout.addWidget(self.query_header)
         
-        # Create a drop area for tables above the tab widget
+        # Create a compact drop area for tables above the tab widget
         self.tab_drop_area = QFrame()
-        self.tab_drop_area.setFixedHeight(30)
+        self.tab_drop_area.setFixedHeight(22)
         self.tab_drop_area.setObjectName("tab_drop_area")
         
         # Add a label with hint text
         drop_area_layout = QHBoxLayout(self.tab_drop_area)
-        drop_area_layout.setContentsMargins(10, 0, 10, 0)
-        self.drop_hint_label = QLabel("Drag tables here to create new query tabs")
-        self.drop_hint_label.setStyleSheet("color: #95a5a6; font-size: 11px;")
+        drop_area_layout.setContentsMargins(8, 0, 8, 0)
+        self.drop_hint_label = QLabel("📂 Drop tables here to create new query tabs")
+        self.drop_hint_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
         self.drop_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         drop_area_layout.addWidget(self.drop_hint_label)
         
         self.tab_drop_area.setStyleSheet("""
             #tab_drop_area {
-                background-color: #f8f9fa;
-                border: 1px dashed #BDC3C7;
-                border-radius: 4px;
-                margin: 0 0 5px 0;
+                background-color: #fafbfc;
+                border: 1px dashed #d0d7de;
+                border-radius: 3px;
             }
             
             #tab_drop_area:hover {
-                background-color: #E5F7FF;
-                border: 1px dashed #3498DB;
+                background-color: #ddf4ff;
+                border: 1px dashed #0969da;
             }
         """)
         self.tab_drop_area.setAcceptDrops(True)
@@ -275,9 +290,9 @@ class SQLShell(QMainWindow):
         
         right_layout.addWidget(self.tab_widget)
 
-        # Add panels to main layout
-        main_layout.addWidget(left_panel, 1)
-        main_layout.addWidget(right_panel, 4)
+        # Add panels to main layout (sidebar:content ratio 1:5 gives more space to queries)
+        main_layout.addWidget(self.left_panel, 1)
+        main_layout.addWidget(right_panel, 5)
 
         # Status bar
         self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
@@ -447,12 +462,21 @@ class SQLShell(QMainWindow):
             # Create a default in-memory DuckDB connection if none exists
             connection_info = self.db_manager.create_memory_connection()
             self.db_info_label.setText(connection_info)
+        
+        # Database file extensions
+        db_extensions = {'.db', '.sqlite', '.sqlite3', '.duckdb'}
             
         file_names, _ = QFileDialog.getOpenFileNames(
             self,
-            "Open Data Files",
+            "Open Files",
             "",
-            "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;Text Files (*.txt);;Parquet Files (*.parquet);;All Files (*)"
+            "All Supported Files (*.xlsx *.xls *.csv *.txt *.parquet *.db *.sqlite *.sqlite3 *.duckdb);;"
+            "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;"
+            "Database Files (*.db *.sqlite *.sqlite3 *.duckdb);;"
+            "Excel Files (*.xlsx *.xls);;"
+            "CSV Files (*.csv);;"
+            "Parquet Files (*.parquet);;"
+            "All Files (*)"
         )
         
         for file_name in file_names:
@@ -460,32 +484,65 @@ class SQLShell(QMainWindow):
                 # Add to recent files
                 self.add_recent_file(file_name)
                 
-                # Use the database manager to load the file
-                table_name, df = self.db_manager.load_file(file_name)
-                
-                # Update UI using new method
-                self.tables_list.add_table_item(table_name, os.path.basename(file_name))
-                self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
-                
-                # Show preview of loaded data
-                preview_df = df.head()
-                self.populate_table(preview_df)
-                
-                # Update results title to show preview
-                results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
-                if results_title and results_title.text() == "RESULTS":
-                    results_title.setText(f"PREVIEW: {table_name}")
-                
-                # Update completer with new table and column names
-                self.update_completer()
+                # Check if this is a database file
+                file_ext = os.path.splitext(file_name)[1].lower()
+                if file_ext in db_extensions:
+                    # Handle database file
+                    self._load_database_file(file_name)
+                else:
+                    # Handle data file (Excel, CSV, Parquet, etc.)
+                    self._load_data_file(file_name)
                 
             except Exception as e:
                 error_msg = f'Error loading file {os.path.basename(file_name)}: {str(e)}'
                 self.statusBar().showMessage(error_msg)
                 QMessageBox.critical(self, "Error", error_msg)
-                self.results_table.setRowCount(0)
-                self.results_table.setColumnCount(0)
-                self.row_count_label.setText("")
+    
+    def _load_data_file(self, file_name):
+        """Load a data file (Excel, CSV, Parquet, etc.)"""
+        # Use the database manager to load the file
+        table_name, df = self.db_manager.load_file(file_name)
+        
+        # Update UI using new method
+        self.tables_list.add_table_item(table_name, os.path.basename(file_name))
+        self.statusBar().showMessage(f'Loaded {file_name} as table "{table_name}"')
+        
+        # Show preview of loaded data
+        preview_df = df.head()
+        self.populate_table(preview_df)
+        
+        # Update results title to show preview
+        results_title = self.findChild(QLabel, "header_label", Qt.FindChildOption.FindChildrenRecursively)
+        if results_title and results_title.text() == "RESULTS":
+            results_title.setText(f"PREVIEW: {table_name}")
+        
+        # Update completer with new table and column names
+        self.update_completer()
+    
+    def _load_database_file(self, file_name):
+        """Load a database file (SQLite, DuckDB, etc.)"""
+        # Clear existing database tables from the list widget (tables that came from a database)
+        for i in range(self.tables_list.topLevelItemCount() - 1, -1, -1):
+            item = self.tables_list.topLevelItem(i)
+            if item and item.text(0).endswith('(database)'):
+                self.tables_list.takeTopLevelItem(i)
+        
+        # Use the database manager to open the database
+        # This attaches the database while preserving loaded files
+        self.db_manager.open_database(file_name, load_all_tables=True)
+        
+        # Update UI with tables from the database
+        for table_name, source in self.db_manager.loaded_tables.items():
+            # Check if this is a database table (source starts with 'database:')
+            if source.startswith('database:'):
+                self.tables_list.add_table_item(table_name, "database")
+        
+        # Update the completer with table and column names
+        self.update_completer()
+        
+        # Update status bar
+        self.statusBar().showMessage(f"Connected to database: {file_name}")
+        self.db_info_label.setText(self.db_manager.get_connection_info())
 
     def remove_selected_table(self):
         current_item = self.tables_list.currentItem()
@@ -1540,6 +1597,14 @@ LIMIT 10
             reload_action = context_menu.addAction("Refresh")
             reload_action.setIcon(QIcon.fromTheme("view-refresh"))
         
+        # Add change source action for file-based tables
+        change_source_action = None
+        if table_name in self.db_manager.loaded_tables:
+            source_path = self.db_manager.loaded_tables[table_name]
+            if source_path not in ['database', 'query_result']:
+                change_source_action = context_menu.addAction("Change Table Source...")
+                change_source_action.setIcon(QIcon.fromTheme("document-open"))
+        
         # Add move to folder submenu
         move_menu = context_menu.addMenu("Move to Folder")
         move_menu.setIcon(QIcon.fromTheme("folder"))
@@ -1593,6 +1658,8 @@ LIMIT 10
             self.execute_query()
         elif action == reload_action:
             self.reload_selected_table(table_name)
+        elif change_source_action and action == change_source_action:
+            self.change_table_source(table_name, item)
         elif action == copy_path_action:
             # Get the full path from the table source
             if table_name in self.db_manager.loaded_tables:
@@ -1811,6 +1878,80 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Error reloading table: {str(e)}")
             self.statusBar().showMessage('Error reloading table')
+
+    def change_table_source(self, table_name, item):
+        """Change the source file for a table (useful when files have been moved)"""
+        try:
+            # Get the current file path
+            if table_name not in self.db_manager.loaded_tables:
+                show_warning_notification("Table source not found")
+                return
+            
+            current_path = self.db_manager.loaded_tables[table_name]
+            
+            # Determine the starting directory for the file dialog
+            if os.path.exists(current_path):
+                start_dir = os.path.dirname(current_path)
+            else:
+                start_dir = ""
+            
+            # Get the file extension to filter by same type
+            current_ext = os.path.splitext(current_path)[1].lower()
+            
+            # Build file filter based on current file type
+            if current_ext in ['.xlsx', '.xls']:
+                file_filter = "Excel Files (*.xlsx *.xls);;All Files (*)"
+            elif current_ext in ['.csv', '.txt']:
+                file_filter = "CSV/Text Files (*.csv *.txt);;All Files (*)"
+            elif current_ext == '.parquet':
+                file_filter = "Parquet Files (*.parquet);;All Files (*)"
+            else:
+                file_filter = "Data Files (*.xlsx *.xls *.csv *.txt *.parquet);;All Files (*)"
+            
+            # Open file dialog
+            new_path, _ = QFileDialog.getOpenFileName(
+                self,
+                f"Select new source file for '{table_name}'",
+                start_dir,
+                file_filter
+            )
+            
+            if not new_path:
+                return  # User cancelled
+            
+            # Verify the file exists
+            if not os.path.exists(new_path):
+                show_warning_notification("Selected file does not exist")
+                return
+            
+            # Update the source path in the database manager
+            self.db_manager.loaded_tables[table_name] = new_path
+            
+            # Update the item text in the tree widget
+            new_source = os.path.basename(new_path)
+            item.setText(0, f"{table_name} ({new_source})")
+            
+            # Mark as needing reload so user knows data needs to be refreshed
+            self.tables_list.mark_table_needs_reload(table_name)
+            
+            # Show success message
+            self.statusBar().showMessage(f'Changed source for "{table_name}" to {new_source}. Reload to update data.')
+            
+            # Ask if they want to reload now
+            reply = QMessageBox.question(
+                self,
+                "Reload Table?",
+                f"Source file for '{table_name}' has been changed.\n\nWould you like to reload the table now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.reload_selected_table(table_name)
+                
+        except Exception as e:
+            show_error_notification(f"Error changing table source: {str(e)}")
+            self.statusBar().showMessage('Error changing table source')
 
     def new_project(self, skip_confirmation=False):
         """Create a new project by clearing current state"""
@@ -3119,6 +3260,48 @@ LIMIT 10
         else:
             self.showMaximized()
             self.was_maximized = True
+    
+    def toggle_sidebar(self, checked=None):
+        """Toggle sidebar visibility (Ctrl+B)"""
+        if hasattr(self, 'left_panel'):
+            if checked is None:
+                # Toggle based on current state
+                self.left_panel.setVisible(not self.left_panel.isVisible())
+            else:
+                self.left_panel.setVisible(checked)
+            
+            # Update menu action state
+            if hasattr(self, 'toggle_sidebar_action'):
+                self.toggle_sidebar_action.setChecked(self.left_panel.isVisible())
+            
+            status = "shown" if self.left_panel.isVisible() else "hidden"
+            self.statusBar().showMessage(f"Sidebar {status} (Ctrl+B to toggle)", 2000)
+    
+    def toggle_compact_mode(self, checked=None):
+        """Toggle compact mode to maximize query/results space (Ctrl+Shift+C)"""
+        if checked is None:
+            checked = not getattr(self, '_compact_mode', False)
+        
+        self._compact_mode = checked
+        
+        # Update all tabs to use compact mode
+        for i in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(i)
+            if hasattr(tab, 'set_compact_mode'):
+                tab.set_compact_mode(checked)
+        
+        # Toggle secondary UI elements in main window
+        if hasattr(self, 'query_header'):
+            self.query_header.setVisible(not checked)
+        if hasattr(self, 'tab_drop_area'):
+            self.tab_drop_area.setVisible(not checked)
+        
+        # Update menu action state
+        if hasattr(self, 'compact_mode_action'):
+            self.compact_mode_action.setChecked(checked)
+        
+        status = "enabled" if checked else "disabled"
+        self.statusBar().showMessage(f"Compact mode {status} (Ctrl+Shift+C to toggle)", 2000)
             
     def change_zoom(self, factor):
         """Change the zoom level of the application by adjusting font sizes"""

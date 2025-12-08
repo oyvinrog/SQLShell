@@ -53,6 +53,13 @@ def create_file_menu(main_window):
     
     file_menu.addSeparator()
     
+    # Load data action (databases, CSV, Excel, Parquet, etc.)
+    load_data_action = file_menu.addAction('Load Data...')
+    load_data_action.setShortcut('Ctrl+L')
+    load_data_action.triggered.connect(main_window.show_load_dialog)
+    
+    file_menu.addSeparator()
+    
     exit_action = file_menu.addAction('Exit')
     exit_action.setShortcut('Ctrl+Q')
     exit_action.triggered.connect(main_window.close)
@@ -76,6 +83,22 @@ def create_view_menu(main_window):
     search_action = view_menu.addAction('Search in Results...')
     search_action.setShortcut('Ctrl+F')
     search_action.triggered.connect(main_window.show_search_dialog)
+    
+    view_menu.addSeparator()
+    
+    # Toggle sidebar visibility
+    main_window.toggle_sidebar_action = view_menu.addAction('Toggle Sidebar')
+    main_window.toggle_sidebar_action.setShortcut('Ctrl+B')
+    main_window.toggle_sidebar_action.setCheckable(True)
+    main_window.toggle_sidebar_action.setChecked(True)  # Sidebar visible by default
+    main_window.toggle_sidebar_action.triggered.connect(main_window.toggle_sidebar)
+    
+    # Compact mode - reduces padding and hides secondary UI elements
+    main_window.compact_mode_action = view_menu.addAction('Compact Mode')
+    main_window.compact_mode_action.setShortcut('Ctrl+Shift+C')
+    main_window.compact_mode_action.setCheckable(True)
+    main_window.compact_mode_action.setChecked(False)
+    main_window.compact_mode_action.triggered.connect(main_window.toggle_compact_mode)
     
     view_menu.addSeparator()
     

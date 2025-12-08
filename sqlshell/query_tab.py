@@ -31,17 +31,20 @@ class QueryTab(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
+        # Track compact mode state
+        self._compact_mode = False
+        
         # Create splitter for query and results
         self.splitter = QSplitter(Qt.Orientation.Vertical)
-        self.splitter.setHandleWidth(8)
+        self.splitter.setHandleWidth(6)
         self.splitter.setChildrenCollapsible(False)
         
         # Top part - Query section
         query_widget = QFrame()
         query_widget.setObjectName("content_panel")
-        query_layout = QVBoxLayout(query_widget)
-        query_layout.setContentsMargins(16, 16, 16, 16)
-        query_layout.setSpacing(12)
+        self.query_layout = QVBoxLayout(query_widget)
+        self.query_layout.setContentsMargins(8, 6, 8, 6)
+        self.query_layout.setSpacing(6)
         
         # Query input
         self.query_edit = SQLEditor()
@@ -69,59 +72,113 @@ class QueryTab(QWidget):
         # Connect keyboard events for direct handling of Ctrl+Enter
         self.query_edit.installEventFilter(self)
         
-        query_layout.addWidget(self.query_edit)
+        self.query_layout.addWidget(self.query_edit)
         
-        # Button row
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
+        # Ultra-compact button row (22px height)
+        self.button_layout = QHBoxLayout()
+        self.button_layout.setSpacing(2)
+        self.button_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.execute_btn = QPushButton('Execute Query')
+        btn_style = "padding: 2px 8px; font-size: 11px;"
+        btn_height = 22
+        
+        self.execute_btn = QPushButton('▶ Run')
         self.execute_btn.setObjectName("primary_button")
-        self.execute_btn.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.execute_btn.setToolTip('Execute entire query (Ctrl+Enter)')
         self.execute_btn.clicked.connect(self.execute_query)
+        self.execute_btn.setFixedHeight(btn_height)
+        self.execute_btn.setStyleSheet(btn_style)
         
-        # Add F5/F9 buttons for clarity
-        self.execute_all_btn = QPushButton('F5 - Execute All')
+        # Compact F5/F9 buttons
+        self.execute_all_btn = QPushButton('F5')
         self.execute_all_btn.setToolTip('Execute all statements (F5)')
         self.execute_all_btn.clicked.connect(self.execute_all_statements)
+        self.execute_all_btn.setFixedHeight(btn_height)
+        self.execute_all_btn.setFixedWidth(32)
+        self.execute_all_btn.setStyleSheet(btn_style)
         
-        self.execute_current_btn = QPushButton('F9 - Execute Current')
-        self.execute_current_btn.setToolTip('Execute current statement (F9)')
+        self.execute_current_btn = QPushButton('F9')
+        self.execute_current_btn.setToolTip('Execute current statement at cursor (F9)')
         self.execute_current_btn.clicked.connect(self.execute_current_statement)
+        self.execute_current_btn.setFixedHeight(btn_height)
+        self.execute_current_btn.setFixedWidth(32)
+        self.execute_current_btn.setStyleSheet(btn_style)
         
         self.clear_btn = QPushButton('Clear')
+        self.clear_btn.setToolTip('Clear query editor')
         self.clear_btn.clicked.connect(self.clear_query)
+        self.clear_btn.setFixedHeight(btn_height)
+        self.clear_btn.setStyleSheet(btn_style)
         
-        button_layout.addWidget(self.execute_btn)
-        button_layout.addWidget(self.execute_all_btn)
-        button_layout.addWidget(self.execute_current_btn)
-        button_layout.addWidget(self.clear_btn)
-        button_layout.addStretch()
+        self.button_layout.addWidget(self.execute_btn)
+        self.button_layout.addWidget(self.execute_all_btn)
+        self.button_layout.addWidget(self.execute_current_btn)
+        self.button_layout.addWidget(self.clear_btn)
+        self.button_layout.addStretch()
         
-        self.export_excel_btn = QPushButton('Export to Excel')
-        self.export_excel_btn.setIcon(QIcon.fromTheme("x-office-spreadsheet"))
+        self.export_excel_btn = QPushButton('Excel')
+        self.export_excel_btn.setToolTip('Export results to Excel')
         self.export_excel_btn.clicked.connect(self.export_to_excel)
+        self.export_excel_btn.setFixedHeight(btn_height)
+        self.export_excel_btn.setStyleSheet(btn_style)
         
-        self.export_parquet_btn = QPushButton('Export to Parquet')
-        self.export_parquet_btn.setIcon(QIcon.fromTheme("application-octet-stream"))
+        self.export_parquet_btn = QPushButton('Parquet')
+        self.export_parquet_btn.setToolTip('Export results to Parquet')
         self.export_parquet_btn.clicked.connect(self.export_to_parquet)
+        self.export_parquet_btn.setFixedHeight(btn_height)
+        self.export_parquet_btn.setStyleSheet(btn_style)
         
-        button_layout.addWidget(self.export_excel_btn)
-        button_layout.addWidget(self.export_parquet_btn)
+        self.button_layout.addWidget(self.export_excel_btn)
+        self.button_layout.addWidget(self.export_parquet_btn)
         
-        query_layout.addLayout(button_layout)
+        self.query_layout.addLayout(self.button_layout)
         
-        # Bottom part - Results section
+        # Bottom part - Results section with reduced padding
         results_widget = QWidget()
         self.results_layout = QVBoxLayout(results_widget)
-        self.results_layout.setContentsMargins(16, 16, 16, 16)
-        self.results_layout.setSpacing(12)
+        self.results_layout.setContentsMargins(8, 4, 8, 4)
+        self.results_layout.setSpacing(4)
         
-        # Results header with row count
+        # Compact results header with row count and info button
         header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+        
         self.results_title = QLabel(self.results_title_text)
         self.results_title.setObjectName("header_label")
+        self.results_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #34495e;")
         header_layout.addWidget(self.results_title)
+        
+        # Compact info button with tooltip (replaces verbose help text)
+        self.help_info_btn = QToolButton()
+        self.help_info_btn.setText("ℹ")
+        self.help_info_btn.setToolTip(
+            "<b>Keyboard Shortcuts:</b><br>"
+            "• <b>Ctrl+Enter</b> - Execute entire query<br>"
+            "• <b>F5</b> - Execute all statements<br>"
+            "• <b>F9</b> - Execute current statement<br>"
+            "• <b>Ctrl+F</b> - Search in results<br>"
+            "• <b>Ctrl+C</b> - Copy selected data<br>"
+            "• <b>Ctrl+B</b> - Toggle sidebar<br>"
+            "• <b>Ctrl+Shift+C</b> - Compact mode<br><br>"
+            "<b>Table Interactions:</b><br>"
+            "• Double-click header → Add column to query<br>"
+            "• Right-click header → Analytical options"
+        )
+        self.help_info_btn.setStyleSheet("""
+            QToolButton {
+                border: none;
+                color: #3498db;
+                font-size: 12px;
+                padding: 0 4px;
+            }
+            QToolButton:hover {
+                color: #2980b9;
+                background-color: #ecf0f1;
+                border-radius: 2px;
+            }
+        """)
+        header_layout.addWidget(self.help_info_btn)
         
         header_layout.addStretch()
         
@@ -130,12 +187,6 @@ class QueryTab(QWidget):
         header_layout.addWidget(self.row_count_label)
         
         self.results_layout.addLayout(header_layout)
-        
-        # Add descriptive text about table interactions and new F5/F9 functionality
-        help_text = QLabel("📊 <b>Table Interactions:</b> Double-click on a column header to add it to your query. Right-click for analytical capabilities. <b>🚀 Execution:</b> F5 executes all statements, F9 executes current statement (at cursor), Ctrl+Enter executes entire query. <b>🔍 Search:</b> Ctrl+F to search in results, ESC to clear search. <b>📋 Copy:</b> Ctrl+C copies selected data to clipboard.")
-        help_text.setWordWrap(True)
-        help_text.setStyleSheet("color: #7FB3D5; font-size: 11px; margin: 5px 0; padding: 8px; background-color: #F8F9FA; border-radius: 4px;")
-        self.results_layout.addWidget(help_text)
         
         # Results table with customized header
         self.results_table = CopyableTableWidget()
@@ -171,23 +222,59 @@ class QueryTab(QWidget):
         self.splitter.addWidget(query_widget)
         self.splitter.addWidget(results_widget)
         
-        # Set initial sizes - default 40% query, 60% results
-        # This will be better for most uses of the app
+        # Set initial sizes - balanced split (45% query, 55% results)
+        # Both areas are important for SQL work
         screen = QApplication.primaryScreen()
         if screen:
-            # Get available screen height
             available_height = screen.availableGeometry().height()
-            # Calculate reasonable query pane size (25-35% depending on screen size)
             if available_height >= 1080:  # Large screens
-                query_height = int(available_height * 0.3)  # 30% for query area
+                query_height = int(available_height * 0.40)  # 40% for query area
                 self.splitter.setSizes([query_height, available_height - query_height])
             else:  # Smaller screens
-                self.splitter.setSizes([300, 500])  # Default values for smaller screens
+                self.splitter.setSizes([350, 400])
         else:
-            # Fallback to fixed values if screen detection fails
-            self.splitter.setSizes([300, 500])
+            self.splitter.setSizes([350, 400])
         
         main_layout.addWidget(self.splitter)
+    
+    def set_compact_mode(self, enabled):
+        """Toggle compact mode for this tab to maximize query/results space"""
+        self._compact_mode = enabled
+        
+        if enabled:
+            # Compact mode: minimize UI chrome for maximum editor/results space
+            self.query_layout.setContentsMargins(2, 2, 2, 2)
+            self.query_layout.setSpacing(2)
+            self.results_layout.setContentsMargins(2, 2, 2, 2)
+            self.results_layout.setSpacing(2)
+            self.results_title.setVisible(False)
+            self.help_info_btn.setVisible(False)
+            
+            # Ultra-compact buttons (icons only)
+            self.execute_btn.setText("▶")
+            self.execute_btn.setFixedWidth(28)
+            self.clear_btn.setText("✕")
+            self.clear_btn.setFixedWidth(28)
+            self.export_excel_btn.setVisible(False)
+            self.export_parquet_btn.setVisible(False)
+        else:
+            # Normal mode
+            self.query_layout.setContentsMargins(8, 6, 8, 6)
+            self.query_layout.setSpacing(6)
+            self.results_layout.setContentsMargins(8, 4, 8, 4)
+            self.results_layout.setSpacing(4)
+            self.results_title.setVisible(True)
+            self.help_info_btn.setVisible(True)
+            
+            # Restore button labels
+            self.execute_btn.setText("▶ Run")
+            self.execute_btn.setMinimumWidth(0)
+            self.execute_btn.setMaximumWidth(16777215)
+            self.clear_btn.setText("Clear")
+            self.clear_btn.setMinimumWidth(0)
+            self.clear_btn.setMaximumWidth(16777215)
+            self.export_excel_btn.setVisible(True)
+            self.export_parquet_btn.setVisible(True)
         
     def get_query_text(self):
         """Get the current query text"""

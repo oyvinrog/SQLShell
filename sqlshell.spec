@@ -31,6 +31,8 @@ datas = [
     # SQLShell resources
     (os.path.join(SPEC_ROOT, 'sqlshell', 'resources'), 'sqlshell/resources'),
     (os.path.join(SPEC_ROOT, 'sqlshell', 'data'), 'sqlshell/data'),
+    # Include pyproject.toml for version reading in frozen builds
+    (os.path.join(SPEC_ROOT, 'pyproject.toml'), '.'),
 ]
 
 # Add sample data (optional - comment out for smaller builds)

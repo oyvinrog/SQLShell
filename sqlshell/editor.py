@@ -635,10 +635,9 @@ class SQLEditor(QPlainTextEdit):
                 else:
                     break
             
-            # Check if line ends with an opening bracket or keywords that should increase indentation
+            # Check if line ends with an opening bracket - only then increase indentation
             increase_indent = ""
-            if text.strip().endswith("(") or any(text.strip().upper().endswith(keyword) for keyword in 
-                                               ["SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "HAVING"]):
+            if text.strip().endswith("("):
                 increase_indent = "    "
                 
             # Insert new line with proper indentation
