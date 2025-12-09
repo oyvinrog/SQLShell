@@ -1,23 +1,98 @@
 import pandas as pd
 import numpy as np
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-import nltk
+import os
+import sys
 
-# Download required NLTK data
+# Flag to track if NLTK is available
+NLTK_AVAILABLE = False
+
+def _setup_nltk_data_path():
+    """Configure NLTK to find data in bundled location (for PyInstaller builds)"""
+    import nltk
+    
+    # Check if running from a PyInstaller bundle
+    if getattr(sys, 'frozen', False):
+        # Running in a PyInstaller bundle
+        bundle_dir = sys._MEIPASS
+        nltk_data_path = os.path.join(bundle_dir, 'nltk_data')
+        if os.path.exists(nltk_data_path):
+            nltk.data.path.insert(0, nltk_data_path)
+    
+    # Also check relative to the application
+    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    possible_paths = [
+        os.path.join(app_dir, 'nltk_data'),
+        os.path.join(os.path.dirname(app_dir), 'nltk_data'),
+    ]
+    for path in possible_paths:
+        if os.path.exists(path) and path not in nltk.data.path:
+            nltk.data.path.insert(0, path)
+
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
-# Download punkt_tab explicitly as required by the punkt tokenizer
-try:
-    nltk.data.find('tokenizers/punkt_tab/english')
-except LookupError:
-    nltk.download('punkt_tab')
+    import nltk
+    _setup_nltk_data_path()
+    from nltk.corpus import stopwords
+    from nltk.tokenize import word_tokenize
+    
+    # Try to find required NLTK data, download if missing
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        try:
+            nltk.download('punkt', quiet=True)
+        except Exception:
+            pass  # Download failed silently - NLTK features will be unavailable
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        try:
+            nltk.download('stopwords', quiet=True)
+        except Exception:
+            pass  # Download failed silently - NLTK features will be unavailable
+    try:
+        nltk.data.find('tokenizers/punkt_tab/english')
+    except LookupError:
+        try:
+            nltk.download('punkt_tab', quiet=True)
+        except Exception:
+            pass  # Download failed silently - NLTK features will be unavailable
+    
+    # Test if NLTK is actually working
+    try:
+        _ = stopwords.words('english')
+        _ = word_tokenize("test")
+        NLTK_AVAILABLE = True
+    except Exception:
+        NLTK_AVAILABLE = False
+        
+except ImportError:
+    NLTK_AVAILABLE = False
+
+
+def _simple_tokenize(text):
+    """Simple fallback tokenizer when NLTK is not available"""
+    import re
+    # Simple word tokenization using regex
+    return re.findall(r'\b[a-zA-Z]+\b', text.lower())
+
+
+def _get_simple_stopwords():
+    """Return a basic set of English stopwords when NLTK is not available"""
+    return {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare', 'ought',
+        'used', 'it', 'its', 'this', 'that', 'these', 'those', 'i', 'me', 'my',
+        'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours',
+        'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her',
+        'hers', 'herself', 'they', 'them', 'their', 'theirs', 'themselves',
+        'what', 'which', 'who', 'whom', 'when', 'where', 'why', 'how', 'all',
+        'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such',
+        'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+        'just', 'also', 'now', 'here', 'there', 'then', 'once', 'if', 'because',
+        'while', 'although', 'though', 'after', 'before', 'since', 'until', 'unless'
+    }
 
 def get_ohe(dataframe: pd.DataFrame, column: str, binary_format: str = "numeric", 
            algorithm: str = "basic") -> pd.DataFrame:
@@ -85,15 +160,21 @@ def get_ohe(dataframe: pd.DataFrame, column: str, binary_format: str = "numeric"
     # Apply appropriate encoding
     if is_text:
         # Apply text-based one-hot encoding
-        # Get stopwords
-        stop_words = set(stopwords.words('english'))
+        # Get stopwords (use NLTK if available, otherwise fallback)
+        if NLTK_AVAILABLE:
+            stop_words = set(stopwords.words('english'))
+        else:
+            stop_words = _get_simple_stopwords()
         
         # Tokenize and count words
         word_counts = {}
         for text in dataframe[column]:
             if isinstance(text, str):
-                # Tokenize and convert to lowercase
-                words = word_tokenize(text.lower())
+                # Tokenize and convert to lowercase (use NLTK if available, otherwise fallback)
+                if NLTK_AVAILABLE:
+                    words = word_tokenize(text.lower())
+                else:
+                    words = _simple_tokenize(text)
                 # Remove stopwords and count
                 words = [word for word in words if word not in stop_words and word.isalnum()]
                 for word in words:

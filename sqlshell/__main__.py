@@ -835,6 +835,12 @@ class SQLShell(QMainWindow):
                     print(f"Warning: Could not determine source table: {e}")
                 
                 self.populate_table(result)
+                
+                # User ran their own query, so disable preview mode
+                # This means tools should use current_df, not the full table
+                current_tab.is_preview_mode = False
+                current_tab.preview_table_name = None
+                
                 self.statusBar().showMessage(f"Query executed successfully. Time: {execution_time:.2f}s. Rows: {len(result)}")
                 
                 # Show success notification for query execution
@@ -908,12 +914,21 @@ class SQLShell(QMainWindow):
 
             start_time = datetime.now()
             
+            # Get current tab for resetting preview mode
+            current_tab = self.get_current_tab()
+            
             try:
                 # Use the database manager to execute the query
                 result = self.db_manager.execute_query(query_text)
                 
                 execution_time = (datetime.now() - start_time).total_seconds()
                 self.populate_table(result)
+                
+                # User ran their own query, so disable preview mode
+                # This means tools should use current_df, not the full table
+                if current_tab:
+                    current_tab.is_preview_mode = False
+                    current_tab.preview_table_name = None
                 
                 # Show which statement was executed in status
                 query_preview = query_text[:50] + "..." if len(query_text) > 50 else query_text
@@ -1060,6 +1075,10 @@ class SQLShell(QMainWindow):
             
             # Update the results title to show which table is being previewed
             current_tab.results_title.setText(f"PREVIEW: {table_name}")
+            
+            # Set preview mode - tools should use full table data, not just the preview
+            current_tab.is_preview_mode = True
+            current_tab.preview_table_name = table_name
             
         except Exception as e:
             current_tab.results_table.setRowCount(0)
@@ -4005,19 +4024,48 @@ LIMIT 10
             show_error_notification(f"Profile Error: Error analyzing row similarity - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing similarity: {str(e)}')
 
+    def get_data_for_tool(self):
+        """
+        Get the appropriate DataFrame for tools.
+        
+        If we're in preview mode (user clicked on a table in the left panel),
+        this returns the FULL table data, not just the preview rows.
+        
+        If the user ran their own query, this returns the query results (current_df).
+        
+        Returns:
+            Tuple of (DataFrame, is_full_table) where is_full_table indicates
+            whether the full table was loaded (useful for status messages).
+            Returns (None, False) if no data is available.
+        """
+        current_tab = self.get_current_tab()
+        if not current_tab or current_tab.current_df is None:
+            return None, False
+        
+        # Check if we're in preview mode and should use full table
+        if current_tab.is_preview_mode and current_tab.preview_table_name:
+            try:
+                # Get the full table data
+                full_df = self.db_manager.get_full_table(current_tab.preview_table_name)
+                return full_df, True
+            except Exception as e:
+                # Fall back to current_df if we can't get full table
+                print(f"Warning: Could not get full table, using preview: {e}")
+                return current_tab.current_df.copy(), False
+        
+        # Not in preview mode, use the query results
+        return current_tab.current_df.copy(), False
+
     def explain_column(self, column_name):
         """Analyze a column to explain its relationship with other columns"""
         try:
-            # Get the current tab
-            current_tab = self.get_current_tab()
-            if not current_tab or current_tab.current_df is None:
+            # Get the appropriate data (full table if preview mode, else query results)
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
                 return
                 
             # Show a loading indicator
             self.statusBar().showMessage(f'Analyzing column "{column_name}"...')
-            
-            # Get the dataframe from the current tab
-            df = current_tab.current_df
             
             if df is not None and not df.empty:
                 # Sample the data if it's larger than 100 rows for ultra-fast performance
@@ -4050,20 +4098,18 @@ LIMIT 10
     def encode_text(self, column_name):
         """Generate one-hot encoding for a text column and visualize the results"""
         try:
-            # Get the current tab
-            current_tab = self.get_current_tab()
-            if not current_tab or current_tab.current_df is None:
+            # Get the appropriate data (full table if preview mode, else query results)
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
                 return
                 
             # Show a loading indicator
             self.statusBar().showMessage(f'Preparing one-hot encoding for "{column_name}"...')
             
-            # Get the dataframe from the current tab
-            full_df = current_tab.current_df.copy()
-            df = full_df
-            
-            # Save original row count for reference
-            current_tab.original_df_rowcount = len(full_df)
+            # Get the current tab to save original row count
+            current_tab = self.get_current_tab()
+            if current_tab:
+                current_tab.original_df_rowcount = len(df)
             
             # Check if the column exists
             if column_name not in df.columns:
@@ -4096,6 +4142,10 @@ LIMIT 10
             # Update the current tab's dataframe with the encoded version
             current_tab.current_df = encoded_df
             
+            # Reset preview mode - we're now showing modified data
+            current_tab.is_preview_mode = False
+            current_tab.preview_table_name = None
+            
             # Update the table display
             self.populate_table(encoded_df)
             
@@ -4106,20 +4156,113 @@ LIMIT 10
             show_error_notification(f"Apply Encoding Error: Error applying encoding - {str(e)}")
             self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
 
+    def discover_classification_rules(self, target_column):
+        """Discover classification rules (IF-THEN rules) using CN2 algorithm"""
+        try:
+            # Get the appropriate data (full table if preview mode, else query results)
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
+                show_warning_notification("No data available. Please load some data first.")
+                return
+                
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Discovering classification rules for "{target_column}"...')
+            
+            # Check if the column exists
+            if target_column not in df.columns:
+                show_warning_notification(f"Column '{target_column}' not found in the current dataset.")
+                return
+            
+            # Check if there are enough columns for rule learning
+            if len(df.columns) < 2:
+                show_warning_notification("Need at least 2 columns (target + features) for rule discovery.")
+                return
+            
+            # Check for NaN values in target
+            n_nan = df[target_column].isna().sum()
+            if n_nan > 0:
+                # Will be handled by filtering, just warn
+                if n_nan == len(df):
+                    show_warning_notification(
+                        f"Column '{target_column}' contains only missing values. "
+                        "Cannot discover rules."
+                    )
+                    return
+            
+            # Check if target column has reasonable number of unique values
+            n_unique = df[target_column].dropna().nunique()
+            
+            # Check if target is numeric with many unique values - auto-discretize
+            discretizer = None
+            is_numeric = pd.api.types.is_numeric_dtype(df[target_column])
+            
+            if is_numeric and n_unique > 15:
+                # Auto-discretize numeric targets with many distinct values
+                # Uses academically-grounded binning methods
+                from sqlshell.utils.profile_cn2 import discretize_numeric_target
+                
+                self.statusBar().showMessage(
+                    f'Discretizing numeric column "{target_column}" ({n_unique} unique values)...'
+                )
+                
+                df, discretizer = discretize_numeric_target(
+                    df, 
+                    target_column, 
+                    method='auto',  # Auto-selects best method based on distribution
+                    n_bins=None     # Auto-compute optimal number of bins
+                )
+                
+                # Update unique count after discretization
+                n_unique = df[target_column].dropna().nunique()
+            elif n_unique > 50:
+                # Non-numeric column with too many values
+                show_warning_notification(
+                    f"Column '{target_column}' has {n_unique} unique values. "
+                    "CN2 works best with categorical targets (fewer distinct values)."
+                )
+                return
+            
+            if n_unique < 2:
+                show_warning_notification(
+                    f"Column '{target_column}' has only {n_unique} unique value(s). "
+                    "Need at least 2 distinct classes for classification."
+                )
+                return
+            
+            # Import and use the visualize_cn2_rules function
+            from sqlshell.utils.profile_cn2 import visualize_cn2_rules
+            
+            # Create and show the CN2 rules visualization
+            vis = visualize_cn2_rules(df, target_column, beam_width=5, min_covered_examples=5)
+            
+            # If we discretized, add info about the binning to the visualization
+            if discretizer is not None:
+                vis.setWindowTitle(
+                    f"CN2 Rule Induction - {target_column} (Discretized: {discretizer.method_used_})"
+                )
+                # Store discretizer info for reference
+                vis._discretizer = discretizer
+            
+            # Store reference to prevent garbage collection
+            self._current_cn2_vis = vis
+            
+            self.statusBar().showMessage(f'Classification rules discovered for "{target_column}"')
+                
+        except Exception as e:
+            show_error_notification(f"Rule Discovery Error: {str(e)}")
+            self.statusBar().showMessage(f'Error discovering rules: {str(e)}')
+
     def predict_column(self, column_name):
         """Create a prediction model for a column and add predictions as new column"""
         try:
-            # Get the current tab
-            current_tab = self.get_current_tab()
-            if not current_tab or current_tab.current_df is None:
+            # Get the appropriate data (full table if preview mode, else query results)
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
                 show_warning_notification("No data available for prediction. Please load some data first.")
                 return
                 
             # Show a loading indicator
             self.statusBar().showMessage(f'Preparing prediction model for "{column_name}"...')
-            
-            # Get the dataframe from the current tab
-            df = current_tab.current_df.copy()
             
             # Check if the column exists
             if column_name not in df.columns:
@@ -4175,6 +4318,10 @@ LIMIT 10
             # Update the current tab's dataframe with the predicted version
             current_tab.current_df = predicted_df
             
+            # Reset preview mode - we're now showing modified data
+            current_tab.is_preview_mode = False
+            current_tab.preview_table_name = None
+            
             # Copy the _query_source attribute to the new dataframe
             if table_name:
                 setattr(predicted_df, '_query_source', table_name)
@@ -4215,9 +4362,9 @@ LIMIT 10
     def load_and_apply_model(self):
         """Load a saved prediction model and apply it to the current dataset"""
         try:
-            # Get the current tab
-            current_tab = self.get_current_tab()
-            if not current_tab or current_tab.current_df is None:
+            # Get the appropriate data (full table if preview mode, else query results)
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
                 show_warning_notification("No data available. Please load some data first.")
                 return
             
@@ -4228,7 +4375,7 @@ LIMIT 10
             self.statusBar().showMessage('Loading prediction model...')
             
             # Load and apply the model
-            predicted_df = show_load_model_dialog(current_tab.current_df, self)
+            predicted_df = show_load_model_dialog(df, self)
             
             if predicted_df is not None:
                 # Apply the predictions using the existing method

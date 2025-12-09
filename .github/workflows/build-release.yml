@@ -129,6 +129,48 @@ jobs:
       - name: Build executable
         run: python build.py
 
+      - name: Verify build includes critical modules
+        run: |
+          echo "=== Checking built distribution for critical modules ==="
+          
+          # Check that sqlshell/utils directory exists
+          if [ ! -d "dist/SQLShell/_internal/sqlshell/utils" ]; then
+            echo "ERROR: sqlshell/utils directory missing from build!"
+            echo "Contents of dist/SQLShell/_internal/sqlshell/:"
+            ls -la dist/SQLShell/_internal/sqlshell/ || echo "sqlshell directory not found"
+            exit 1
+          fi
+          
+          # Check for critical files
+          CRITICAL_FILES=(
+            "dist/SQLShell/_internal/sqlshell/utils/profile_column.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_cn2.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_ohe.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_entropy.py"
+            "dist/SQLShell/_internal/sqlshell/db/database_manager.py"
+            "dist/SQLShell/_internal/sqlshell/ui/filter_header.py"
+          )
+          
+          MISSING=0
+          for file in "${CRITICAL_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: Missing critical file: $file"
+              MISSING=1
+            else
+              echo "OK: $file"
+            fi
+          done
+          
+          if [ $MISSING -eq 1 ]; then
+            echo ""
+            echo "Build verification failed! Some critical modules are missing."
+            echo "Check that sqlshell.spec includes all required directories in 'datas'."
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== Build verification passed ==="
+
       - name: Create tarball
         run: |
           cd dist
@@ -224,6 +266,48 @@ jobs:
         run: |
           python -m PyInstaller --clean --noconfirm sqlshell.spec
 
+      - name: Verify build includes critical modules
+        run: |
+          Write-Host "=== Checking built distribution for critical modules ===" -ForegroundColor Cyan
+          
+          # Check that sqlshell/utils directory exists
+          if (-not (Test-Path "dist/SQLShell/_internal/sqlshell/utils")) {
+            Write-Host "ERROR: sqlshell/utils directory missing from build!" -ForegroundColor Red
+            Write-Host "Contents of dist/SQLShell/_internal/sqlshell/:"
+            Get-ChildItem "dist/SQLShell/_internal/sqlshell/" -ErrorAction SilentlyContinue
+            exit 1
+          }
+          
+          # Check for critical files
+          $criticalFiles = @(
+            "dist/SQLShell/_internal/sqlshell/utils/profile_column.py",
+            "dist/SQLShell/_internal/sqlshell/utils/profile_cn2.py",
+            "dist/SQLShell/_internal/sqlshell/utils/profile_ohe.py",
+            "dist/SQLShell/_internal/sqlshell/utils/profile_entropy.py",
+            "dist/SQLShell/_internal/sqlshell/db/database_manager.py",
+            "dist/SQLShell/_internal/sqlshell/ui/filter_header.py"
+          )
+          
+          $missing = $false
+          foreach ($file in $criticalFiles) {
+            if (-not (Test-Path $file)) {
+              Write-Host "ERROR: Missing critical file: $file" -ForegroundColor Red
+              $missing = $true
+            } else {
+              Write-Host "OK: $file" -ForegroundColor Green
+            }
+          }
+          
+          if ($missing) {
+            Write-Host ""
+            Write-Host "Build verification failed! Some critical modules are missing." -ForegroundColor Red
+            Write-Host "Check that sqlshell.spec includes all required directories in 'datas'."
+            exit 1
+          }
+          
+          Write-Host ""
+          Write-Host "=== Build verification passed ===" -ForegroundColor Green
+
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
@@ -263,6 +347,10 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
+      - name: Install system dependencies
+        run: |
+          brew install libomp
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -271,6 +359,48 @@ jobs:
 
       - name: Build executable
         run: python build.py
+
+      - name: Verify build includes critical modules
+        run: |
+          echo "=== Checking built distribution for critical modules ==="
+          
+          # Check that sqlshell/utils directory exists
+          if [ ! -d "dist/SQLShell/_internal/sqlshell/utils" ]; then
+            echo "ERROR: sqlshell/utils directory missing from build!"
+            echo "Contents of dist/SQLShell/_internal/sqlshell/:"
+            ls -la dist/SQLShell/_internal/sqlshell/ || echo "sqlshell directory not found"
+            exit 1
+          fi
+          
+          # Check for critical files
+          CRITICAL_FILES=(
+            "dist/SQLShell/_internal/sqlshell/utils/profile_column.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_cn2.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_ohe.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_entropy.py"
+            "dist/SQLShell/_internal/sqlshell/db/database_manager.py"
+            "dist/SQLShell/_internal/sqlshell/ui/filter_header.py"
+          )
+          
+          MISSING=0
+          for file in "${CRITICAL_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: Missing critical file: $file"
+              MISSING=1
+            else
+              echo "OK: $file"
+            fi
+          done
+          
+          if [ $MISSING -eq 1 ]; then
+            echo ""
+            echo "Build verification failed! Some critical modules are missing."
+            echo "Check that sqlshell.spec includes all required directories in 'datas'."
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== Build verification passed ==="
 
       - name: Create DMG
         run: |

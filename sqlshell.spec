@@ -31,6 +31,12 @@ datas = [
     # SQLShell resources
     (os.path.join(SPEC_ROOT, 'sqlshell', 'resources'), 'sqlshell/resources'),
     (os.path.join(SPEC_ROOT, 'sqlshell', 'data'), 'sqlshell/data'),
+    # SQLShell utils - include as source files for dynamic imports
+    (os.path.join(SPEC_ROOT, 'sqlshell', 'utils'), 'sqlshell/utils'),
+    # SQLShell db - include as source files for dynamic imports
+    (os.path.join(SPEC_ROOT, 'sqlshell', 'db'), 'sqlshell/db'),
+    # SQLShell ui - include as source files for dynamic imports
+    (os.path.join(SPEC_ROOT, 'sqlshell', 'ui'), 'sqlshell/ui'),
     # Include pyproject.toml for version reading in frozen builds
     (os.path.join(SPEC_ROOT, 'pyproject.toml'), '.'),
 ]
@@ -45,6 +51,26 @@ datas += collect_data_files('pyarrow')
 datas += collect_data_files('xgboost')
 datas += collect_data_files('sklearn')
 datas += collect_data_files('nltk')
+
+# Include NLTK data files (punkt tokenizer, stopwords) - required for text encoding features
+# NLTK data is typically in ~/nltk_data or system locations
+import os
+nltk_data_paths = [
+    os.path.expanduser('~/nltk_data'),
+    '/usr/share/nltk_data',
+    '/usr/local/share/nltk_data',
+]
+for nltk_path in nltk_data_paths:
+    if os.path.exists(nltk_path):
+        # Include tokenizers (punkt, punkt_tab)
+        tokenizers_path = os.path.join(nltk_path, 'tokenizers')
+        if os.path.exists(tokenizers_path):
+            datas.append((tokenizers_path, 'nltk_data/tokenizers'))
+        # Include corpora (stopwords)
+        corpora_path = os.path.join(nltk_path, 'corpora')
+        if os.path.exists(corpora_path):
+            datas.append((corpora_path, 'nltk_data/corpora'))
+        break  # Use first available path
 
 # Hidden imports that PyInstaller might miss
 hiddenimports = [

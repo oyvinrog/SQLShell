@@ -30,7 +30,10 @@ from scipy.stats import chi2_contingency, pearsonr
 
 # Import matplotlib at the top level
 import matplotlib
-matplotlib.use('QtAgg')
+try:
+    matplotlib.use('QtAgg')
+except ImportError:
+    matplotlib.use('Agg')  # Fall back to headless backend for CI/testing
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 import seaborn as sns
@@ -996,14 +999,14 @@ class ExplainerThread(QThread):
         self.importance_table.setRowCount(1)
         self.importance_table.setColumnCount(3)
         self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
-        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split('\n')[0]}"))
+        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split(chr(10))[0]}"))
         self.importance_table.setItem(0, 1, QTableWidgetItem(""))
         self.importance_table.setItem(0, 2, QTableWidgetItem(""))
         self.importance_table.resizeColumnsToContents()
         
         # Update the chart to show error
         self.chart_view.axes.clear()
-        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message.split('\n')[0]}", 
+        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message.split(chr(10))[0]}", 
                                ha='center', va='center', fontsize=12, color='red',
                                wrap=True)
         self.chart_view.axes.set_axis_off()
@@ -1951,14 +1954,14 @@ class ColumnProfilerApp(QMainWindow):
         self.importance_table.setRowCount(1)
         self.importance_table.setColumnCount(3)
         self.importance_table.setHorizontalHeaderLabels(["Feature", "Importance", "Abs. Correlation"])
-        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split('\n')[0]}"))
+        self.importance_table.setItem(0, 0, QTableWidgetItem(f"Error: {error_message.split(chr(10))[0]}"))
         self.importance_table.setItem(0, 1, QTableWidgetItem(""))
         self.importance_table.setItem(0, 2, QTableWidgetItem(""))
         self.importance_table.resizeColumnsToContents()
         
         # Update the chart to show error
         self.chart_view.axes.clear()
-        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message.split('\n')[0]}", 
+        self.chart_view.axes.text(0.5, 0.5, f"Error calculating importance:\n{error_message.split(chr(10))[0]}", 
                                ha='center', va='center', fontsize=12, color='red',
                                wrap=True)
         self.chart_view.axes.set_axis_off()
