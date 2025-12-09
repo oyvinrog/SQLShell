@@ -138,8 +138,9 @@ def create_large_numbers_data(num_records=100):
                               for _ in range(num_records)]
     
     # Create monetary values (with decimals)
-    data['Revenue'] = [np.random.randint(1000000, 9999999999) + np.random.random() for _ in range(num_records)]
-    data['Budget'] = [np.random.randint(10000000, 999999999) + np.random.random() for _ in range(num_records)]
+    # Use dtype=np.int64 to avoid int32 overflow on Windows
+    data['Revenue'] = [np.random.randint(1000000, 9999999999, dtype=np.int64) + np.random.random() for _ in range(num_records)]
+    data['Budget'] = [np.random.randint(10000000, 999999999, dtype=np.int64) + np.random.random() for _ in range(num_records)]
     
     # Create DataFrame
     df = pd.DataFrame(data)

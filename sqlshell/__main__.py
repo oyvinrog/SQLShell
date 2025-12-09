@@ -4079,9 +4079,8 @@ LIMIT 10
                 
                 # Create and show the visualization
                 self.statusBar().showMessage(f'Generating column profile for "{column_name}"...')
-                visualize_profile(df, column_name)
-                
-                # We don't need to store a reference since the UI keeps itself alive
+                # Store reference to prevent garbage collection on Windows
+                self._column_profile_window = visualize_profile(df, column_name)
                 
                 if row_count > 100:
                     self.statusBar().showMessage(f'Column profile generated for "{column_name}" (sampled 100 rows from {row_count})')
@@ -4120,10 +4119,11 @@ LIMIT 10
             from sqlshell.utils.profile_ohe import visualize_ohe
             
             # Create and show the one-hot encoding visualization
-            vis = visualize_ohe(df, column_name)
+            # Store reference as instance variable to prevent garbage collection on Windows
+            self._ohe_visualization = visualize_ohe(df, column_name)
             
             # Connect the encodingApplied signal to our handler
-            vis.encodingApplied.connect(self.apply_encoding_to_current_tab)
+            self._ohe_visualization.encodingApplied.connect(self.apply_encoding_to_current_tab)
             
             self.statusBar().showMessage(f'One-hot encoding visualization ready for "{column_name}"')
                 

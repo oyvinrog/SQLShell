@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlshell"
-version = "0.3.6"
+version = "0.3.7"
 description = "A powerful SQL shell with GUI interface for data analysis"
 readme = "README.md"
 authors = [
