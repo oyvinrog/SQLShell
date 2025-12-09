@@ -7,7 +7,7 @@ Build command: pyinstaller sqlshell.spec
 import sys
 import os
 import re
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -175,6 +175,19 @@ hiddenimports += collect_submodules('PyQt6')
 # Binaries to include (platform-specific DLLs/SOs will be auto-detected)
 binaries = []
 
+# Collect XGBoost native libraries (.so/.dll files) - critical for xgboost to work
+binaries += collect_dynamic_libs('xgboost')
+
+# Add xgboost hidden imports manually (avoid collect_submodules which tries to import testing modules)
+hiddenimports += [
+    'xgboost',
+    'xgboost.core',
+    'xgboost.sklearn',
+    'xgboost.training',
+    'xgboost.callback',
+    'xgboost.dask',
+]
+
 # Analysis
 a = Analysis(
     [os.path.join(SPEC_ROOT, 'sqlshell', '__main__.py')],
@@ -191,7 +204,7 @@ a = Analysis(
         'tcl',
         'tk',
         'test',
-        'unittest',
+        # Note: unittest is needed by sklearn internals (unittest.mock) - don't exclude it
         'pytest',
         'pytest_cov',
         'pytest_xdist',
