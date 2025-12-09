@@ -82,21 +82,21 @@ try:
         try:
             nltk.download('punkt', quiet=True)
         except Exception:
-            pass
+            pass  # Download failed silently - NLTK features will be unavailable
     try:
         nltk.data.find('corpora/stopwords')
     except LookupError:
         try:
             nltk.download('stopwords', quiet=True)
         except Exception:
-            pass
+            pass  # Download failed silently - NLTK features will be unavailable
     try:
         nltk.data.find('tokenizers/punkt_tab/english')
     except LookupError:
         try:
             nltk.download('punkt_tab', quiet=True)
         except Exception:
-            pass
+            pass  # Download failed silently - NLTK features will be unavailable
     
     # Test if NLTK is actually working
     try:

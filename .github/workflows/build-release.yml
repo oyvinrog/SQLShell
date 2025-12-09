@@ -144,6 +144,7 @@ jobs:
           # Check for critical files
           CRITICAL_FILES=(
             "dist/SQLShell/_internal/sqlshell/utils/profile_column.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_cn2.py"
             "dist/SQLShell/_internal/sqlshell/utils/profile_ohe.py"
             "dist/SQLShell/_internal/sqlshell/utils/profile_entropy.py"
             "dist/SQLShell/_internal/sqlshell/db/database_manager.py"
@@ -280,6 +281,7 @@ jobs:
           # Check for critical files
           $criticalFiles = @(
             "dist/SQLShell/_internal/sqlshell/utils/profile_column.py",
+            "dist/SQLShell/_internal/sqlshell/utils/profile_cn2.py",
             "dist/SQLShell/_internal/sqlshell/utils/profile_ohe.py",
             "dist/SQLShell/_internal/sqlshell/utils/profile_entropy.py",
             "dist/SQLShell/_internal/sqlshell/db/database_manager.py",
@@ -373,6 +375,7 @@ jobs:
           # Check for critical files
           CRITICAL_FILES=(
             "dist/SQLShell/_internal/sqlshell/utils/profile_column.py"
+            "dist/SQLShell/_internal/sqlshell/utils/profile_cn2.py"
             "dist/SQLShell/_internal/sqlshell/utils/profile_ohe.py"
             "dist/SQLShell/_internal/sqlshell/utils/profile_entropy.py"
             "dist/SQLShell/_internal/sqlshell/db/database_manager.py"

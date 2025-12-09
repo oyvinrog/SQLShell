@@ -48,6 +48,7 @@ class TestCriticalImports:
         'sqlshell.utils.profile_ohe_comparison',
         'sqlshell.utils.profile_prediction',
         'sqlshell.utils.profile_similarity',
+        'sqlshell.utils.profile_cn2',
         'sqlshell.utils.search_in_df',
         
         # Other critical modules
@@ -146,6 +147,7 @@ class TestPackageStructure:
         
         required_files = [
             'profile_column.py',
+            'profile_cn2.py',
             'profile_distributions.py',
             'profile_entropy.py',
             'profile_foreign_keys.py',
