@@ -2,7 +2,10 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 import matplotlib
-matplotlib.use('qtagg')  # Set the backend before importing pyplot
+try:
+    matplotlib.use('qtagg')  # Set the backend before importing pyplot
+except ImportError:
+    matplotlib.use('Agg')  # Fall back to headless backend for CI/testing
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg

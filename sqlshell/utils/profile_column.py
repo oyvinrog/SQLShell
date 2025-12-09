@@ -30,7 +30,10 @@ from scipy.stats import chi2_contingency, pearsonr
 
 # Import matplotlib at the top level
 import matplotlib
-matplotlib.use('QtAgg')
+try:
+    matplotlib.use('QtAgg')
+except ImportError:
+    matplotlib.use('Agg')  # Fall back to headless backend for CI/testing
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 import seaborn as sns
