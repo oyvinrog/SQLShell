@@ -345,6 +345,10 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
+      - name: Install system dependencies
+        run: |
+          brew install libomp
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
