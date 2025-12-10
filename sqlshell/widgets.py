@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QTableWidget, QApplication, QMenu
+from PyQt6.QtWidgets import QTableWidget, QApplication, QMenu, QMessageBox
 from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QKeyEvent, QAction, QIcon
 import pandas as pd
@@ -71,6 +71,14 @@ class CopyableTableWidget(QTableWidget):
         copy_all_action.triggered.connect(self.copy_all_to_clipboard)
         menu.addAction(copy_all_action)
         
+        # Add count rows action if we have data
+        parent_tab = getattr(self, '_parent_tab', None)
+        if parent_tab and hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+            menu.addSeparator()
+            count_rows_action = QAction("Count Rows", self)
+            count_rows_action.triggered.connect(self._show_row_count)
+            menu.addAction(count_rows_action)
+        
         # Add table analysis options if we have a table context
         table_name = self._get_current_table_name()
         main_window = self._get_main_window()
@@ -120,6 +128,33 @@ class CopyableTableWidget(QTableWidget):
         if main_window and hasattr(main_window, method_name):
             method = getattr(main_window, method_name)
             method(table_name)
+    
+    def _show_row_count(self):
+        """Show the row count in a message box"""
+        parent_tab = getattr(self, '_parent_tab', None)
+        if not parent_tab:
+            return
+        
+        # Check if we're in preview mode - if so, get the full table count
+        if (hasattr(parent_tab, 'is_preview_mode') and parent_tab.is_preview_mode and 
+            hasattr(parent_tab, 'preview_table_name') and parent_tab.preview_table_name):
+            # Get the main window to access the database manager
+            main_window = self._get_main_window()
+            if main_window and hasattr(main_window, 'db_manager'):
+                try:
+                    # Get the full table to count all rows
+                    full_df = main_window.db_manager.get_full_table(parent_tab.preview_table_name)
+                    row_count = len(full_df)
+                    QMessageBox.information(self, "Row Count", f"Total rows: {row_count:,}")
+                except Exception as e:
+                    # Fall back to preview count if we can't get full table
+                    if hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+                        row_count = len(parent_tab.current_df)
+                        QMessageBox.information(self, "Row Count", f"Preview rows: {row_count:,}\n(Error getting full count: {str(e)})")
+        elif hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+            # Not in preview mode, just show the current dataframe count
+            row_count = len(parent_tab.current_df)
+            QMessageBox.information(self, "Row Count", f"Total rows: {row_count:,}")
     
     def _get_unformatted_value(self, row, col):
         """Get the unformatted value from the original DataFrame if available"""
