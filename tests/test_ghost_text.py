@@ -628,3 +628,56 @@ class TestEdgeCases:
         result = editor.accept_ghost_text()
         assert result is True
         assert "FROM" in editor.toPlainText()
+    
+    def test_cursor_position_unchanged_after_ghost_text_display(self, editor):
+        """Test that cursor position doesn't change when ghost text is displayed."""
+        editor.setPlainText("SELECT mac")
+        cursor = editor.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        editor.setTextCursor(cursor)
+        
+        original_position = cursor.position()
+        
+        # Show ghost text
+        editor.show_ghost_text("macchiato", original_position)
+        
+        # Cursor should not have moved
+        assert editor.textCursor().position() == original_position
+    
+    def test_cursor_position_unchanged_after_accept(self, editor):
+        """Test that cursor is at correct position after accepting ghost text."""
+        editor.setPlainText("SELECT mac")
+        cursor = editor.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        editor.setTextCursor(cursor)
+        
+        original_position = cursor.position()
+        
+        # Show and accept ghost text
+        editor.show_ghost_text("macchiato", original_position)
+        editor.accept_ghost_text()
+        
+        # Cursor should be at end of "macchiato"
+        text = editor.toPlainText()
+        expected_position = text.find("macchiato") + len("macchiato")
+        assert editor.textCursor().position() == expected_position
+    
+    def test_ghost_text_rejected_when_cursor_moves_during_display(self, editor):
+        """Test that ghost text is not shown if cursor moves between request and display."""
+        editor.setPlainText("SELECT mac")
+        cursor = editor.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        editor.setTextCursor(cursor)
+        
+        position = cursor.position()
+        
+        # Cursor moves before showing ghost text
+        cursor.movePosition(cursor.MoveOperation.Left, cursor.MoveMode.MoveAnchor, 3)
+        editor.setTextCursor(cursor)
+        
+        # Try to show ghost text at old position
+        editor.show_ghost_text("macchiato", position)
+        
+        # Ghost text should not be shown
+        assert editor.ghost_text == ""
+        assert editor.ghost_text_suggestion == ""

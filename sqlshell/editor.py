@@ -139,6 +139,11 @@ class SQLEditor(QPlainTextEdit):
 
     def show_ghost_text(self, suggestion, position):
         """Show ghost text suggestion at the given position"""
+        # Verify the cursor is still at the expected position
+        if self.textCursor().position() != position:
+            # Cursor has moved, don't show ghost text
+            return
+        
         self.ghost_text_suggestion = suggestion
         self.ghost_text_position = position
         
@@ -151,7 +156,8 @@ class SQLEditor(QPlainTextEdit):
             self.ghost_text = suggestion[len(current_word):]
         else:
             self.ghost_text = suggestion
-            
+        
+        # Schedule a viewport update without moving cursor
         self.viewport().update()  # Trigger a repaint
 
     def accept_ghost_text(self):
@@ -159,13 +165,14 @@ class SQLEditor(QPlainTextEdit):
         if not self.ghost_text_suggestion:
             return False
         
+        # Get a fresh cursor and save the current position
         cursor = self.textCursor()
-        current_position = cursor.position()
+        original_position = cursor.position()
         
         # Verify we're still at the expected position (allow small tolerance for continued typing)
         if self.ghost_text_position >= 0:
             # Calculate how many characters were typed since ghost text was shown
-            chars_typed = current_position - self.ghost_text_position
+            chars_typed = original_position - self.ghost_text_position
             
             # If too many characters were typed, or cursor moved backwards, reject
             if chars_typed < 0 or chars_typed > len(self.ghost_text_partial_word) + 10:
@@ -178,38 +185,55 @@ class SQLEditor(QPlainTextEdit):
         # Check if suggestion is a full word replacement or just a completion suffix
         is_full_replacement = self.ghost_text_suggestion.lower().startswith(current_word.lower()) if current_word else True
         
-        if is_full_replacement:
-            # Full replacement: suggestion starts with current word
-            # Validate that current word is still a prefix of suggestion
-            if current_word and not self.ghost_text_suggestion.lower().startswith(current_word.lower()):
-                # User has typed something that doesn't match the suggestion
-                self.clear_ghost_text()
-                return False
-            
-            # Delete the current word and replace with full suggestion
-            if current_word:
-                # Move back to select the partial word
-                for _ in range(len(current_word)):
-                    cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter, 
-                                      QTextCursor.MoveMode.KeepAnchor)
-                cursor.removeSelectedText()
-            
-            # Insert the full suggestion
-            cursor.insertText(self.ghost_text_suggestion)
-        else:
-            # Completion suffix: just append the suggestion to current text
-            # Validate: current word should still match the original partial word we started with
-            if self.ghost_text_partial_word and current_word:
-                # Check if current word still starts with the original partial word
-                if not current_word.lower().startswith(self.ghost_text_partial_word.lower()):
-                    # User has typed something that doesn't match original context
+        # Begin editing block to ensure atomic operation
+        cursor.beginEditBlock()
+        
+        try:
+            if is_full_replacement:
+                # Full replacement: suggestion starts with current word
+                # Validate that current word is still a prefix of suggestion
+                if current_word and not self.ghost_text_suggestion.lower().startswith(current_word.lower()):
+                    # User has typed something that doesn't match the suggestion
+                    cursor.endEditBlock()
                     self.clear_ghost_text()
                     return False
+                
+                # Delete the current word and replace with full suggestion
+                if current_word:
+                    # Move back to select the partial word
+                    for _ in range(len(current_word)):
+                        cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter, 
+                                          QTextCursor.MoveMode.KeepAnchor)
+                    cursor.removeSelectedText()
+                
+                # Insert the full suggestion
+                cursor.insertText(self.ghost_text_suggestion)
+            else:
+                # Completion suffix: just append the suggestion to current text
+                # Validate: current word should still match the original partial word we started with
+                if self.ghost_text_partial_word and current_word:
+                    # Check if current word still starts with the original partial word
+                    if not current_word.lower().startswith(self.ghost_text_partial_word.lower()):
+                        # User has typed something that doesn't match original context
+                        cursor.endEditBlock()
+                        self.clear_ghost_text()
+                        return False
+                
+                # No need to delete anything, just insert at current position
+                cursor.insertText(self.ghost_text_suggestion)
             
-            # No need to delete anything, just insert
-            cursor.insertText(self.ghost_text_suggestion)
-        
-        self.setTextCursor(cursor)
+            # End editing block
+            cursor.endEditBlock()
+            
+            # Update the editor's cursor
+            self.setTextCursor(cursor)
+            
+        except Exception as e:
+            # If anything goes wrong, end the edit block and restore cursor
+            cursor.endEditBlock()
+            print(f"Error accepting ghost text: {e}")
+            self.clear_ghost_text()
+            return False
         
         # Clear ghost text
         self.clear_ghost_text()
@@ -559,11 +583,12 @@ class SQLEditor(QPlainTextEdit):
         """Show ghost text completion instead of popup"""
         import re
         
-        print(f"[EDITOR DEBUG] complete() called")
-        
         # Get the text under cursor
         prefix = self.text_under_cursor()
         current_word = self.get_word_under_cursor()
+        
+        # Save current cursor position to detect if it changes during completion
+        initial_cursor_pos = self.textCursor().position()
         
         # Clear existing ghost text first
         self.clear_ghost_text()
@@ -571,6 +596,10 @@ class SQLEditor(QPlainTextEdit):
         # Don't show completion for empty text or too short prefixes unless it's a table prefix
         is_table_prefix = '.' in current_word and current_word.endswith('.')
         if not prefix and not is_table_prefix:
+            return
+        
+        # Verify cursor hasn't moved (could happen if user is still typing rapidly)
+        if self.textCursor().position() != initial_cursor_pos:
             return
         
         # Get context-aware completions 
@@ -609,9 +638,11 @@ class SQLEditor(QPlainTextEdit):
             completions.sort(key=relevance_score)
             best_suggestion = completions[0]
             
-            # Show ghost text for the best suggestion
+            # Final check: cursor hasn't moved
             cursor_position = self.textCursor().position()
-            self.show_ghost_text(best_suggestion, cursor_position)
+            if cursor_position == initial_cursor_pos:
+                # Show ghost text for the best suggestion
+                self.show_ghost_text(best_suggestion, cursor_position)
 
     def keyPressEvent(self, event):
         # Check for Ctrl+Enter first, which should take precedence over other behaviors
