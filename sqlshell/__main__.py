@@ -4024,6 +4024,137 @@ LIMIT 10
             show_error_notification(f"Profile Error: Error analyzing row similarity - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing similarity: {str(e)}')
 
+    # DataFrame-based analysis methods (work with current query results)
+    def analyze_current_data_entropy(self):
+        """Analyze current query results with the entropy profiler to identify important columns"""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None or current_tab.current_df.empty:
+                show_warning_notification("No data available to analyze.")
+                return
+            
+            df = current_tab.current_df.copy()
+            self.statusBar().showMessage(f'Analyzing data columns...')
+            
+            # Import the entropy profiler
+            from sqlshell.utils.profile_entropy import visualize_profile
+            
+            # Create and show the visualization
+            self.statusBar().showMessage(f'Generating entropy profile...')
+            vis = visualize_profile(df)
+            
+            # Store a reference to prevent garbage collection
+            self._entropy_window = vis
+            
+            self.statusBar().showMessage(f'Entropy profile generated for current data')
+                
+        except Exception as e:
+            show_error_notification(f"Analysis Error: Error analyzing data - {str(e)}")
+            self.statusBar().showMessage(f'Error analyzing data: {str(e)}')
+
+    def profile_current_data_structure(self):
+        """Analyze current query results structure to identify candidate keys and functional dependencies"""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None or current_tab.current_df.empty:
+                show_warning_notification("No data available to analyze.")
+                return
+            
+            df = current_tab.current_df.copy()
+            row_count = len(df)
+            
+            self.statusBar().showMessage(f'Profiling data structure ({row_count:,} rows)...')
+            
+            # Import the structure profiler
+            from sqlshell.utils.profile_keys import visualize_profile
+            
+            # Create and show the visualization
+            self.statusBar().showMessage(f'Analyzing data structure ({row_count:,} rows)...')
+            vis = visualize_profile(df)
+            
+            # Store a reference to prevent garbage collection
+            self._keys_profile_window = vis
+            
+            self.statusBar().showMessage(f'Data structure profile generated ({row_count:,} rows)')
+                
+        except Exception as e:
+            show_error_notification(f"Profile Error: Error profiling data structure - {str(e)}")
+            self.statusBar().showMessage(f'Error profiling data: {str(e)}')
+
+    def profile_current_data_distributions(self):
+        """Analyze current query results column distributions to understand data patterns"""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None or current_tab.current_df.empty:
+                show_warning_notification("No data available to analyze.")
+                return
+            
+            df = current_tab.current_df.copy()
+            row_count = len(df)
+            
+            self.statusBar().showMessage(f'Analyzing column distributions...')
+            
+            # Sample the data if it's larger than 10,000 rows
+            if row_count > 10000:
+                self.statusBar().showMessage(f'Sampling data (using 10,000 rows from {row_count} total)...')
+                df = df.sample(n=10000, random_state=42)
+            
+            # Import the distributions profiler
+            from sqlshell.utils.profile_distributions import visualize_profile
+            
+            # Create and show the visualization
+            self.statusBar().showMessage(f'Generating distribution profile...')
+            vis = visualize_profile(df)
+            
+            # Store a reference to prevent garbage collection
+            self._distributions_window = vis
+            
+            if row_count > 10000:
+                self.statusBar().showMessage(f'Distribution profile generated (sampled 10,000 rows from {row_count:,})')
+            else:
+                self.statusBar().showMessage(f'Distribution profile generated')
+                
+        except Exception as e:
+            show_error_notification(f"Profile Error: Error analyzing distributions - {str(e)}")
+            self.statusBar().showMessage(f'Error analyzing distributions: {str(e)}')
+
+    def profile_current_data_similarity(self):
+        """Analyze current query results row similarity to identify patterns and outliers"""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None or current_tab.current_df.empty:
+                show_warning_notification("No data available to analyze.")
+                return
+            
+            df = current_tab.current_df.copy()
+            row_count = len(df)
+            
+            self.statusBar().showMessage(f'Analyzing row similarity...')
+            
+            # Sample the data if it's larger than 1,000 rows for performance
+            if row_count > 1000:
+                self.statusBar().showMessage(f'Sampling data (using 1,000 rows from {row_count} total)...')
+                df = df.sample(n=1000, random_state=42)
+            
+            # Import the similarity profiler
+            from sqlshell.utils.profile_similarity import visualize_profile
+            
+            # Create and show the visualization
+            self.statusBar().showMessage(f'Generating similarity profile...')
+            vis = visualize_profile(df)
+            
+            # Store a reference to prevent garbage collection
+            self._similarity_window = vis
+            
+            if row_count > 1000:
+                self.statusBar().showMessage(f'Similarity profile generated (sampled 1,000 rows from {row_count:,})')
+            else:
+                self.statusBar().showMessage(f'Similarity profile generated')
+                
+        except Exception as e:
+            show_error_notification(f"Profile Error: Error analyzing row similarity - {str(e)}")
+            self.statusBar().showMessage(f'Error analyzing similarity: {str(e)}')
+
     def get_data_for_tool(self):
         """
         Get the appropriate DataFrame for tools.
