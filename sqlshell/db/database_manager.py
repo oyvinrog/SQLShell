@@ -614,7 +614,8 @@ class DatabaseManager:
                     print(traceback.format_exc())
                     raise ValueError(f"Error loading CSV/TXT file: {str(e)}")
             elif file_path.endswith('.parquet'):
-                df = pd.read_parquet(file_path)
+                # Use fastparquet engine (lighter than pyarrow - saves 147MB in builds)
+                df = pd.read_parquet(file_path, engine='fastparquet')
             else:
                 raise ValueError("Unsupported file format. Supported formats: .xlsx, .xls, .csv, .txt, .parquet, and Delta tables.")
             
@@ -939,7 +940,8 @@ class DatabaseManager:
                             keep_default_na=True
                         )
             elif file_path.endswith('.parquet'):
-                df = pd.read_parquet(file_path)
+                # Use fastparquet engine (lighter than pyarrow - saves 147MB in builds)
+                df = pd.read_parquet(file_path, engine='fastparquet')
             else:
                 return False, "Unsupported file format"
             

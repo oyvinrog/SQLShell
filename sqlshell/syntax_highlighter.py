@@ -6,9 +6,9 @@ class SQLSyntaxHighlighter(QSyntaxHighlighter):
         super().__init__(document)
         self.highlighting_rules = []
 
-        # SQL Keywords
+        # SQL Keywords - Using darker blue for better contrast (WCAG AA: 4.5:1)
         keyword_format = QTextCharFormat()
-        keyword_format.setForeground(QColor("#0000FF"))  # Blue
+        keyword_format.setForeground(QColor("#0066CC"))  # Darker blue, better contrast
         keyword_format.setFontWeight(QFont.Weight.Bold)
         keywords = [
             "\\bSELECT\\b", "\\bFROM\\b", "\\bWHERE\\b", "\\bAND\\b", "\\bOR\\b",
@@ -28,9 +28,10 @@ class SQLSyntaxHighlighter(QSyntaxHighlighter):
             regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
             self.highlighting_rules.append((regex, keyword_format))
 
-        # Functions
+        # Functions - Using darker purple for better contrast
         function_format = QTextCharFormat()
-        function_format.setForeground(QColor("#AA00AA"))  # Purple
+        function_format.setForeground(QColor("#8B008B"))  # Darker magenta/purple
+        function_format.setFontWeight(QFont.Weight.Medium)
         functions = [
             "\\bAVG\\b", "\\bCOUNT\\b", "\\bSUM\\b", "\\bMAX\\b", "\\bMIN\\b",
             "\\bCOALESCE\\b", "\\bNVL\\b", "\\bNULLIF\\b", "\\bCAST\\b", "\\bCONVERT\\b",
@@ -44,17 +45,17 @@ class SQLSyntaxHighlighter(QSyntaxHighlighter):
             regex = QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption)
             self.highlighting_rules.append((regex, function_format))
 
-        # Numbers
+        # Numbers - Darker green for better readability
         number_format = QTextCharFormat()
-        number_format.setForeground(QColor("#009900"))  # Green
+        number_format.setForeground(QColor("#007700"))  # Darker green with better contrast
         self.highlighting_rules.append((
             QRegularExpression("\\b[0-9]+\\b"),
             number_format
         ))
 
-        # Single-line string literals
+        # Single-line string literals - Warmer brown/orange
         string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#CC6600"))  # Orange/Brown
+        string_format.setForeground(QColor("#A04000"))  # Darker orange/brown for better contrast
         self.highlighting_rules.append((
             QRegularExpression("'[^']*'"),
             string_format
@@ -64,9 +65,9 @@ class SQLSyntaxHighlighter(QSyntaxHighlighter):
             string_format
         ))
 
-        # Comments
+        # Comments - Medium gray with better contrast
         comment_format = QTextCharFormat()
-        comment_format.setForeground(QColor("#777777"))  # Gray
+        comment_format.setForeground(QColor("#6A737D"))  # GitHub's comment color - well tested
         comment_format.setFontItalic(True)
         self.highlighting_rules.append((
             QRegularExpression("--[^\n]*"),

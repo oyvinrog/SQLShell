@@ -39,6 +39,24 @@ class CopyableTableWidget(QTableWidget):
                 if hasattr(parent_tab.current_df, '_query_source'):
                     return getattr(parent_tab.current_df, '_query_source')
             
+            # As a fallback, try to extract table name from the query text
+            if hasattr(parent_tab, 'query_edit'):
+                query_text = parent_tab.query_edit.toPlainText().strip()
+                if query_text:
+                    # Try to extract table name from simple SELECT queries
+                    import re
+                    # Look for FROM or JOIN clauses
+                    pattern = r'(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)'
+                    matches = re.findall(pattern, query_text, re.IGNORECASE)
+                    if matches:
+                        # Return the first table found
+                        table_name = matches[0]
+                        # Verify this table exists in the main window's loaded tables
+                        main_window = self._get_main_window()
+                        if main_window and hasattr(main_window, 'db_manager'):
+                            if table_name in main_window.db_manager.loaded_tables:
+                                return table_name
+            
             return None
         except Exception:
             return None
@@ -79,55 +97,94 @@ class CopyableTableWidget(QTableWidget):
             count_rows_action.triggered.connect(self._show_row_count)
             menu.addAction(count_rows_action)
         
-        # Add table analysis options if we have a table context
+        # Add table analysis options if we have data
         table_name = self._get_current_table_name()
         main_window = self._get_main_window()
         
-        if table_name and main_window:
+        # Show analysis menu if we have either a table name OR current data
+        has_data = (parent_tab and hasattr(parent_tab, 'current_df') and 
+                    parent_tab.current_df is not None and not parent_tab.current_df.empty)
+        
+        if main_window and (table_name or has_data):
             menu.addSeparator()
             
             # Add a submenu for table analysis
             analysis_menu = menu.addMenu("Table Analysis")
             analysis_menu.setIcon(QIcon.fromTheme("system-search"))
             
-            # Analyze Column Importance (entropy)
-            analyze_entropy_action = analysis_menu.addAction("Analyze Column Importance")
-            analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
-            analyze_entropy_action.triggered.connect(
-                lambda: self._call_main_window_method('analyze_table_entropy', table_name)
-            )
-            
-            # Profile Table Structure
-            profile_table_action = analysis_menu.addAction("Profile Table Structure")
-            profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
-            profile_table_action.triggered.connect(
-                lambda: self._call_main_window_method('profile_table_structure', table_name)
-            )
-            
-            # Analyze Column Distributions
-            profile_distributions_action = analysis_menu.addAction("Analyze Column Distributions")
-            profile_distributions_action.setIcon(QIcon.fromTheme("accessories-calculator"))
-            profile_distributions_action.triggered.connect(
-                lambda: self._call_main_window_method('profile_distributions', table_name)
-            )
-            
-            # Analyze Row Similarity
-            profile_similarity_action = analysis_menu.addAction("Analyze Row Similarity")
-            profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
-            profile_similarity_action.triggered.connect(
-                lambda: self._call_main_window_method('profile_similarity', table_name)
-            )
+            # If we have a table name, use table-based analysis
+            # Otherwise, use DataFrame-based analysis
+            if table_name:
+                # Analyze Column Importance (entropy)
+                analyze_entropy_action = analysis_menu.addAction("Analyze Column Importance")
+                analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
+                analyze_entropy_action.triggered.connect(
+                    lambda: self._call_main_window_method('analyze_table_entropy', table_name)
+                )
+                
+                # Profile Table Structure
+                profile_table_action = analysis_menu.addAction("Profile Table Structure")
+                profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
+                profile_table_action.triggered.connect(
+                    lambda: self._call_main_window_method('profile_table_structure', table_name)
+                )
+                
+                # Analyze Column Distributions
+                profile_distributions_action = analysis_menu.addAction("Analyze Column Distributions")
+                profile_distributions_action.setIcon(QIcon.fromTheme("accessories-calculator"))
+                profile_distributions_action.triggered.connect(
+                    lambda: self._call_main_window_method('profile_distributions', table_name)
+                )
+                
+                # Analyze Row Similarity
+                profile_similarity_action = analysis_menu.addAction("Analyze Row Similarity")
+                profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
+                profile_similarity_action.triggered.connect(
+                    lambda: self._call_main_window_method('profile_similarity', table_name)
+                )
+            else:
+                # Use DataFrame-based analysis for query results without a clear table source
+                # Analyze Column Importance (entropy)
+                analyze_entropy_action = analysis_menu.addAction("Analyze Column Importance")
+                analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
+                analyze_entropy_action.triggered.connect(
+                    lambda: self._call_main_window_method('analyze_current_data_entropy')
+                )
+                
+                # Profile Data Structure
+                profile_table_action = analysis_menu.addAction("Profile Data Structure")
+                profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
+                profile_table_action.triggered.connect(
+                    lambda: self._call_main_window_method('profile_current_data_structure')
+                )
+                
+                # Analyze Column Distributions
+                profile_distributions_action = analysis_menu.addAction("Analyze Column Distributions")
+                profile_distributions_action.setIcon(QIcon.fromTheme("accessories-calculator"))
+                profile_distributions_action.triggered.connect(
+                    lambda: self._call_main_window_method('profile_current_data_distributions')
+                )
+                
+                # Analyze Row Similarity
+                profile_similarity_action = analysis_menu.addAction("Analyze Row Similarity")
+                profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
+                profile_similarity_action.triggered.connect(
+                    lambda: self._call_main_window_method('profile_current_data_similarity')
+                )
         
         # Only show menu if we have actions
         if menu.actions():
             menu.exec(self.mapToGlobal(position))
     
-    def _call_main_window_method(self, method_name, table_name):
-        """Call a method on the main window with the table name"""
+    def _call_main_window_method(self, method_name, table_name=None):
+        """Call a method on the main window with optional table name"""
         main_window = self._get_main_window()
         if main_window and hasattr(main_window, method_name):
             method = getattr(main_window, method_name)
-            method(table_name)
+            if table_name is not None:
+                method(table_name)
+            else:
+                method()
     
     def _show_row_count(self):
         """Show the row count in a message box"""

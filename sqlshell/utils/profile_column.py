@@ -1,8 +1,8 @@
 import pandas as pd
-import xgboost as xgb
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestRegressor
 import sys
 import time
 import hashlib
@@ -350,60 +350,59 @@ class ExplainerThread(QThread):
             if self._is_canceled:
                 return
                 
-            # Train a tree-based model
-            self.progress.emit(50, "Training XGBoost model...")
+            # Train a tree-based model for feature importance
+            self.progress.emit(50, "Training RandomForest model...")
             
             # Check the number of features left for analysis
             feature_count = X_train.shape[1]
             
             # Adjust model complexity based on feature count
             if feature_count < 3:
-                max_depth = 1  # Very simple trees for few features
+                max_depth = 3  # Simple trees for few features
                 n_estimators = 10  # Use more trees to compensate
             else:
-                max_depth = 2  # Still shallow trees
-                n_estimators = 5  # Fewer trees for more features
+                max_depth = 5  # Moderate depth trees
+                n_estimators = 10  # Balanced number of trees
                 
-            model = xgb.XGBRegressor(
+            model = RandomForestRegressor(
                 n_estimators=n_estimators,
                 max_depth=max_depth,
-                learning_rate=0.3,           # Higher learning rate to compensate for fewer trees
-                tree_method='hist',          # Fast histogram method
-                subsample=0.7,               # Use 70% of data per tree
-                grow_policy='depthwise',     # Simple growth policy
+                min_samples_split=5,         # Prevent overfitting
+                min_samples_leaf=2,          # Prevent overfitting
+                max_features='sqrt',         # Use subset of features per tree
                 n_jobs=1,                    # Single thread to avoid overhead
                 random_state=42,
-                verbosity=0                  # Suppress output
+                verbose=0                    # Suppress output
             )
             
-            # Set memory conservation parameter for large datasets with many features
+            # Set simpler parameters for large feature sets
             if X_train.shape[1] > 100:  # If there are many features
-                self.progress.emit(55, "Large feature set detected, using memory-efficient training...")
-                model.set_params(grow_policy='lossguide', max_leaves=64)
+                self.progress.emit(55, "Large feature set detected, using simpler model...")
+                model.set_params(n_estimators=5, max_depth=3)
             
             # Fit model with a try/except to catch memory issues
             try:
                 model.fit(X_train, y_train)
             except Exception as e:
                 # Log the error for debugging
-                print(f"Initial XGBoost fit failed: {str(e)}")
+                print(f"Initial RandomForest fit failed: {str(e)}")
                 
                 # If we encounter an error, try with an even smaller and simpler model
                 self.progress.emit(55, "Adjusting model parameters due to computational constraints...")
                 try:
                     # Try a simpler regressor with more conservative parameters
-                    model = xgb.XGBRegressor(
+                    model = RandomForestRegressor(
                         n_estimators=3, 
-                        max_depth=1,
-                        subsample=0.5,
-                        colsample_bytree=0.5,
+                        max_depth=2,
+                        max_features='sqrt',
                         n_jobs=1,
-                        verbosity=0
+                        random_state=42,
+                        verbose=0
                     )
                     model.fit(X_train, y_train)
                 except Exception as inner_e:
                     # If even the simpler model fails, resort to a fallback strategy
-                    print(f"Even simpler XGBoost failed: {str(inner_e)}")
+                    print(f"Even simpler RandomForest failed: {str(inner_e)}")
                     self.progress.emit(60, "Using fallback importance calculation method...")
                     
                     # Create a basic feature importance based on correlation with target
@@ -457,7 +456,7 @@ class ExplainerThread(QThread):
             if self._is_canceled:
                 return
                 
-            # Get feature importance directly from XGBoost
+            # Get feature importance from the trained model
             self.progress.emit(80, "Calculating feature importance and correlations...")
             
             try:
@@ -465,7 +464,7 @@ class ExplainerThread(QThread):
                 if X.shape[1] == 0:
                     raise ValueError("No features available for importance analysis")
                 
-                # Get feature importance directly from XGBoost
+                # Get feature importance from RandomForest
                 importance = model.feature_importances_
                 
                 # Verify importance values are valid
