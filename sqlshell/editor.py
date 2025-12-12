@@ -597,11 +597,16 @@ class SQLEditor(QPlainTextEdit):
         
         # Handle Tab key to accept ghost text
         if event.key() == Qt.Key.Key_Tab:
-            # Try to accept ghost text first
-            if self.ghost_text_suggestion and self.accept_ghost_text():
+            # Only try to accept ghost text if cursor is at the position where ghost text was shown
+            # This prevents accidentally accepting ghost text when trying to indent on a new line
+            cursor_pos = self.textCursor().position()
+            if (self.ghost_text_suggestion and 
+                self.ghost_text_position >= 0 and 
+                cursor_pos == self.ghost_text_position and
+                self.accept_ghost_text()):
                 return
             else:
-                # Insert 4 spaces instead of a tab character if no ghost text
+                # Insert 4 spaces instead of a tab character if no ghost text at cursor
                 self.insertPlainText("    ")
                 return
         
