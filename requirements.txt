@@ -3,8 +3,7 @@ numpy>=1.24.0
 PyQt6>=6.4.0
 duckdb>=0.9.0
 openpyxl>=3.1.0  # For Excel support
-pyarrow  # For parquet support
-fastparquet>=2023.10.1  # Alternative parquet engine
+fastparquet>=2023.10.1  # For Parquet support (lighter than pyarrow)
 xlrd>=2.0.1  # For old .xls files 
 deltalake  # For Delta Lake table support
 Pillow>=10.0.0  # For image processing (used in splash screen and icon creation) 

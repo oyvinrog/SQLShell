@@ -28,7 +28,6 @@ dependencies = [
     "PyQt6>=6.4.0",
     "duckdb>=0.9.0",
     "openpyxl>=3.1.0",
-    "pyarrow>=14.0.1",
     "fastparquet>=2023.10.1",
     "xlrd>=2.0.1",
     "deltalake",

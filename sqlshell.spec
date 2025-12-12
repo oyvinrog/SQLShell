@@ -47,7 +47,7 @@ if os.path.exists(os.path.join(SPEC_ROOT, 'sample_data')):
 
 # Collect data files from dependencies
 datas += collect_data_files('duckdb')
-datas += collect_data_files('pyarrow')
+# Note: Using fastparquet instead of pyarrow (saves 147MB)
 # Note: XGBoost removed - using scikit-learn RandomForest instead (saves 207MB + 383MB CUDA)
 datas += collect_data_files('sklearn')
 datas += collect_data_files('nltk')
@@ -132,8 +132,6 @@ hiddenimports = [
     'sqlite3',
     
     # File formats
-    'pyarrow',
-    'pyarrow.parquet',
     'fastparquet',
     'openpyxl',
     'xlrd',

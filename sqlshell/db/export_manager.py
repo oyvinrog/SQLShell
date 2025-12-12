@@ -72,8 +72,8 @@ class ExportManager:
             - Dictionary with export metadata
         """
         try:
-            # Export to Parquet
-            df.to_parquet(file_name, index=False)
+            # Export to Parquet using fastparquet engine (lighter than pyarrow - saves 147MB in builds)
+            df.to_parquet(file_name, index=False, engine='fastparquet')
             
             # Generate table name from file name
             base_name = os.path.splitext(os.path.basename(file_name))[0]
