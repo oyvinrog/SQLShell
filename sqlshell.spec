@@ -48,7 +48,7 @@ if os.path.exists(os.path.join(SPEC_ROOT, 'sample_data')):
 # Collect data files from dependencies
 datas += collect_data_files('duckdb')
 datas += collect_data_files('pyarrow')
-datas += collect_data_files('xgboost')
+# Note: XGBoost removed - using scikit-learn RandomForest instead (saves 207MB + 383MB CUDA)
 datas += collect_data_files('sklearn')
 datas += collect_data_files('nltk')
 
@@ -144,7 +144,7 @@ hiddenimports = [
     'sklearn.ensemble',
     'sklearn.preprocessing',
     'sklearn.model_selection',
-    'xgboost',
+    # Note: XGBoost removed - using scikit-learn RandomForest instead
     
     # Visualization
     'matplotlib',
@@ -175,18 +175,7 @@ hiddenimports += collect_submodules('PyQt6')
 # Binaries to include (platform-specific DLLs/SOs will be auto-detected)
 binaries = []
 
-# Collect XGBoost native libraries (.so/.dll files) - critical for xgboost to work
-binaries += collect_dynamic_libs('xgboost')
-
-# Add xgboost hidden imports manually (avoid collect_submodules which tries to import testing modules)
-hiddenimports += [
-    'xgboost',
-    'xgboost.core',
-    'xgboost.sklearn',
-    'xgboost.training',
-    'xgboost.callback',
-    'xgboost.dask',
-]
+# Note: XGBoost dynamic libraries no longer needed - scikit-learn uses standard NumPy/SciPy libs
 
 # Analysis
 a = Analysis(
@@ -218,6 +207,17 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# OPTIMIZATION: Filter out NVIDIA/CUDA libraries even though we removed XGBoost
+# In case any other library tries to include them
+a.binaries = [
+    (name, path, typecode) 
+    for name, path, typecode in a.binaries
+    if not any(x in name.lower() for x in [
+        'cuda', 'cudnn', 'cublas', 'cufft', 'curand', 'cusparse',
+        'cusolver', 'nccl', 'nvrtc', 'nvidia', 'nvml'
+    ])
+]
 
 # Remove duplicate entries
 a.datas = list(set(a.datas))

@@ -10,8 +10,7 @@ deltalake  # For Delta Lake table support
 Pillow>=10.0.0  # For image processing (used in splash screen and icon creation) 
 scipy>=1.15.0  # For statistical distributions and analysis
 matplotlib>=3.10.0  # For data visualization 
-xgboost
-scikit-learn
+scikit-learn  # For RandomForest-based profiling (replaces XGBoost)
 seaborn>=0.13.0  # For enhanced statistical visualizations in column profiler
 nltk>=3.8.1  # For text processing and stopwords
 openai>=1.0.0  # For AI-powered SQL autocomplete (optional)
