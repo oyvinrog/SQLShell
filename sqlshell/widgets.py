@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QTableWidget, QApplication, QMenu
+from PyQt6.QtWidgets import QTableWidget, QApplication, QMenu, QMessageBox
 from PyQt6.QtCore import Qt, QEvent
-from PyQt6.QtGui import QKeyEvent, QAction
+from PyQt6.QtGui import QKeyEvent, QAction, QIcon
 import pandas as pd
 import numpy as np
 
@@ -23,8 +23,38 @@ class CopyableTableWidget(QTableWidget):
         # For other keys, use the default behavior
         super().keyPressEvent(event)
     
+    def _get_current_table_name(self):
+        """Get the current table name from the results context"""
+        try:
+            parent_tab = getattr(self, '_parent_tab', None)
+            if parent_tab is None:
+                return None
+            
+            # First check if we're in preview mode with a known table name
+            if hasattr(parent_tab, 'preview_table_name') and parent_tab.preview_table_name:
+                return parent_tab.preview_table_name
+            
+            # Otherwise try to get from the DataFrame's _query_source attribute
+            if hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+                if hasattr(parent_tab.current_df, '_query_source'):
+                    return getattr(parent_tab.current_df, '_query_source')
+            
+            return None
+        except Exception:
+            return None
+    
+    def _get_main_window(self):
+        """Get a reference to the main window"""
+        try:
+            parent_tab = getattr(self, '_parent_tab', None)
+            if parent_tab and hasattr(parent_tab, 'parent'):
+                return parent_tab.parent
+            return None
+        except Exception:
+            return None
+    
     def show_context_menu(self, position):
-        """Show context menu with copy options"""
+        """Show context menu with copy options and table analysis actions"""
         menu = QMenu(self)
         
         # Check if there's a selection
@@ -41,9 +71,90 @@ class CopyableTableWidget(QTableWidget):
         copy_all_action.triggered.connect(self.copy_all_to_clipboard)
         menu.addAction(copy_all_action)
         
+        # Add count rows action if we have data
+        parent_tab = getattr(self, '_parent_tab', None)
+        if parent_tab and hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+            menu.addSeparator()
+            count_rows_action = QAction("Count Rows", self)
+            count_rows_action.triggered.connect(self._show_row_count)
+            menu.addAction(count_rows_action)
+        
+        # Add table analysis options if we have a table context
+        table_name = self._get_current_table_name()
+        main_window = self._get_main_window()
+        
+        if table_name and main_window:
+            menu.addSeparator()
+            
+            # Add a submenu for table analysis
+            analysis_menu = menu.addMenu("Table Analysis")
+            analysis_menu.setIcon(QIcon.fromTheme("system-search"))
+            
+            # Analyze Column Importance (entropy)
+            analyze_entropy_action = analysis_menu.addAction("Analyze Column Importance")
+            analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
+            analyze_entropy_action.triggered.connect(
+                lambda: self._call_main_window_method('analyze_table_entropy', table_name)
+            )
+            
+            # Profile Table Structure
+            profile_table_action = analysis_menu.addAction("Profile Table Structure")
+            profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
+            profile_table_action.triggered.connect(
+                lambda: self._call_main_window_method('profile_table_structure', table_name)
+            )
+            
+            # Analyze Column Distributions
+            profile_distributions_action = analysis_menu.addAction("Analyze Column Distributions")
+            profile_distributions_action.setIcon(QIcon.fromTheme("accessories-calculator"))
+            profile_distributions_action.triggered.connect(
+                lambda: self._call_main_window_method('profile_distributions', table_name)
+            )
+            
+            # Analyze Row Similarity
+            profile_similarity_action = analysis_menu.addAction("Analyze Row Similarity")
+            profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
+            profile_similarity_action.triggered.connect(
+                lambda: self._call_main_window_method('profile_similarity', table_name)
+            )
+        
         # Only show menu if we have actions
         if menu.actions():
             menu.exec(self.mapToGlobal(position))
+    
+    def _call_main_window_method(self, method_name, table_name):
+        """Call a method on the main window with the table name"""
+        main_window = self._get_main_window()
+        if main_window and hasattr(main_window, method_name):
+            method = getattr(main_window, method_name)
+            method(table_name)
+    
+    def _show_row_count(self):
+        """Show the row count in a message box"""
+        parent_tab = getattr(self, '_parent_tab', None)
+        if not parent_tab:
+            return
+        
+        # Check if we're in preview mode - if so, get the full table count
+        if (hasattr(parent_tab, 'is_preview_mode') and parent_tab.is_preview_mode and 
+            hasattr(parent_tab, 'preview_table_name') and parent_tab.preview_table_name):
+            # Get the main window to access the database manager
+            main_window = self._get_main_window()
+            if main_window and hasattr(main_window, 'db_manager'):
+                try:
+                    # Get the full table to count all rows
+                    full_df = main_window.db_manager.get_full_table(parent_tab.preview_table_name)
+                    row_count = len(full_df)
+                    QMessageBox.information(self, "Row Count", f"Total rows: {row_count:,}")
+                except Exception as e:
+                    # Fall back to preview count if we can't get full table
+                    if hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+                        row_count = len(parent_tab.current_df)
+                        QMessageBox.information(self, "Row Count", f"Preview rows: {row_count:,}\n(Error getting full count: {str(e)})")
+        elif hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+            # Not in preview mode, just show the current dataframe count
+            row_count = len(parent_tab.current_df)
+            QMessageBox.information(self, "Row Count", f"Total rows: {row_count:,}")
     
     def _get_unformatted_value(self, row, col):
         """Get the unformatted value from the original DataFrame if available"""
