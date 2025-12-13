@@ -3,6 +3,9 @@ name: Build Release
 on:
   release:
     types: [created]
+  push:
+    branches:
+      - 'test-build/**'  # Trigger on branches like test-build/fix-icu
   workflow_dispatch:  # Allow manual trigger
     inputs:
       version:
@@ -141,7 +144,8 @@ jobs:
             libxcb-keysyms1 \
             libxcb-randr0 \
             libxcb-render-util0 \
-            libxcb-shape0
+            libxcb-shape0 \
+            patchelf
 
       - name: Build executable
         run: python build.py
@@ -186,6 +190,23 @@ jobs:
             echo "Build verification failed! Some critical modules are missing."
             echo "Check that sqlshell.spec includes all required directories in 'datas'."
             exit 1
+          fi
+          
+          echo ""
+          echo "=== Checking for ICU libraries ==="
+          
+          # Check for ICU libraries (required by Qt)
+          ICU_COUNT=$(find dist/SQLShell -name "libicu*.so*" | wc -l)
+          if [ "$ICU_COUNT" -eq 0 ]; then
+            echo "ERROR: No ICU libraries found in build!"
+            echo "Contents of dist/SQLShell:"
+            ls -la dist/SQLShell/*.so* || echo "No .so files found"
+            echo ""
+            echo "This will cause the binary to fail with: 'libicudata.so.XX: cannot open shared object file'"
+            exit 1
+          else
+            echo "Found $ICU_COUNT ICU libraries:"
+            find dist/SQLShell -name "libicu*.so*" -exec basename {} \;
           fi
           
           echo ""
