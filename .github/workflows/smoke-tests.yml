@@ -303,24 +303,48 @@ jobs:
             Write-Host "Installing from: $($installer.FullName)" -ForegroundColor Cyan
             Write-Host "Starting installation (this may take 1-2 minutes)..." -ForegroundColor Cyan
             
-            # Run installer in silent mode
-            # /VERYSILENT = no UI, /SUPPRESSMSGBOXES = no message boxes, /NORESTART = don't restart
-            # /DIR=C:\SQLShell = install location
-            # Note: skipifsilent flag in .iss already prevents app launch in silent mode
+            # Run installer in silent mode using a job with timeout
+            # This prevents hanging if the installer launches a GUI or waits indefinitely
             $startTime = Get-Date
-            $process = Start-Process -FilePath $installer.FullName `
-              -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DIR=C:\SQLShell' `
-              -Wait -PassThru -NoNewWindow
+            $installerPath = $installer.FullName
+            
+            $job = Start-Job -ScriptBlock {
+              param($path)
+              $proc = Start-Process -FilePath $path `
+                -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=C:\SQLShell' `
+                -Wait -PassThru
+              return $proc.ExitCode
+            } -ArgumentList $installerPath
+            
+            # Wait up to 120 seconds for installation
+            $completed = Wait-Job $job -Timeout 120
             $duration = (Get-Date) - $startTime
             
-            Write-Host "Installation completed in $([math]::Round($duration.TotalSeconds, 1)) seconds" -ForegroundColor Cyan
-            
-            if ($process.ExitCode -eq 0) {
-              Write-Host "[OK] Installer completed successfully (exit code 0)" -ForegroundColor Green
+            if ($completed) {
+              $exitCode = Receive-Job $job
+              Write-Host "Installation completed in $([math]::Round($duration.TotalSeconds, 1)) seconds" -ForegroundColor Cyan
+              
+              if ($exitCode -eq 0) {
+                Write-Host "[OK] Installer completed successfully (exit code 0)" -ForegroundColor Green
+              } else {
+                Write-Host "[WARNING] Installer exited with code: $exitCode" -ForegroundColor Yellow
+              }
             } else {
-              Write-Host "[WARNING] Installer exited with code: $($process.ExitCode)" -ForegroundColor Yellow
-              # Continue anyway - will verify installation in next step
+              Write-Host "[WARNING] Installation timed out after 120 seconds, stopping..." -ForegroundColor Yellow
+              Stop-Job $job
+              
+              # Kill any hanging installer or app processes
+              Get-Process | Where-Object { $_.ProcessName -like "*SQLShell*" -or $_.ProcessName -like "*setup*" } | ForEach-Object {
+                Write-Host "Stopping process: $($_.ProcessName)" -ForegroundColor Yellow
+                Stop-Process $_ -Force -ErrorAction SilentlyContinue
+              }
+              
+              # Check if installation succeeded despite timeout (installer may have finished but app launched)
+              if (Test-Path "C:\SQLShell\SQLShell.exe") {
+                Write-Host "[OK] Installation appears successful despite timeout" -ForegroundColor Green
+              }
             }
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
           } else {
             Write-Host "[WARNING]  No installer found, skipping installation test" -ForegroundColor Yellow
             exit 0
@@ -375,7 +399,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          brew install libomp
+          brew install libomp coreutils
 
       - name: Mount DMG and extract
         if: github.event_name == 'workflow_run'
@@ -421,7 +445,8 @@ jobs:
         run: |
           if [ -f "/tmp/SQLShell/SQLShell" ]; then
             chmod +x /tmp/SQLShell/SQLShell
-            timeout 30s /tmp/SQLShell/SQLShell --help || {
+            # Use gtimeout from coreutils (macOS doesn't have timeout by default)
+            gtimeout 30s /tmp/SQLShell/SQLShell --help || {
               echo "[ERROR] Application failed to run or timed out"
               exit 1
             }
