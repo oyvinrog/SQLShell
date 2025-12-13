@@ -226,7 +226,7 @@ if sys.platform.startswith('linux'):
             if lib_path in collected_libs:
                 continue
             
-            # If it's a symlink, record it for post-build recreation
+            # If it's a symlink, record it fHow or post-build recreation
             if lib_file.is_symlink():
                 target = lib_file.resolve()
                 if target.exists() and str(target) not in collected_libs:
@@ -244,14 +244,15 @@ if sys.platform.startswith('linux'):
                     symlink_map[lib_name] = f"PyQt6/Qt6/lib/{target.name}"
                     print(f"[SQLShell Build] Skipping duplicate: {lib_name} -> {target.name}")
             elif lib_file.is_file():
-                # Add the actual file
-                binaries.append((lib_path, '.'))
+                # Add the actual file to PyQt6/Qt6/lib subdirectory to match directory structure
+                file_subpath = f"PyQt6/Qt6/lib/{lib_name}"
+                binaries.append((lib_path, file_subpath))
                 collected_libs.add(lib_path)
                 collected_count += 1
                 
                 # Print critical libraries for verification
                 if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
-                    print(f"[SQLShell Build] Adding critical library: {lib_name}")
+                    print(f"[SQLShell Build] Adding critical library: {lib_name} -> {file_subpath}")
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
