@@ -25,8 +25,8 @@ from typing import Union, Tuple, Optional, List
 from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
     QTableWidget, QTableWidgetItem, QLabel, QPushButton,
-    QComboBox, QSplitter, QTabWidget, QScrollArea,
-    QFrame, QSizePolicy, QSlider, QMessageBox, QHeaderView
+    QComboBox, QTabWidget,
+    QFrame, QSlider, QMessageBox, QHeaderView
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
