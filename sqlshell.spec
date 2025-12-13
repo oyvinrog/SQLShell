@@ -182,10 +182,18 @@ binaries = []
 # Collect PyQt6 dynamic libraries (fixes ICU library issues on Linux)
 binaries += collect_dynamic_libs('PyQt6')
 
+# Global variable to track symlinks for post-build recreation
+symlink_map = {}
+PYQT6_QT6_LIB_SRC = None  # set on Linux when PyQt6 is available; used for post-build fixes
+
 # On Linux, manually collect ALL Qt6 libraries to prevent missing dependencies
 if sys.platform.startswith('linux'):
     import site
     from pathlib import Path
+    
+    # Destination inside the PyInstaller onedir bundle (under dist/SQLShell/_internal/)
+    # Keep Qt runtime libraries in the same layout as the PyQt6 wheel: PyQt6/Qt6/lib
+    QT6_LIB_DEST = os.path.join('PyQt6', 'Qt6', 'lib')
     
     # Find Qt6 library paths in PyQt6 installation
     pyqt6_lib_paths = []
@@ -196,6 +204,7 @@ if sys.platform.startswith('linux'):
         pyqt6_pkg_path = Path(PyQt6.__file__).parent / 'Qt6' / 'lib'
         if pyqt6_pkg_path.exists():
             pyqt6_lib_paths.append(pyqt6_pkg_path)
+            PYQT6_QT6_LIB_SRC = pyqt6_pkg_path
             print(f"[SQLShell Build] Found PyQt6 libs at: {pyqt6_pkg_path}")
     except ImportError:
         print("[SQLShell Build] WARNING: PyQt6 not found during spec file execution")
@@ -214,36 +223,78 @@ if sys.platform.startswith('linux'):
     collected_libs = set()  # Track collected libraries to avoid duplicates
 
     for pyqt6_lib_path in pyqt6_lib_paths:
-        # Get all .so and .so.* files (including symlinks - resolve them first)
+        # Collect all .so and .so.* files
         for lib_file in pyqt6_lib_path.glob('*.so*'):
-            # Handle both regular files and symlinks
+            lib_path = str(lib_file)
+            lib_name = lib_file.name
+            
+            # Skip if already added (avoid duplicates)
+            if lib_path in collected_libs:
+                continue
+            
+            # If it's a symlink, record it for post-build recreation
             if lib_file.is_symlink():
-                # Resolve symlink and add the actual file
-                real_file = lib_file.resolve()
-                if real_file.exists() and real_file.is_file():
-                    real_path = str(real_file)
-                    if real_path not in collected_libs:
-                        binaries.append((real_path, '.'))
-                        collected_libs.add(real_path)
-                        collected_count += 1
-                        # Print critical libraries for verification
-                        if any(x in real_file.name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
-                            print(f"[SQLShell Build] Adding critical library (resolved): {real_file.name}")
-            elif lib_file.is_file():
-                lib_path = str(lib_file)
-                if lib_path not in collected_libs:
-                    binaries.append((lib_path, '.'))
-                    collected_libs.add(lib_path)
+                target = lib_file.resolve()
+                if target.exists() and str(target) not in collected_libs:
+                    # Add the target file into PyQt6/Qt6/lib inside the bundle
+                    binaries.append((str(target), QT6_LIB_DEST))
+                    collected_libs.add(str(target))
                     collected_count += 1
-                    # Print critical libraries for verification
-                    if any(x in lib_file.name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
-                        print(f"[SQLShell Build] Adding critical library: {lib_file.name}")
+                    # Record symlink for post-build recreation (in Qt6/lib)
+                    symlink_map[lib_name] = target.name
+                    print(f"[SQLShell Build] Adding library: {lib_name} -> {target.name}")
+                elif str(target) in collected_libs:
+                    # Target already added, still record symlink
+                    symlink_map[lib_name] = target.name
+                    print(f"[SQLShell Build] Skipping duplicate: {lib_name} -> {target.name}")
+            elif lib_file.is_file():
+                # Add the actual file into PyQt6/Qt6/lib inside the bundle
+                binaries.append((lib_path, QT6_LIB_DEST))
+                collected_libs.add(lib_path)
+                collected_count += 1
+                
+                # Print critical libraries for verification
+                if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
+                    print(f"[SQLShell Build] Adding critical library: {lib_name}")
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
     else:
         print("[SQLShell Build] ERROR: No Qt6 libraries found! Build may fail on target systems.")
         print("[SQLShell Build] Please ensure PyQt6 is installed in the build environment.")
+
+    # Explicitly ensure ICU libraries are bundled into PyQt6/Qt6/lib.
+    # Some environments end up with broken libicudata symlinks if libicudata is missed.
+    for pyqt6_lib_path in pyqt6_lib_paths:
+        for icu_pattern in ("libicudata.so*", "libicui18n.so*", "libicuuc.so*"):
+            for icu_file in pyqt6_lib_path.glob(icu_pattern):
+                if icu_file.is_file() and str(icu_file) not in collected_libs:
+                    binaries.append((str(icu_file), QT6_LIB_DEST))
+                    collected_libs.add(str(icu_file))
+                    print(f"[SQLShell Build] Forcing ICU bundle: {icu_file.name}")
+    
+    # Try to find and bundle system EGL libraries if not already collected
+    # libEGL is typically a system library that Qt6 depends on
+    import shutil
+    egl_paths = [
+        '/usr/lib/x86_64-linux-gnu/libEGL.so.1',
+        '/usr/lib/libEGL.so.1',
+        '/usr/lib64/libEGL.so.1',
+    ]
+    for egl_path in egl_paths:
+        egl_file = Path(egl_path)
+        if egl_file.exists() and str(egl_file) not in collected_libs:
+            binaries.append((str(egl_file), '.'))
+            collected_libs.add(str(egl_file))
+            print(f"[SQLShell Build] Found and bundling system EGL library: {egl_path}")
+            # Also try to find and bundle related EGL libraries
+            egl_dir = egl_file.parent
+            for related_lib in egl_dir.glob('libEGL*.so*'):
+                if related_lib.is_file() and str(related_lib) not in collected_libs:
+                    binaries.append((str(related_lib), '.'))
+                    collected_libs.add(str(related_lib))
+                    print(f"[SQLShell Build] Bundling EGL-related library: {related_lib.name}")
+            break  # Only use first found location
 
 # Note: XGBoost dynamic libraries no longer needed - scikit-learn uses standard NumPy/SciPy libs
 
@@ -338,43 +389,93 @@ coll = COLLECT(
     name='SQLShell',
 )
 
-# Linux-specific post-build: Create wrapper script for library path handling
+# Linux-specific post-build: Set RPATH to find libraries in current directory
 if sys.platform.startswith('linux'):
     import os
+    import subprocess
     from pathlib import Path
 
     dist_dir = Path(SPEC_ROOT) / 'dist' / 'SQLShell'
     exe_path = dist_dir / 'SQLShell'
-    wrapper_path = dist_dir / 'SQLShell.wrapper'
 
-    # Rename the actual executable
     if exe_path.exists():
-        import shutil
-        shutil.move(str(exe_path), str(wrapper_path))
+        try:
+            # Set RPATH to look in _internal directory where PyInstaller puts libraries
+            # $ORIGIN = directory where executable is located
+            subprocess.run(['patchelf', '--set-rpath', '$ORIGIN/_internal', str(exe_path)], check=True)
+            print(f"[SQLShell Build] Set RPATH to $ORIGIN/_internal for: {exe_path}")
+        except FileNotFoundError:
+            print("[SQLShell Build] WARNING: patchelf not found. Libraries may not be found at runtime.")
+            print("[SQLShell Build] Install patchelf: sudo apt-get install patchelf")
+        except subprocess.CalledProcessError as e:
+            print(f"[SQLShell Build] WARNING: Failed to set RPATH: {e}")
+            
+        # Recreate symlinks that were recorded during collection.
+        # Place them under PyQt6/Qt6/lib to match the PyQt6 wheel layout.
+        internal_dir = dist_dir / '_internal'
+        qt6_lib_dir = internal_dir / 'PyQt6' / 'Qt6' / 'lib'
+        print(f"[SQLShell Build] Recreating {len(symlink_map)} symlinks in {qt6_lib_dir} ...")
+        for symlink_name, target_name in symlink_map.items():
+            symlink_path = qt6_lib_dir / symlink_name
+            target_path = qt6_lib_dir / target_name
+            
+            # Only create if target exists and symlink doesn't
+            if target_path.exists() and not symlink_path.exists():
+                try:
+                    # Create relative symlink (both in same directory)
+                    symlink_path.symlink_to(target_name)
+                    print(f"[SQLShell Build] Created symlink: {symlink_name} -> {target_name}")
+                except (OSError, FileExistsError) as e:
+                    print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
+            elif not target_path.exists():
+                print(f"[SQLShell Build] WARNING: Target not found for {symlink_name}: {target_name}")
 
-        # Create wrapper script
-        wrapper_script = f"""#!/bin/bash
-# SQLShell launcher wrapper
-# Sets library paths for PyQt6 and ICU libraries
+        # Hardening: ensure libicudata is physically present.
+        # We've seen builds where PyInstaller ends up creating a symlink to
+        # PyQt6/Qt6/lib/libicudata.so.XX but does not copy the actual file,
+        # leading to runtime failures on any machine lacking system ICU XX.
+        try:
+            import shutil
+            if PYQT6_QT6_LIB_SRC is not None:
+                qt6_lib_dir.mkdir(parents=True, exist_ok=True)
 
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-
-# Set library path to include _internal directory
-export LD_LIBRARY_PATH="${{SCRIPT_DIR}}/_internal:${{LD_LIBRARY_PATH}}"
-
-# Launch the actual executable
-exec "${{SCRIPT_DIR}}/SQLShell.wrapper" "$@"
-"""
-
-        with open(exe_path, 'w') as f:
-            f.write(wrapper_script)
-
-        # Make wrapper executable
-        os.chmod(exe_path, 0o755)
-
-        print(f"[SQLShell Build] Created wrapper script: {exe_path}")
-        print(f"[SQLShell Build] Renamed executable to: {wrapper_path}")
+                # If no usable libicudata is present in the dist, copy it from the build env.
+                existing = [p for p in qt6_lib_dir.glob('libicudata.so*') if p.exists() and p.is_file()]
+                if not existing:
+                    src_dir = Path(PYQT6_QT6_LIB_SRC)
+                    candidates = [p for p in src_dir.glob('libicudata.so*') if p.is_file()]
+                    if candidates:
+                        for src in candidates:
+                            dst = qt6_lib_dir / src.name
+                            shutil.copy2(src, dst)
+                            print(f"[SQLShell Build] Copied missing ICU data library: {dst.name}")
+                    else:
+                        print(f"[SQLShell Build] WARNING: No ICU data library found in build env: {src_dir}")
+        except Exception as e:
+            print(f"[SQLShell Build] WARNING: Failed to ensure libicudata is present: {e}")
+        
+        # Verify ICU and EGL libraries are present
+        # ICU should live in PyQt6/Qt6/lib; EGL is expected in _internal root if bundled.
+        icu_libs = list(qt6_lib_dir.glob('libicu*.so*'))
+        egl_libs = list(internal_dir.glob('libEGL*.so*'))
+        
+        if icu_libs:
+            print(f"[SQLShell Build] Verified {len(icu_libs)} ICU libraries in dist:")
+            for lib in sorted(icu_libs):
+                symlink_info = " (symlink)" if lib.is_symlink() else ""
+                print(f"  - {lib.name}{symlink_info}")
+        else:
+            print("[SQLShell Build] ERROR: No ICU libraries found in dist directory!")
+            print("[SQLShell Build] The built binary will likely fail to run.")
+        
+        if egl_libs:
+            print(f"[SQLShell Build] Verified {len(egl_libs)} EGL libraries in dist:")
+            for lib in sorted(egl_libs):
+                symlink_info = " (symlink)" if lib.is_symlink() else ""
+                print(f"  - {lib.name}{symlink_info}")
+        else:
+            print("[SQLShell Build] WARNING: No EGL libraries found in dist directory.")
+            print("[SQLShell Build] EGL should be available as system dependency (libegl1).")
 
 # macOS app bundle (only on macOS)
 if sys.platform == 'darwin':

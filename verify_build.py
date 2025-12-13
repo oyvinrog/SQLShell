@@ -48,11 +48,25 @@ def verify_build():
         for lib_name, lib_pattern in critical_libs:
             # Search recursively for the library
             found_files = list(dist_dir.rglob(f"{lib_pattern}*"))
-            
-            if found_files:
-                print(f"✓ {lib_name:30} Found: {found_files[0].name}")
+
+            # Treat broken symlinks as missing (common failure mode for ICU)
+            usable_files = []
+            for p in found_files:
+                try:
+                    # Path.exists() follows symlinks; returns False for broken symlink
+                    if p.exists():
+                        usable_files.append(p)
+                except OSError:
+                    # e.g., permission errors; treat as unusable
+                    continue
+
+            if usable_files:
+                # Prefer showing a real file (not a symlink) if available
+                preferred = next((p for p in usable_files if not p.is_symlink()), usable_files[0])
+                rel = preferred.relative_to(dist_dir)
+                print(f"✓ {lib_name:30} Found: {rel}")
             else:
-                print(f"❌ {lib_name:30} MISSING!")
+                print(f"❌ {lib_name:30} MISSING (or broken symlink)!")
                 all_libs_found = False
         
         if not all_libs_found:
@@ -60,6 +74,24 @@ def verify_build():
             print("   The executable may fail with 'cannot open shared object file' errors.")
             print("   Please rebuild with the updated sqlshell.spec file.")
             return False
+
+        # Extra sanity check: ICU libs must exist under PyQt6/Qt6/lib in onedir builds.
+        qt_icu_dir = dist_dir / "_internal" / "PyQt6" / "Qt6" / "lib"
+        if qt_icu_dir.exists():
+            required_in_qt_dir = [
+                ("ICU data", "libicudata.so*"),
+                ("ICU i18n", "libicui18n.so*"),
+                ("ICU uc", "libicuuc.so*"),
+            ]
+            for label, pattern in required_in_qt_dir:
+                candidates = list(qt_icu_dir.glob(pattern))
+                if not any(p.exists() for p in candidates):
+                    print(f"\n❌ CRITICAL: {label} library missing in PyQt6/Qt6/lib!")
+                    print("   This usually indicates a broken symlink or missed Qt runtime file.")
+                    return False
+        else:
+            print("\n⚠ WARNING: Expected Qt6 lib directory not found in build:")
+            print(f"   {qt_icu_dir}")
     
     # Check for common Qt6 plugins
     print("\n" + "=" * 70)

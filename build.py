@@ -8,6 +8,9 @@ Usage:
     python build.py --installer  # Build executable + installer
     python build.py --clean      # Clean build artifacts
     python build.py --onefile    # Build single-file executable
+    
+Note: This script requires a virtual environment. If run with system Python,
+      it will automatically re-exec using .venv/bin/python if available.
 """
 
 import argparse
@@ -18,6 +21,46 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+def ensure_venv():
+    """Ensure we're running in a virtual environment.
+    
+    If not in venv and .venv exists, re-exec using venv Python.
+    This avoids PEP 668 "externally-managed-environment" errors.
+    """
+    in_venv = sys.prefix != sys.base_prefix
+    
+    if in_venv:
+        return  # Already in venv, continue
+    
+    # Check for common venv locations
+    script_dir = Path(__file__).parent.resolve()
+    venv_paths = [
+        script_dir / ".venv" / "bin" / "python",
+        script_dir / "venv" / "bin" / "python",
+        script_dir / ".venv" / "Scripts" / "python.exe",  # Windows
+        script_dir / "venv" / "Scripts" / "python.exe",   # Windows
+    ]
+    
+    for venv_python in venv_paths:
+        if venv_python.exists():
+            print(f"Re-launching with venv Python: {venv_python}")
+            print("(To avoid this, run: source .venv/bin/activate)")
+            print()
+            os.execv(str(venv_python), [str(venv_python)] + sys.argv)
+    
+    # No venv found, warn and continue (may fail on modern systems)
+    print("WARNING: No virtual environment detected!")
+    print("If you see 'externally-managed-environment' errors, create a venv:")
+    print("  python3 -m venv .venv")
+    print("  source .venv/bin/activate")
+    print("  pip install -r requirements.txt pyinstaller patchelf")
+    print()
+
+
+# Auto-detect and use virtual environment
+ensure_venv()
 
 # Configuration
 APP_NAME = "SQLShell"
@@ -38,7 +81,10 @@ APP_VERSION = get_version_from_pyproject()
 SCRIPT_DIR = Path(__file__).parent.resolve()
 BUILD_DIR = SCRIPT_DIR / "build"
 DIST_DIR = SCRIPT_DIR / "dist"
-INSTALLER_DIR = SCRIPT_DIR / "installer"
+# NOTE: `installer/` is a source directory (scripts/specs checked into git).
+# Never write build artifacts there or delete it during cleaning.
+# Use a separate staging directory for packaging steps.
+INSTALLER_BUILD_DIR = SCRIPT_DIR / "build_installer"
 
 
 def run_command(cmd: list, cwd: Path = None) -> int:
@@ -57,7 +103,7 @@ def clean_build():
     dirs_to_remove = [
         BUILD_DIR,
         DIST_DIR / APP_NAME,
-        INSTALLER_DIR,
+        INSTALLER_BUILD_DIR,
     ]
     
     files_to_remove = [
@@ -219,11 +265,45 @@ def create_linux_tarball():
     return output_path
 
 
+def create_linux_self_extracting_installer():
+    """Create a self-extracting Linux installer (.run) using installer/linux/create_installer.sh."""
+    print("\nCreating Linux self-extracting installer...")
+    
+    installer_script = SCRIPT_DIR / "installer" / "linux" / "create_installer.sh"
+    if not installer_script.exists():
+        print(f"  Warning: installer script not found: {installer_script}")
+        return None
+    
+    makeself = shutil.which("makeself")
+    if not makeself:
+        print("  Warning: makeself not found. Install with: sudo apt install makeself")
+        return None
+    
+    # Pass version/name through environment so the script never hardcodes it.
+    env = os.environ.copy()
+    env["APP_NAME"] = APP_NAME
+    env["APP_VERSION"] = APP_VERSION
+    
+    result = subprocess.run([str(installer_script)], cwd=SCRIPT_DIR, env=env)
+    if result.returncode != 0:
+        print("  Error: Failed to create self-extracting installer")
+        return None
+    
+    output_name = f"{APP_NAME}-{APP_VERSION}-linux-x64-installer.run"
+    output_path = DIST_DIR / output_name
+    if output_path.exists():
+        print(f"  Created: {output_path}")
+        return output_path
+    
+    print(f"  Warning: Installer script finished but output not found: {output_path}")
+    return None
+
+
 def create_linux_appimage():
     """Create an AppImage for Linux (requires appimagetool)."""
     print("\nCreating Linux AppImage...")
     
-    appdir = INSTALLER_DIR / f"{APP_NAME}.AppDir"
+    appdir = INSTALLER_BUILD_DIR / f"{APP_NAME}.AppDir"
     appdir.mkdir(parents=True, exist_ok=True)
     
     # Copy application files
@@ -275,7 +355,7 @@ def create_linux_deb():
     """Create a .deb package for Debian/Ubuntu."""
     print("\nCreating Debian package...")
     
-    deb_root = INSTALLER_DIR / "deb" / APP_NAME.lower()
+    deb_root = INSTALLER_BUILD_DIR / "deb" / APP_NAME.lower()
     deb_root.mkdir(parents=True, exist_ok=True)
     
     # Create directory structure
@@ -309,6 +389,7 @@ Section: database
 Priority: optional
 Architecture: {arch}
 Installed-Size: {installed_size}
+Depends: libegl1, libgl1, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-xinerama0, libxcb-xfixes0
 Maintainer: {APP_AUTHOR}
 Description: {APP_DESCRIPTION}
  SQLShell is a powerful SQL query tool with GUI interface
@@ -354,7 +435,7 @@ def create_windows_installer():
     """Create a Windows installer using NSIS."""
     print("\nCreating Windows installer...")
     
-    nsis_script = INSTALLER_DIR / "windows" / "installer.nsi"
+    nsis_script = INSTALLER_BUILD_DIR / "windows" / "installer.nsi"
     nsis_script.parent.mkdir(parents=True, exist_ok=True)
     
     # Create NSIS script
@@ -531,12 +612,13 @@ def main():
     
     # Create installers if requested
     if args.installer or args.all:
-        INSTALLER_DIR.mkdir(exist_ok=True)
+        INSTALLER_BUILD_DIR.mkdir(exist_ok=True)
         
         system = platform.system()
         
         if system == "Linux":
             create_linux_tarball()
+            create_linux_self_extracting_installer()
             create_linux_appimage()
             if shutil.which("dpkg-deb"):
                 create_linux_deb()
