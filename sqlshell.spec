@@ -182,6 +182,9 @@ binaries = []
 # Collect PyQt6 dynamic libraries (fixes ICU library issues on Linux)
 binaries += collect_dynamic_libs('PyQt6')
 
+# Global variable to track symlinks for post-build recreation
+symlink_map = {}
+
 # On Linux, manually collect ALL Qt6 libraries to prevent missing dependencies
 if sys.platform.startswith('linux'):
     import site
@@ -214,8 +217,7 @@ if sys.platform.startswith('linux'):
     collected_libs = set()  # Track collected libraries to avoid duplicates
 
     for pyqt6_lib_path in pyqt6_lib_paths:
-        # Get all .so and .so.* files - DON'T resolve symlinks, add them as-is
-        # PyInstaller will preserve symlinks when we add them directly
+        # Collect all .so and .so.* files
         for lib_file in pyqt6_lib_path.glob('*.so*'):
             lib_path = str(lib_file)
             lib_name = lib_file.name
@@ -224,15 +226,25 @@ if sys.platform.startswith('linux'):
             if lib_path in collected_libs:
                 continue
             
-            # Add to binaries - this will include both symlinks and actual files
-            binaries.append((lib_path, '.'))
-            collected_libs.add(lib_path)
-            collected_count += 1
-            
-            # Print critical libraries for verification
-            if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
-                symlink_info = " (symlink)" if lib_file.is_symlink() else ""
-                print(f"[SQLShell Build] Adding critical library: {lib_name}{symlink_info}")
+            # If it's a symlink, record it for post-build recreation
+            if lib_file.is_symlink():
+                target = lib_file.resolve()
+                if target.exists():
+                    symlink_map[lib_name] = target.name
+                    # Add the actual target file (PyInstaller will copy it)
+                    binaries.append((str(target), '.'))
+                    collected_libs.add(str(target))
+                    collected_count += 1
+                    print(f"[SQLShell Build] Adding library: {lib_name} -> {target.name} (will recreate symlink)")
+            elif lib_file.is_file():
+                # Add the actual file
+                binaries.append((lib_path, '.'))
+                collected_libs.add(lib_path)
+                collected_count += 1
+                
+                # Print critical libraries for verification
+                if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
+                    print(f"[SQLShell Build] Adding critical library: {lib_name}")
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
@@ -377,7 +389,21 @@ if sys.platform.startswith('linux'):
         except subprocess.CalledProcessError as e:
             print(f"[SQLShell Build] WARNING: Failed to set RPATH: {e}")
             
-        # Verify ICU and EGL libraries are present (symlinks should have been copied by PyInstaller)
+        # Recreate symlinks that were recorded during collection
+        print(f"[SQLShell Build] Recreating {len(symlink_map)} symlinks...")
+        for symlink_name, target_name in symlink_map.items():
+            symlink_path = dist_dir / symlink_name
+            target_path = dist_dir / target_name
+            
+            # Only create if target exists and symlink doesn't
+            if target_path.exists() and not symlink_path.exists():
+                try:
+                    symlink_path.symlink_to(target_name)
+                    print(f"[SQLShell Build] Created symlink: {symlink_name} -> {target_name}")
+                except (OSError, FileExistsError) as e:
+                    print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
+        
+        # Verify ICU and EGL libraries are present
         icu_libs = list(dist_dir.glob('libicu*.so*'))
         egl_libs = list(dist_dir.glob('libEGL*.so*'))
         
