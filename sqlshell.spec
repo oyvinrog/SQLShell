@@ -236,9 +236,12 @@ if sys.platform.startswith('linux'):
                     binaries.append((str(target), target_subpath))
                     collected_libs.add(str(target))
                     collected_count += 1
+                    # Record symlink for post-build recreation
+                    symlink_map[lib_name] = f"PyQt6/Qt6/lib/{target.name}"
                     print(f"[SQLShell Build] Adding library: {lib_name} -> {target.name} (will copy to {target_subpath})")
                 elif str(target) in collected_libs:
-                    # Target already added
+                    # Target already added, still record symlink
+                    symlink_map[lib_name] = f"PyQt6/Qt6/lib/{target.name}"
                     print(f"[SQLShell Build] Skipping duplicate: {lib_name} -> {target.name}")
             elif lib_file.is_file():
                 # Add the actual file
