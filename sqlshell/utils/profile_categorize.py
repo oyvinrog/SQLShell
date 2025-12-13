@@ -19,7 +19,7 @@ References:
 import pandas as pd
 import numpy as np
 import warnings
-from typing import Union, Tuple, Optional, List
+from typing import Tuple
 
 # PyQt6 imports for visualization
 from PyQt6.QtWidgets import (
