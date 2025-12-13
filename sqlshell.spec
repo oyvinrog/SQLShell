@@ -397,22 +397,27 @@ if sys.platform.startswith('linux'):
             print(f"[SQLShell Build] WARNING: Failed to set RPATH: {e}")
             
         # Recreate symlinks that were recorded during collection
-        print(f"[SQLShell Build] Recreating {len(symlink_map)} symlinks...")
+        # Symlinks should be in _internal/ directory
+        internal_dir = dist_dir / '_internal'
+        print(f"[SQLShell Build] Recreating {len(symlink_map)} symlinks in _internal/...")
         for symlink_name, target_name in symlink_map.items():
-            symlink_path = dist_dir / symlink_name
-            target_path = dist_dir / target_name
+            symlink_path = internal_dir / symlink_name
+            target_path = internal_dir / target_name
             
             # Only create if target exists and symlink doesn't
             if target_path.exists() and not symlink_path.exists():
                 try:
+                    # Create relative symlink
                     symlink_path.symlink_to(target_name)
-                    print(f"[SQLShell Build] Created symlink: {symlink_name} -> {target_name}")
+                    print(f"[SQLShell Build] Created symlink: _internal/{symlink_name} -> {target_name}")
                 except (OSError, FileExistsError) as e:
                     print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
+            elif not target_path.exists():
+                print(f"[SQLShell Build] WARNING: Target not found for {symlink_name}: {target_path}")
         
-        # Verify ICU and EGL libraries are present
-        icu_libs = list(dist_dir.glob('libicu*.so*'))
-        egl_libs = list(dist_dir.glob('libEGL*.so*'))
+        # Verify ICU and EGL libraries are present in _internal
+        icu_libs = list(internal_dir.glob('libicu*.so*'))
+        egl_libs = list(internal_dir.glob('libEGL*.so*'))
         
         if icu_libs:
             print(f"[SQLShell Build] Verified {len(icu_libs)} ICU libraries in dist:")
