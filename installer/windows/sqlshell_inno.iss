@@ -38,9 +38,13 @@ SetupIconFile=..\..\sqlshell\resources\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ; Compression
+; Note: ultra64 compression makes smaller installers but slower decompression
+; For faster installation (especially in CI), consider lzma2/normal or lzma2/fast
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
+; Reduce memory usage during decompression to speed up installation
+LZMADictionarySize=65536
 
 ; Appearance
 WizardStyle=modern
@@ -95,11 +99,13 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [Code]
 // Custom code for additional setup logic
+// NOTE: Keep these functions simple to avoid installation delays
 
 function InitializeSetup(): Boolean;
 begin
   Result := True;
   // Add any pre-installation checks here
+  // Keep this fast - no network calls or long operations
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -107,6 +113,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     // Post-installation tasks
+    // Keep this fast to avoid delays during silent install
   end;
 end;
 

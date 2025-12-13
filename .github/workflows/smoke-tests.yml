@@ -284,19 +284,30 @@ jobs:
 
       - name: Install from installer
         if: github.event_name == 'workflow_run'
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: |
           $installer = Get-ChildItem artifacts\*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($installer) {
             Write-Host "Installing from: $($installer.FullName)" -ForegroundColor Cyan
-            # Run installer in silent mode with skip post-install to prevent hanging
-            # /VERYSILENT = no UI, /NORESTART = don't prompt for restart, /SKIPPOSTINSTALL = don't launch app
-            $process = Start-Process -FilePath $installer.FullName -ArgumentList '/VERYSILENT', '/NORESTART', '/SKIPPOSTINSTALL', '/DIR=C:\SQLShell' -Wait -PassThru -NoNewWindow
+            Write-Host "Starting installation (this may take 1-2 minutes)..." -ForegroundColor Cyan
+            
+            # Run installer in silent mode
+            # /VERYSILENT = no UI, /SUPPRESSMSGBOXES = no message boxes, /NORESTART = don't restart
+            # /DIR=C:\SQLShell = install location
+            # Note: skipifsilent flag in .iss already prevents app launch in silent mode
+            $startTime = Get-Date
+            $process = Start-Process -FilePath $installer.FullName `
+              -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/DIR=C:\SQLShell' `
+              -Wait -PassThru -NoNewWindow
+            $duration = (Get-Date) - $startTime
+            
+            Write-Host "Installation completed in $([math]::Round($duration.TotalSeconds, 1)) seconds" -ForegroundColor Cyan
+            
             if ($process.ExitCode -eq 0) {
-              Write-Host "[OK] Installer completed successfully" -ForegroundColor Green
+              Write-Host "[OK] Installer completed successfully (exit code 0)" -ForegroundColor Green
             } else {
               Write-Host "[WARNING] Installer exited with code: $($process.ExitCode)" -ForegroundColor Yellow
-              # Still continue - some installers return non-zero even on success
+              # Continue anyway - will verify installation in next step
             }
           } else {
             Write-Host "[WARNING]  No installer found, skipping installation test" -ForegroundColor Yellow

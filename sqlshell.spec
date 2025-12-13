@@ -214,34 +214,25 @@ if sys.platform.startswith('linux'):
     collected_libs = set()  # Track collected libraries to avoid duplicates
 
     for pyqt6_lib_path in pyqt6_lib_paths:
-        # Get all .so and .so.* files (including symlinks - resolve them first)
+        # Get all .so and .so.* files - DON'T resolve symlinks, add them as-is
+        # PyInstaller will preserve symlinks when we add them directly
         for lib_file in pyqt6_lib_path.glob('*.so*'):
-            # Resolve symlinks to their actual targets
-            if lib_file.is_symlink():
-                resolved_path = lib_file.resolve()
-                if not resolved_path.exists():
-                    continue
-                lib_path = str(resolved_path)
-                lib_name = lib_file.name  # Keep original symlink name
-            elif lib_file.is_file():
-                lib_path = str(lib_file)
-                lib_name = lib_file.name
-            else:
+            lib_path = str(lib_file)
+            lib_name = lib_file.name
+            
+            # Skip if already added (avoid duplicates)
+            if lib_path in collected_libs:
                 continue
             
-            # Avoid duplicates by checking both resolved path and name
-            if lib_path not in collected_libs:
-                # Put libraries in root directory so they're easily found
-                binaries.append((lib_path, '.'))
-                collected_libs.add(lib_path)
-                collected_count += 1
-                
-                # Print critical libraries for verification
-                if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
-                    print(f"[SQLShell Build] Adding critical library: {lib_name}")
-                
-                # Note: Symlinks for major version numbers (e.g., libicudata.so.73 -> libicudata.so.73.2)
-                # will be created in the post-build step below to ensure the loader can find them
+            # Add to binaries - this will include both symlinks and actual files
+            binaries.append((lib_path, '.'))
+            collected_libs.add(lib_path)
+            collected_count += 1
+            
+            # Print critical libraries for verification
+            if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
+                symlink_info = " (symlink)" if lib_file.is_symlink() else ""
+                print(f"[SQLShell Build] Adding critical library: {lib_name}{symlink_info}")
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
@@ -386,53 +377,27 @@ if sys.platform.startswith('linux'):
         except subprocess.CalledProcessError as e:
             print(f"[SQLShell Build] WARNING: Failed to set RPATH: {e}")
             
-        # Also verify ICU libraries are present and create necessary symlinks
+        # Verify ICU and EGL libraries are present (symlinks should have been copied by PyInstaller)
         icu_libs = list(dist_dir.glob('libicu*.so*'))
+        egl_libs = list(dist_dir.glob('libEGL*.so*'))
+        
         if icu_libs:
             print(f"[SQLShell Build] Verified {len(icu_libs)} ICU libraries in dist:")
             for lib in sorted(icu_libs):
-                print(f"  - {lib.name}")
-            
-            # Create symlinks for major version numbers (e.g., libicudata.so.73.2 -> libicudata.so.73)
-            # This ensures the loader can find libraries when looking for specific versions
-            for lib_file in icu_libs:
-                if lib_file.is_file() and '.so.' in lib_file.name:
-                    parts = lib_file.name.split('.so.')
-                    if len(parts) == 2:
-                        version_parts = parts[1].split('.')
-                        if len(version_parts) >= 2:  # Has minor version (e.g., 73.2)
-                            major_version = version_parts[0]
-                            symlink_name = f"{parts[0]}.so.{major_version}"
-                            symlink_path = dist_dir / symlink_name
-                            
-                            # Only create symlink if it doesn't exist
-                            if not symlink_path.exists():
-                                try:
-                                    symlink_path.symlink_to(lib_file.name)
-                                    print(f"[SQLShell Build] Created symlink: {symlink_name} -> {lib_file.name}")
-                                except (OSError, FileExistsError) as e:
-                                    print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
+                symlink_info = " (symlink)" if lib.is_symlink() else ""
+                print(f"  - {lib.name}{symlink_info}")
         else:
             print("[SQLShell Build] ERROR: No ICU libraries found in dist directory!")
             print("[SQLShell Build] The built binary will likely fail to run.")
         
-        # Also check for and create EGL library symlinks if needed
-        egl_libs = list(dist_dir.glob('libEGL*.so*'))
-        for lib_file in egl_libs:
-            if lib_file.is_file() and '.so.' in lib_file.name:
-                parts = lib_file.name.split('.so.')
-                if len(parts) == 2:
-                    version_parts = parts[1].split('.')
-                    if len(version_parts) >= 2:
-                        major_version = version_parts[0]
-                        symlink_name = f"{parts[0]}.so.{major_version}"
-                        symlink_path = dist_dir / symlink_name
-                        if not symlink_path.exists():
-                            try:
-                                symlink_path.symlink_to(lib_file.name)
-                                print(f"[SQLShell Build] Created symlink: {symlink_name} -> {lib_file.name}")
-                            except (OSError, FileExistsError) as e:
-                                print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
+        if egl_libs:
+            print(f"[SQLShell Build] Verified {len(egl_libs)} EGL libraries in dist:")
+            for lib in sorted(egl_libs):
+                symlink_info = " (symlink)" if lib.is_symlink() else ""
+                print(f"  - {lib.name}{symlink_info}")
+        else:
+            print("[SQLShell Build] WARNING: No EGL libraries found in dist directory.")
+            print("[SQLShell Build] EGL should be available as system dependency (libegl1).")
 
 # macOS app bundle (only on macOS)
 if sys.platform == 'darwin':
