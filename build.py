@@ -169,6 +169,7 @@ def build_executable(onefile: bool = False):
             # Collect all submodules
             "--collect-all", "duckdb",
             "--collect-all", "sklearn",
+            "--collect-all", "PyQt6",
             # Exclude unnecessary
             "--exclude-module", "tkinter",
             "--exclude-module", "test",
