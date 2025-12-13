@@ -93,6 +93,29 @@ def check_dependencies():
     except ImportError:
         print("  ✗ PyInstaller not found. Installing...")
         run_command([sys.executable, "-m", "pip", "install", "pyinstaller"])
+    
+    # Check PyQt6 (critical for Linux builds to ensure ICU libraries are available)
+    try:
+        import PyQt6
+        from pathlib import Path
+        pyqt6_path = Path(PyQt6.__file__).parent
+        print(f"  ✓ PyQt6 installed at {pyqt6_path}")
+        
+        # On Linux, verify Qt6 libraries exist
+        if platform.system() == "Linux":
+            qt6_lib_path = pyqt6_path / "Qt6" / "lib"
+            if qt6_lib_path.exists():
+                icu_libs = list(qt6_lib_path.glob("libicu*.so*"))
+                if icu_libs:
+                    print(f"  ✓ Found {len(icu_libs)} ICU libraries in PyQt6")
+                else:
+                    print("  ⚠ WARNING: ICU libraries not found in PyQt6!")
+                    print("    Build may fail on target systems.")
+            else:
+                print(f"  ⚠ WARNING: Qt6 lib directory not found: {qt6_lib_path}")
+    except ImportError:
+        print("  ✗ PyQt6 not found! Please install: pip install PyQt6")
+        sys.exit(1)
 
 
 def check_icons():
@@ -526,6 +549,20 @@ def main():
         if system != "Linux":
             create_linux_tarball()
     
+    # Run build verification
+    print("\n" + "="*60)
+    print("Running build verification...")
+    print("="*60 + "\n")
+    
+    verify_script = SCRIPT_DIR / "verify_build.py"
+    if verify_script.exists():
+        result = run_command([sys.executable, str(verify_script)])
+        if result != 0:
+            print("\n⚠ WARNING: Build verification found issues!")
+            print("Review the output above before distributing.")
+    else:
+        print("⚠ verify_build.py not found, skipping verification")
+    
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║                      Build Complete!                         ║
@@ -536,6 +573,9 @@ Distribution files are in: {DIST_DIR}
 To test the build:
   cd dist/{APP_NAME}
   ./{APP_NAME}
+
+To verify on a clean system, test in a container or VM:
+  docker run --rm -v $(pwd)/dist:/dist ubuntu:latest /dist/{APP_NAME}/{APP_NAME}
 
 """)
 

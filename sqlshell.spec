@@ -172,6 +172,51 @@ binaries = []
 # Collect PyQt6 dynamic libraries (fixes ICU library issues on Linux)
 binaries += collect_dynamic_libs('PyQt6')
 
+# On Linux, manually collect ALL Qt6 libraries to prevent missing dependencies
+if sys.platform.startswith('linux'):
+    import site
+    from pathlib import Path
+    
+    # Find Qt6 library paths in PyQt6 installation
+    pyqt6_lib_paths = []
+    
+    # Method 1: Check PyQt6 package location directly (most reliable)
+    try:
+        import PyQt6
+        pyqt6_pkg_path = Path(PyQt6.__file__).parent / 'Qt6' / 'lib'
+        if pyqt6_pkg_path.exists():
+            pyqt6_lib_paths.append(pyqt6_pkg_path)
+            print(f"[SQLShell Build] Found PyQt6 libs at: {pyqt6_pkg_path}")
+    except ImportError:
+        print("[SQLShell Build] WARNING: PyQt6 not found during spec file execution")
+    
+    # Method 2: Check site-packages (fallback)
+    for site_dir in site.getsitepackages() + [site.getusersitepackages()]:
+        if site_dir:
+            pyqt6_path = Path(site_dir) / 'PyQt6' / 'Qt6' / 'lib'
+            if pyqt6_path.exists() and pyqt6_path not in pyqt6_lib_paths:
+                pyqt6_lib_paths.append(pyqt6_path)
+                print(f"[SQLShell Build] Found PyQt6 libs at: {pyqt6_path}")
+    
+    # Collect ALL .so files from Qt6/lib to ensure nothing is missed
+    # This includes ICU, SSL, and other Qt dependencies
+    collected_count = 0
+    for pyqt6_lib_path in pyqt6_lib_paths:
+        # Get all .so and .so.* files
+        for lib_file in pyqt6_lib_path.glob('*.so*'):
+            if lib_file.is_file() and not lib_file.is_symlink():
+                binaries.append((str(lib_file), '.'))
+                collected_count += 1
+                # Print critical libraries for verification
+                if any(x in lib_file.name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
+                    print(f"[SQLShell Build] Adding critical library: {lib_file.name}")
+    
+    if collected_count > 0:
+        print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
+    else:
+        print("[SQLShell Build] ERROR: No Qt6 libraries found! Build may fail on target systems.")
+        print("[SQLShell Build] Please ensure PyQt6 is installed in the build environment.")
+
 # Note: XGBoost dynamic libraries no longer needed - scikit-learn uses standard NumPy/SciPy libs
 
 # Analysis
