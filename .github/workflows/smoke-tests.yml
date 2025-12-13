@@ -101,10 +101,22 @@ jobs:
             Write-Host "⚠ sqls not in PATH (this is acceptable)" -ForegroundColor Yellow
           }
 
-      - name: Smoke test - Help command
+      - name: Smoke test - Help command (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           sqls --help 2>/dev/null || python -m sqlshell --help
+
+      - name: Smoke test - Help command (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Try sqls first, fall back to python -m sqlshell
+          try {
+            $output = sqls --help 2>&1
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+          } catch {}
+          python -m sqlshell --help
 
       - name: Smoke test - Module can be imported and basic functionality works
         env:
