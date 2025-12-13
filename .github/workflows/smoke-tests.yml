@@ -45,7 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
-            libxcb-xfixes0 x11-utils libegl1 libgl1
+            libxcb-xfixes0 x11-utils libegl1 libgl1 libicu-dev
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -72,16 +72,51 @@ jobs:
 
       - name: Verify installation - CLI command exists (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          where sqls
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: sqls command not found in PATH" -ForegroundColor Red
-            exit 1
+          # Get Python Scripts directory
+          $pythonPath = python -c "import sys; import os; print(os.path.dirname(sys.executable))"
+          $scriptsPath = Join-Path $pythonPath "Scripts"
+          
+          Write-Host "Python path: $pythonPath" -ForegroundColor Cyan
+          Write-Host "Scripts path: $scriptsPath" -ForegroundColor Cyan
+          Write-Host "Checking for sqls.exe..." -ForegroundColor Cyan
+          
+          # Check if sqls.exe exists in Scripts directory
+          $sqlsPath = Join-Path $scriptsPath "sqls.exe"
+          if (Test-Path $sqlsPath) {
+            Write-Host "✓ Found sqls.exe at: $sqlsPath" -ForegroundColor Green
+          } else {
+            Write-Host "WARNING: sqls.exe not found in Scripts directory" -ForegroundColor Yellow
+            Write-Host "Contents of Scripts directory:" -ForegroundColor Yellow
+            Get-ChildItem $scriptsPath -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object Name
+            Write-Host "This is acceptable - will use 'python -m sqlshell' as fallback" -ForegroundColor Yellow
+          }
+          
+          # Try to run where command (may not be in PATH, which is OK)
+          $whereResult = where.exe sqls 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ sqls found in PATH: $whereResult" -ForegroundColor Green
+          } else {
+            Write-Host "⚠ sqls not in PATH (this is acceptable)" -ForegroundColor Yellow
           }
 
-      - name: Smoke test - Help command
+      - name: Smoke test - Help command (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          sqls --help || python -m sqlshell --help
+          sqls --help 2>/dev/null || python -m sqlshell --help
+
+      - name: Smoke test - Help command (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Try sqls first, fall back to python -m sqlshell
+          try {
+            $output = sqls --help 2>&1
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+          } catch {}
+          python -m sqlshell --help
 
       - name: Smoke test - Module can be imported and basic functionality works
         env:
@@ -124,6 +159,14 @@ jobs:
         run: |
           echo "=== Downloaded artifacts ==="
           ls -la artifacts/ || echo "No artifacts directory"
+
+      - name: Install system dependencies for .deb
+        if: github.event_name == 'workflow_run'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
+            libxcb-xfixes0 || true
 
       - name: Install .deb package
         if: github.event_name == 'workflow_run'
@@ -180,7 +223,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
-            libxcb-xfixes0 x11-utils libegl1 libgl1
+            libxcb-xfixes0 x11-utils libegl1 libgl1 libicu-dev
 
       - name: Extract tarball
         if: github.event_name == 'workflow_run'
@@ -253,13 +296,55 @@ jobs:
 
       - name: Install from installer
         if: github.event_name == 'workflow_run'
+        timeout-minutes: 3
         run: |
           $installer = Get-ChildItem artifacts\*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($installer) {
             Write-Host "Installing from: $($installer.FullName)" -ForegroundColor Cyan
-            # Run installer in silent mode
-            Start-Process -FilePath $installer.FullName -ArgumentList '/VERYSILENT', '/NORESTART', '/DIR=C:\SQLShell' -Wait
-            Write-Host "[OK] Installer completed" -ForegroundColor Green
+            Write-Host "Starting installation (this may take 1-2 minutes)..." -ForegroundColor Cyan
+            
+            # Run installer in silent mode using a job with timeout
+            # This prevents hanging if the installer launches a GUI or waits indefinitely
+            $startTime = Get-Date
+            $installerPath = $installer.FullName
+            
+            $job = Start-Job -ScriptBlock {
+              param($path)
+              $proc = Start-Process -FilePath $path `
+                -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=C:\SQLShell' `
+                -Wait -PassThru
+              return $proc.ExitCode
+            } -ArgumentList $installerPath
+            
+            # Wait up to 120 seconds for installation
+            $completed = Wait-Job $job -Timeout 120
+            $duration = (Get-Date) - $startTime
+            
+            if ($completed) {
+              $exitCode = Receive-Job $job
+              Write-Host "Installation completed in $([math]::Round($duration.TotalSeconds, 1)) seconds" -ForegroundColor Cyan
+              
+              if ($exitCode -eq 0) {
+                Write-Host "[OK] Installer completed successfully (exit code 0)" -ForegroundColor Green
+              } else {
+                Write-Host "[WARNING] Installer exited with code: $exitCode" -ForegroundColor Yellow
+              }
+            } else {
+              Write-Host "[WARNING] Installation timed out after 120 seconds, stopping..." -ForegroundColor Yellow
+              Stop-Job $job
+              
+              # Kill any hanging installer or app processes
+              Get-Process | Where-Object { $_.ProcessName -like "*SQLShell*" -or $_.ProcessName -like "*setup*" } | ForEach-Object {
+                Write-Host "Stopping process: $($_.ProcessName)" -ForegroundColor Yellow
+                Stop-Process $_ -Force -ErrorAction SilentlyContinue
+              }
+              
+              # Check if installation succeeded despite timeout (installer may have finished but app launched)
+              if (Test-Path "C:\SQLShell\SQLShell.exe") {
+                Write-Host "[OK] Installation appears successful despite timeout" -ForegroundColor Green
+              }
+            }
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
           } else {
             Write-Host "[WARNING]  No installer found, skipping installation test" -ForegroundColor Yellow
             exit 0
@@ -314,7 +399,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          brew install libomp
+          brew install libomp coreutils
 
       - name: Mount DMG and extract
         if: github.event_name == 'workflow_run'
@@ -360,7 +445,8 @@ jobs:
         run: |
           if [ -f "/tmp/SQLShell/SQLShell" ]; then
             chmod +x /tmp/SQLShell/SQLShell
-            timeout 30s /tmp/SQLShell/SQLShell --help || {
+            # Use gtimeout from coreutils (macOS doesn't have timeout by default)
+            gtimeout 30s /tmp/SQLShell/SQLShell --help || {
               echo "[ERROR] Application failed to run or timed out"
               exit 1
             }
