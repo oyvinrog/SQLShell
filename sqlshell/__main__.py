@@ -3848,16 +3848,22 @@ LIMIT 10
         try:
             # Show a loading indicator
             self.statusBar().showMessage(f'Analyzing table "{table_name}" columns...')
-            
+
             # Get the table data
             if table_name in self.db_manager.loaded_tables:
                 # Check if table needs reloading first
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
                 
                 if df is not None and not df.empty:
@@ -3895,11 +3901,17 @@ LIMIT 10
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
-                
+
                 if df is not None and not df.empty:
                     row_count = len(df)
                     
@@ -3938,11 +3950,17 @@ LIMIT 10
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
-                
+
                 if df is not None and not df.empty:
                     # Sample the data if it's larger than 10,000 rows
                     row_count = len(df)
