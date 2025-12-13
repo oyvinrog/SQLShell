@@ -566,6 +566,94 @@ class TestDatabaseTablesWithQualifiedNames:
         file_result = db_manager.execute_query(query)
         assert file_result is not None and not file_result.empty
 
+    @pytest.mark.database
+    def test_foreign_key_analysis_query_pattern_for_multiple_database_tables(self, db_manager, temp_dir):
+        """Test the query pattern used for foreign key analysis with multiple database tables."""
+        import sqlite3
+
+        # Create a database with multiple related tables
+        db_path = temp_dir / "fk_test.db"
+        conn = sqlite3.connect(str(db_path))
+
+        # Create customers table
+        customers = pd.DataFrame({
+            'customer_id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie']
+        })
+        customers.to_sql('customers', conn, index=False, if_exists='replace')
+
+        # Create orders table (with foreign key to customers)
+        orders = pd.DataFrame({
+            'order_id': [101, 102, 103],
+            'customer_id': [1, 2, 1],
+            'amount': [100.0, 200.0, 150.0]
+        })
+        orders.to_sql('orders', conn, index=False, if_exists='replace')
+
+        conn.close()
+
+        # Open the database
+        db_manager.open_database(str(db_path))
+
+        # Verify both tables are loaded
+        assert 'customers' in db_manager.loaded_tables
+        assert 'orders' in db_manager.loaded_tables
+
+        # Simulate what the foreign key analysis function does
+        table_names = ['customers', 'orders']
+        dfs = []
+
+        for table_name in table_names:
+            source = db_manager.loaded_tables[table_name]
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                query = f'SELECT * FROM {alias}."{table_name}"'
+            else:
+                query = f'SELECT * FROM "{table_name}"'
+
+            df = db_manager.execute_query(query)
+            assert df is not None and not df.empty
+            dfs.append(df)
+
+        # Should have successfully loaded both tables
+        assert len(dfs) == 2
+        assert 'customer_id' in dfs[0].columns
+        assert 'customer_id' in dfs[1].columns
+
+    @pytest.mark.database
+    def test_all_analysis_functions_work_with_database_tables(self, db_manager, temp_sqlite_db):
+        """Test that all analysis function query patterns work with database tables."""
+        # Open the database
+        db_manager.open_database(str(temp_sqlite_db))
+
+        table_name = 'users'
+        assert table_name in db_manager.loaded_tables
+
+        # Test all the different analysis function query patterns
+        analysis_functions = [
+            'entropy',      # analyze_table_entropy
+            'structure',    # profile_table_structure
+            'distributions',# profile_distributions
+            'similarity'    # profile_similarity
+        ]
+
+        for func_type in analysis_functions:
+            # Simulate what each analysis function does
+            source = db_manager.loaded_tables[table_name]
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                query = f'SELECT * FROM {alias}."{table_name}"'
+            else:
+                query = f'SELECT * FROM "{table_name}"'
+
+            # Execute the query
+            df = db_manager.execute_query(query)
+
+            # Verify it works
+            assert df is not None, f"Query for {func_type} analysis should return a result"
+            assert not df.empty, f"Query for {func_type} analysis should return data"
+            assert len(df) > 0, f"Query for {func_type} analysis should have rows"
+
 
 class TestDatabaseManagerEdgeCases:
     """Tests for edge cases and error handling."""

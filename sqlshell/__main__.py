@@ -1803,7 +1803,13 @@ LIMIT 10
             for table_name in table_names:
                 try:
                     # Get the data as a dataframe
-                    query = f'SELECT * FROM "{table_name}"'
+                    # For database tables, use qualified name (e.g., db.table_name)
+                    source = self.db_manager.loaded_tables[table_name]
+                    if source.startswith('database:'):
+                        alias = source.split(':')[1]
+                        query = f'SELECT * FROM {alias}."{table_name}"'
+                    else:
+                        query = f'SELECT * FROM "{table_name}"'
                     df = self.db_manager.execute_query(query)
                     
                     if df is not None and not df.empty:
@@ -4005,11 +4011,17 @@ LIMIT 10
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
-                
+
                 if df is not None and not df.empty:
                     # Sample the data if it's larger than 1,000 rows for performance
                     row_count = len(df)
