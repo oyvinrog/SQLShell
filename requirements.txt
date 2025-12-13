@@ -6,7 +6,6 @@ openpyxl>=3.1.0  # For Excel support
 fastparquet>=2023.10.1  # For Parquet support (lighter than pyarrow)
 xlrd>=2.0.1  # For old .xls files 
 deltalake  # For Delta Lake table support
-Pillow>=10.0.0  # For image processing (used in splash screen and icon creation) 
 scipy>=1.15.0  # For statistical distributions and analysis
 matplotlib>=3.10.0  # For data visualization 
 scikit-learn  # For RandomForest-based profiling (replaces XGBoost)

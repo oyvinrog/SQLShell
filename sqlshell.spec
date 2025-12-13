@@ -155,10 +155,6 @@ hiddenimports = [
     'nltk.corpus',
     'nltk.tokenize',
     
-    # Image processing
-    'PIL',
-    'PIL.Image',
-    
     # System
     'psutil',
 ]
@@ -172,6 +168,9 @@ hiddenimports += collect_submodules('PyQt6')
 
 # Binaries to include (platform-specific DLLs/SOs will be auto-detected)
 binaries = []
+
+# Collect PyQt6 dynamic libraries (fixes ICU library issues on Linux)
+binaries += collect_dynamic_libs('PyQt6')
 
 # Note: XGBoost dynamic libraries no longer needed - scikit-learn uses standard NumPy/SciPy libs
 

@@ -93,49 +93,17 @@ def check_dependencies():
     except ImportError:
         print("  ✗ PyInstaller not found. Installing...")
         run_command([sys.executable, "-m", "pip", "install", "pyinstaller"])
-    
-    # Check PIL for icon conversion
-    try:
-        from PIL import Image
-        print(f"  ✓ Pillow installed")
-    except ImportError:
-        print("  ✗ Pillow not found. Installing...")
-        run_command([sys.executable, "-m", "pip", "install", "Pillow"])
 
 
-def create_icons():
-    """Create platform-specific icons from PNG source."""
-    from PIL import Image
-    
+def check_icons():
+    """Check if required icon files exist."""
     icon_source = SCRIPT_DIR / "sqlshell" / "resources" / "icon.png"
     if not icon_source.exists():
-        print(f"Warning: Icon source not found at {icon_source}")
-        return
+        print(f"  ✗ Warning: Icon source not found at {icon_source}")
+        return False
     
-    print("Creating platform-specific icons...")
-    
-    img = Image.open(icon_source)
-    
-    # Windows ICO (multiple sizes)
-    if platform.system() == "Windows" or True:  # Always create for cross-compilation
-        ico_path = SCRIPT_DIR / "sqlshell" / "resources" / "icon.ico"
-        if not ico_path.exists():
-            sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-            icons = []
-            for size in sizes:
-                resized = img.resize(size, Image.Resampling.LANCZOS)
-                icons.append(resized)
-            icons[0].save(ico_path, format='ICO', sizes=[s for s in sizes])
-            print(f"  Created: {ico_path}")
-    
-    # macOS ICNS
-    if platform.system() == "Darwin" or True:  # Always create for cross-compilation
-        icns_path = SCRIPT_DIR / "sqlshell" / "resources" / "icon.icns"
-        if not icns_path.exists():
-            # Note: For proper ICNS, you'd need iconutil on macOS
-            # This is a simplified version
-            img.save(icns_path.with_suffix('.png'))
-            print(f"  Note: For macOS .icns, run 'iconutil' on a Mac")
+    print(f"  ✓ Icon files present")
+    return True
 
 
 def build_executable(onefile: bool = False):
@@ -162,15 +130,13 @@ def build_executable(onefile: bool = False):
             "--hidden-import", "duckdb",
             "--hidden-import", "PyQt6",
             "--hidden-import", "pyarrow",
-            "--hidden-import", "xgboost",
             "--hidden-import", "matplotlib",
             "--hidden-import", "seaborn",
             "--hidden-import", "nltk",
-            "--hidden-import", "PIL",
             # Collect all submodules
             "--collect-all", "duckdb",
             "--collect-all", "sklearn",
-            "--collect-all", "xgboost",
+            "--collect-all", "PyQt6",
             # Exclude unnecessary
             "--exclude-module", "tkinter",
             "--exclude-module", "test",
@@ -531,8 +497,8 @@ def main():
     # Check dependencies
     check_dependencies()
     
-    # Create platform icons
-    create_icons()
+    # Check platform icons exist
+    check_icons()
     
     # Build executable
     success = build_executable(onefile=args.onefile)
