@@ -309,6 +309,7 @@ Section: database
 Priority: optional
 Architecture: {arch}
 Installed-Size: {installed_size}
+Depends: libegl1, libgl1, libxkbcommon-x11-0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-xinerama0, libxcb-xfixes0
 Maintainer: {APP_AUTHOR}
 Description: {APP_DESCRIPTION}
  SQLShell is a powerful SQL query tool with GUI interface

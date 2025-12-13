@@ -216,46 +216,61 @@ if sys.platform.startswith('linux'):
     for pyqt6_lib_path in pyqt6_lib_paths:
         # Get all .so and .so.* files (including symlinks - resolve them first)
         for lib_file in pyqt6_lib_path.glob('*.so*'):
-            # Skip symlinks, only collect actual files to avoid duplicates
+            # Resolve symlinks to their actual targets
             if lib_file.is_symlink():
-                continue
-                
-            if lib_file.is_file():
+                resolved_path = lib_file.resolve()
+                if not resolved_path.exists():
+                    continue
+                lib_path = str(resolved_path)
+                lib_name = lib_file.name  # Keep original symlink name
+            elif lib_file.is_file():
                 lib_path = str(lib_file)
                 lib_name = lib_file.name
+            else:
+                continue
+            
+            # Avoid duplicates by checking both resolved path and name
+            if lib_path not in collected_libs:
+                # Put libraries in root directory so they're easily found
+                binaries.append((lib_path, '.'))
+                collected_libs.add(lib_path)
+                collected_count += 1
                 
-                # Avoid duplicates
-                if lib_path not in collected_libs:
-                    # Put libraries in root directory so they're easily found
-                    binaries.append((lib_path, '.'))
-                    collected_libs.add(lib_path)
-                    collected_count += 1
-                    
-                    # Print critical libraries for verification
-                    if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
-                        print(f"[SQLShell Build] Adding critical library: {lib_name}")
-                    
-                    # Also create symlinks for versioned libraries
-                    # e.g., if we have libicudata.so.73.2, also add as libicudata.so.73
-                    if '.so.' in lib_name:
-                        # Extract base name and major version
-                        # e.g., libicudata.so.73.2 -> libicudata.so.73
-                        parts = lib_name.split('.so.')
-                        if len(parts) == 2:
-                            version_parts = parts[1].split('.')
-                            if len(version_parts) >= 1:
-                                major_version = version_parts[0]
-                                symlink_name = f"{parts[0]}.so.{major_version}"
-                                if symlink_name != lib_name:
-                                    # Add entry to track that we need this symlink
-                                    # PyInstaller will handle creating it
-                                    print(f"[SQLShell Build] Will use {lib_name} for {symlink_name}")
+                # Print critical libraries for verification
+                if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
+                    print(f"[SQLShell Build] Adding critical library: {lib_name}")
+                
+                # Note: Symlinks for major version numbers (e.g., libicudata.so.73 -> libicudata.so.73.2)
+                # will be created in the post-build step below to ensure the loader can find them
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
     else:
         print("[SQLShell Build] ERROR: No Qt6 libraries found! Build may fail on target systems.")
         print("[SQLShell Build] Please ensure PyQt6 is installed in the build environment.")
+    
+    # Try to find and bundle system EGL libraries if not already collected
+    # libEGL is typically a system library that Qt6 depends on
+    import shutil
+    egl_paths = [
+        '/usr/lib/x86_64-linux-gnu/libEGL.so.1',
+        '/usr/lib/libEGL.so.1',
+        '/usr/lib64/libEGL.so.1',
+    ]
+    for egl_path in egl_paths:
+        egl_file = Path(egl_path)
+        if egl_file.exists() and str(egl_file) not in collected_libs:
+            binaries.append((str(egl_file), '.'))
+            collected_libs.add(str(egl_file))
+            print(f"[SQLShell Build] Found and bundling system EGL library: {egl_path}")
+            # Also try to find and bundle related EGL libraries
+            egl_dir = egl_file.parent
+            for related_lib in egl_dir.glob('libEGL*.so*'):
+                if related_lib.is_file() and str(related_lib) not in collected_libs:
+                    binaries.append((str(related_lib), '.'))
+                    collected_libs.add(str(related_lib))
+                    print(f"[SQLShell Build] Bundling EGL-related library: {related_lib.name}")
+            break  # Only use first found location
 
 # Note: XGBoost dynamic libraries no longer needed - scikit-learn uses standard NumPy/SciPy libs
 
@@ -371,15 +386,53 @@ if sys.platform.startswith('linux'):
         except subprocess.CalledProcessError as e:
             print(f"[SQLShell Build] WARNING: Failed to set RPATH: {e}")
             
-        # Also verify ICU libraries are present
+        # Also verify ICU libraries are present and create necessary symlinks
         icu_libs = list(dist_dir.glob('libicu*.so*'))
         if icu_libs:
             print(f"[SQLShell Build] Verified {len(icu_libs)} ICU libraries in dist:")
             for lib in sorted(icu_libs):
                 print(f"  - {lib.name}")
+            
+            # Create symlinks for major version numbers (e.g., libicudata.so.73.2 -> libicudata.so.73)
+            # This ensures the loader can find libraries when looking for specific versions
+            for lib_file in icu_libs:
+                if lib_file.is_file() and '.so.' in lib_file.name:
+                    parts = lib_file.name.split('.so.')
+                    if len(parts) == 2:
+                        version_parts = parts[1].split('.')
+                        if len(version_parts) >= 2:  # Has minor version (e.g., 73.2)
+                            major_version = version_parts[0]
+                            symlink_name = f"{parts[0]}.so.{major_version}"
+                            symlink_path = dist_dir / symlink_name
+                            
+                            # Only create symlink if it doesn't exist
+                            if not symlink_path.exists():
+                                try:
+                                    symlink_path.symlink_to(lib_file.name)
+                                    print(f"[SQLShell Build] Created symlink: {symlink_name} -> {lib_file.name}")
+                                except (OSError, FileExistsError) as e:
+                                    print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
         else:
             print("[SQLShell Build] ERROR: No ICU libraries found in dist directory!")
             print("[SQLShell Build] The built binary will likely fail to run.")
+        
+        # Also check for and create EGL library symlinks if needed
+        egl_libs = list(dist_dir.glob('libEGL*.so*'))
+        for lib_file in egl_libs:
+            if lib_file.is_file() and '.so.' in lib_file.name:
+                parts = lib_file.name.split('.so.')
+                if len(parts) == 2:
+                    version_parts = parts[1].split('.')
+                    if len(version_parts) >= 2:
+                        major_version = version_parts[0]
+                        symlink_name = f"{parts[0]}.so.{major_version}"
+                        symlink_path = dist_dir / symlink_name
+                        if not symlink_path.exists():
+                            try:
+                                symlink_path.symlink_to(lib_file.name)
+                                print(f"[SQLShell Build] Created symlink: {symlink_name} -> {lib_file.name}")
+                            except (OSError, FileExistsError) as e:
+                                print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
 
 # macOS app bundle (only on macOS)
 if sys.platform == 'darwin':
