@@ -47,7 +47,9 @@ if os.path.exists(os.path.join(SPEC_ROOT, 'sample_data')):
 
 # Collect data files from dependencies
 datas += collect_data_files('duckdb')
-# Note: Using fastparquet instead of pyarrow (saves 147MB)
+# Note: pyarrow is required by deltalake for Delta table support
+datas += collect_data_files('pyarrow')
+datas += collect_data_files('deltalake')  # Includes native binaries (_internal.abi3.so)
 # Note: XGBoost removed - using scikit-learn RandomForest instead (saves 207MB + 383MB CUDA)
 datas += collect_data_files('sklearn')
 datas += collect_data_files('nltk')
@@ -133,6 +135,7 @@ hiddenimports = [
     
     # File formats
     'fastparquet',
+    'pyarrow',  # Required by deltalake
     'openpyxl',
     'xlrd',
     'deltalake',
@@ -154,7 +157,13 @@ hiddenimports = [
     'nltk',
     'nltk.corpus',
     'nltk.tokenize',
-    
+
+    # ML model persistence
+    'joblib',  # Used by sklearn and profile_prediction.py
+
+    # AI/LLM (optional - only loaded if user configures API key)
+    'openai',
+
     # System
     'psutil',
 ]
@@ -164,6 +173,7 @@ hiddenimports += collect_submodules('pandas')
 hiddenimports += collect_submodules('numpy')
 hiddenimports += collect_submodules('scipy')
 hiddenimports += collect_submodules('sklearn')
+hiddenimports += collect_submodules('pyarrow')  # Required by deltalake and pandas
 hiddenimports += collect_submodules('PyQt6')
 
 # Binaries to include (platform-specific DLLs/SOs will be auto-detected)

@@ -3,8 +3,9 @@ numpy>=1.24.0
 PyQt6>=6.4.0
 duckdb>=0.9.0
 openpyxl>=3.1.0  # For Excel support
-fastparquet>=2023.10.1  # For Parquet support (lighter than pyarrow)
-xlrd>=2.0.1  # For old .xls files 
+fastparquet>=2023.10.1  # For Parquet support (lightweight engine)
+pyarrow>=10.0.0  # Required by deltalake and pandas (auto-imported)
+xlrd>=2.0.1  # For old .xls files
 deltalake  # For Delta Lake table support
 scipy>=1.15.0  # For statistical distributions and analysis
 matplotlib>=3.10.0  # For data visualization 
