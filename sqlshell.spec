@@ -155,10 +155,6 @@ hiddenimports = [
     'nltk.corpus',
     'nltk.tokenize',
     
-    # Image processing
-    'PIL',
-    'PIL.Image',
-    
     # System
     'psutil',
 ]
