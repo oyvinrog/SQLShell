@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sqlshell"
-version = "0.4.4"
+version = "0.4.5"
 description = "A powerful SQL shell with GUI interface for data analysis"
 readme = "README.md"
 authors = [
@@ -29,6 +29,7 @@ dependencies = [
     "duckdb>=0.9.0",
     "openpyxl>=3.1.0",
     "fastparquet>=2023.10.1",
+    "pyarrow>=10.0.0",
     "xlrd>=2.0.1",
     "deltalake",
     "scikit-learn",
