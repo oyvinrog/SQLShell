@@ -49,6 +49,7 @@ class TestCriticalImports:
         'sqlshell.utils.profile_prediction',
         'sqlshell.utils.profile_similarity',
         'sqlshell.utils.profile_cn2',
+        'sqlshell.utils.profile_categorize',
         'sqlshell.utils.search_in_df',
         
         # Other critical modules
@@ -98,6 +99,22 @@ class TestCriticalImports:
             assert callable(visualize_profile), "visualize_profile should be callable"
         except ImportError as e:
             pytest.fail(f"Failed to import from profile_entropy: {e}")
+
+    def test_profile_categorize_has_exports(self):
+        """Test that profile_categorize exports its main components."""
+        try:
+            from sqlshell.utils.profile_categorize import (
+                categorize_numerical,
+                categorize_categorical,
+                auto_categorize,
+                visualize_categorize
+            )
+            assert callable(categorize_numerical), "categorize_numerical should be callable"
+            assert callable(categorize_categorical), "categorize_categorical should be callable"
+            assert callable(auto_categorize), "auto_categorize should be callable"
+            assert callable(visualize_categorize), "visualize_categorize should be callable"
+        except ImportError as e:
+            pytest.fail(f"Failed to import from profile_categorize: {e}")
 
 
 class TestDynamicImportPatterns:

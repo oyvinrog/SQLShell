@@ -211,15 +211,33 @@ if sys.platform.startswith('linux'):
     # Collect ALL .so files from Qt6/lib to ensure nothing is missed
     # This includes ICU, SSL, and other Qt dependencies
     collected_count = 0
+    collected_libs = set()  # Track collected libraries to avoid duplicates
+
     for pyqt6_lib_path in pyqt6_lib_paths:
-        # Get all .so and .so.* files
+        # Get all .so and .so.* files (including symlinks - resolve them first)
         for lib_file in pyqt6_lib_path.glob('*.so*'):
-            if lib_file.is_file() and not lib_file.is_symlink():
-                binaries.append((str(lib_file), '.'))
-                collected_count += 1
-                # Print critical libraries for verification
-                if any(x in lib_file.name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
-                    print(f"[SQLShell Build] Adding critical library: {lib_file.name}")
+            # Handle both regular files and symlinks
+            if lib_file.is_symlink():
+                # Resolve symlink and add the actual file
+                real_file = lib_file.resolve()
+                if real_file.exists() and real_file.is_file():
+                    real_path = str(real_file)
+                    if real_path not in collected_libs:
+                        binaries.append((real_path, '.'))
+                        collected_libs.add(real_path)
+                        collected_count += 1
+                        # Print critical libraries for verification
+                        if any(x in real_file.name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
+                            print(f"[SQLShell Build] Adding critical library (resolved): {real_file.name}")
+            elif lib_file.is_file():
+                lib_path = str(lib_file)
+                if lib_path not in collected_libs:
+                    binaries.append((lib_path, '.'))
+                    collected_libs.add(lib_path)
+                    collected_count += 1
+                    # Print critical libraries for verification
+                    if any(x in lib_file.name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto']):
+                        print(f"[SQLShell Build] Adding critical library: {lib_file.name}")
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
@@ -319,6 +337,44 @@ coll = COLLECT(
     upx_exclude=[],
     name='SQLShell',
 )
+
+# Linux-specific post-build: Create wrapper script for library path handling
+if sys.platform.startswith('linux'):
+    import os
+    from pathlib import Path
+
+    dist_dir = Path(SPEC_ROOT) / 'dist' / 'SQLShell'
+    exe_path = dist_dir / 'SQLShell'
+    wrapper_path = dist_dir / 'SQLShell.wrapper'
+
+    # Rename the actual executable
+    if exe_path.exists():
+        import shutil
+        shutil.move(str(exe_path), str(wrapper_path))
+
+        # Create wrapper script
+        wrapper_script = f"""#!/bin/bash
+# SQLShell launcher wrapper
+# Sets library paths for PyQt6 and ICU libraries
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+
+# Set library path to include _internal directory
+export LD_LIBRARY_PATH="${{SCRIPT_DIR}}/_internal:${{LD_LIBRARY_PATH}}"
+
+# Launch the actual executable
+exec "${{SCRIPT_DIR}}/SQLShell.wrapper" "$@"
+"""
+
+        with open(exe_path, 'w') as f:
+            f.write(wrapper_script)
+
+        # Make wrapper executable
+        os.chmod(exe_path, 0o755)
+
+        print(f"[SQLShell Build] Created wrapper script: {exe_path}")
+        print(f"[SQLShell Build] Renamed executable to: {wrapper_path}")
 
 # macOS app bundle (only on macOS)
 if sys.platform == 'darwin':

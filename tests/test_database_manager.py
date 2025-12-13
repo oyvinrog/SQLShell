@@ -438,6 +438,223 @@ class TestDatabaseAndFilesIntegration:
         assert len(result) == len(sample_df)
 
 
+class TestDatabaseTablesWithQualifiedNames:
+    """Tests for querying database tables using qualified names (fixes issue with analysis functions)."""
+
+    @pytest.mark.database
+    def test_query_database_table_with_qualified_name(self, db_manager, temp_sqlite_db):
+        """Test that database tables can be queried using qualified names (alias.table_name)."""
+        # Open the database
+        db_manager.open_database(str(temp_sqlite_db))
+
+        # Verify table is tracked in loaded_tables
+        assert 'users' in db_manager.loaded_tables, "Table 'users' should be in loaded_tables"
+
+        # Get the source to determine if it's a database table
+        source = db_manager.loaded_tables['users']
+        assert source.startswith('database:'), f"Source should start with 'database:', got: {source}"
+
+        # Extract the alias from the source
+        alias = source.split(':')[1]
+        assert alias == 'db', f"Expected alias 'db', got: {alias}"
+
+        # Query using qualified name (this is what the analysis functions now do)
+        query = f'SELECT * FROM {alias}."users"'
+        result = db_manager.execute_query(query)
+
+        # Verify the query succeeded
+        assert result is not None, "Query should return a result"
+        assert len(result) > 0, "Query should return data"
+        assert 'name' in result.columns, "Result should contain expected columns"
+
+    @pytest.mark.database
+    def test_unqualified_query_on_database_table_fails(self, db_manager, temp_sqlite_db):
+        """Test that unqualified queries on database tables fail (the original bug)."""
+        # Open the database
+        db_manager.open_database(str(temp_sqlite_db))
+
+        # Verify table is tracked
+        assert 'users' in db_manager.loaded_tables
+
+        # Unqualified query should fail (this was the original bug)
+        with pytest.raises(Exception) as exc_info:
+            db_manager.execute_query('SELECT * FROM "users"')
+
+        # The error should mention that the table doesn't exist
+        assert 'users' in str(exc_info.value).lower() or 'not exist' in str(exc_info.value).lower()
+
+    @pytest.mark.database
+    def test_analysis_function_query_pattern_for_database_tables(self, db_manager, temp_sqlite_db):
+        """Test the exact query pattern used by analysis functions for database tables."""
+        # Open the database
+        db_manager.open_database(str(temp_sqlite_db))
+
+        table_name = 'users'
+        assert table_name in db_manager.loaded_tables
+
+        # Simulate what the fixed analysis functions do
+        source = db_manager.loaded_tables[table_name]
+        if source.startswith('database:'):
+            alias = source.split(':')[1]
+            query = f'SELECT * FROM {alias}."{table_name}"'
+        else:
+            query = f'SELECT * FROM "{table_name}"'
+
+        # Execute the query
+        df = db_manager.execute_query(query)
+
+        # Verify it works
+        assert df is not None
+        assert not df.empty
+        assert len(df) > 0
+
+    @pytest.mark.database
+    def test_analysis_function_query_pattern_for_file_tables(self, db_manager, sample_parquet_file):
+        """Test the exact query pattern used by analysis functions for file-based tables."""
+        # Load a parquet file
+        table_name, _ = db_manager.load_file(str(sample_parquet_file))
+
+        assert table_name in db_manager.loaded_tables
+
+        # Simulate what the fixed analysis functions do
+        source = db_manager.loaded_tables[table_name]
+        if source.startswith('database:'):
+            alias = source.split(':')[1]
+            query = f'SELECT * FROM {alias}."{table_name}"'
+        else:
+            query = f'SELECT * FROM "{table_name}"'
+
+        # Execute the query
+        df = db_manager.execute_query(query)
+
+        # Verify it works
+        assert df is not None
+        assert not df.empty
+        assert len(df) > 0
+
+    @pytest.mark.database
+    def test_mixed_database_and_file_tables_query_patterns(self, db_manager, temp_sqlite_db, sample_parquet_file):
+        """Test that both database and file tables can be queried using the analysis function pattern."""
+        # Load both a database and a file
+        db_manager.open_database(str(temp_sqlite_db))
+        file_table_name, _ = db_manager.load_file(str(sample_parquet_file))
+
+        # We should have both types of tables
+        assert 'users' in db_manager.loaded_tables  # database table
+        assert file_table_name in db_manager.loaded_tables  # file table
+
+        # Test querying the database table
+        db_table_name = 'users'
+        source = db_manager.loaded_tables[db_table_name]
+        if source.startswith('database:'):
+            alias = source.split(':')[1]
+            query = f'SELECT * FROM {alias}."{db_table_name}"'
+        else:
+            query = f'SELECT * FROM "{db_table_name}"'
+
+        db_result = db_manager.execute_query(query)
+        assert db_result is not None and not db_result.empty
+
+        # Test querying the file table
+        source = db_manager.loaded_tables[file_table_name]
+        if source.startswith('database:'):
+            alias = source.split(':')[1]
+            query = f'SELECT * FROM {alias}."{file_table_name}"'
+        else:
+            query = f'SELECT * FROM "{file_table_name}"'
+
+        file_result = db_manager.execute_query(query)
+        assert file_result is not None and not file_result.empty
+
+    @pytest.mark.database
+    def test_foreign_key_analysis_query_pattern_for_multiple_database_tables(self, db_manager, temp_dir):
+        """Test the query pattern used for foreign key analysis with multiple database tables."""
+        import sqlite3
+
+        # Create a database with multiple related tables
+        db_path = temp_dir / "fk_test.db"
+        conn = sqlite3.connect(str(db_path))
+
+        # Create customers table
+        customers = pd.DataFrame({
+            'customer_id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie']
+        })
+        customers.to_sql('customers', conn, index=False, if_exists='replace')
+
+        # Create orders table (with foreign key to customers)
+        orders = pd.DataFrame({
+            'order_id': [101, 102, 103],
+            'customer_id': [1, 2, 1],
+            'amount': [100.0, 200.0, 150.0]
+        })
+        orders.to_sql('orders', conn, index=False, if_exists='replace')
+
+        conn.close()
+
+        # Open the database
+        db_manager.open_database(str(db_path))
+
+        # Verify both tables are loaded
+        assert 'customers' in db_manager.loaded_tables
+        assert 'orders' in db_manager.loaded_tables
+
+        # Simulate what the foreign key analysis function does
+        table_names = ['customers', 'orders']
+        dfs = []
+
+        for table_name in table_names:
+            source = db_manager.loaded_tables[table_name]
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                query = f'SELECT * FROM {alias}."{table_name}"'
+            else:
+                query = f'SELECT * FROM "{table_name}"'
+
+            df = db_manager.execute_query(query)
+            assert df is not None and not df.empty
+            dfs.append(df)
+
+        # Should have successfully loaded both tables
+        assert len(dfs) == 2
+        assert 'customer_id' in dfs[0].columns
+        assert 'customer_id' in dfs[1].columns
+
+    @pytest.mark.database
+    def test_all_analysis_functions_work_with_database_tables(self, db_manager, temp_sqlite_db):
+        """Test that all analysis function query patterns work with database tables."""
+        # Open the database
+        db_manager.open_database(str(temp_sqlite_db))
+
+        table_name = 'users'
+        assert table_name in db_manager.loaded_tables
+
+        # Test all the different analysis function query patterns
+        analysis_functions = [
+            'entropy',      # analyze_table_entropy
+            'structure',    # profile_table_structure
+            'distributions',# profile_distributions
+            'similarity'    # profile_similarity
+        ]
+
+        for func_type in analysis_functions:
+            # Simulate what each analysis function does
+            source = db_manager.loaded_tables[table_name]
+            if source.startswith('database:'):
+                alias = source.split(':')[1]
+                query = f'SELECT * FROM {alias}."{table_name}"'
+            else:
+                query = f'SELECT * FROM "{table_name}"'
+
+            # Execute the query
+            df = db_manager.execute_query(query)
+
+            # Verify it works
+            assert df is not None, f"Query for {func_type} analysis should return a result"
+            assert not df.empty, f"Query for {func_type} analysis should return data"
+            assert len(df) > 0, f"Query for {func_type} analysis should have rows"
+
+
 class TestDatabaseManagerEdgeCases:
     """Tests for edge cases and error handling."""
 
@@ -445,12 +662,12 @@ class TestDatabaseManagerEdgeCases:
         """Test loading an empty CSV file."""
         path = temp_dir / "empty.csv"
         pd.DataFrame(columns=['a', 'b', 'c']).to_csv(path, index=False)
-        
+
         db_manager.load_file(str(path))
-        
+
         tables = list(db_manager.loaded_tables.keys())
         result = db_manager.execute_query(f"SELECT * FROM {tables[0]}")
-        
+
         assert len(result) == 0
         assert list(result.columns) == ['a', 'b', 'c']
 

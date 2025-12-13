@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main, develop, feature/*, DecemberAI-*]
+    branches: [main, develop, feature/*, DecemberAI-*, '[0-9]+.[0-9]+.[0-9]+']
   pull_request:
     branches: [main, develop]
 
@@ -47,6 +47,29 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m pytest tests/ --cov=sqlshell --cov-report=xml --cov-report=term-missing -v
+
+      - name: Smoke test - Install and run package
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          echo "=== Installing package locally ==="
+          pip install -e .
+
+          echo "=== Testing import ==="
+          python -c "import sqlshell; print('[OK] Import successful')"
+
+          echo "=== Testing CLI command ==="
+          which sqls
+          sqls --help || python -m sqlshell --help
+
+          echo "=== Testing critical modules ==="
+          python -c "
+          from sqlshell.db import database_manager
+          from sqlshell.utils import profile_column
+          print('[OK] All critical modules imported successfully')
+          "
+
+          echo "[OK] Smoke tests passed"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -110,4 +133,51 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python run_tests.py --quick
+
+      - name: Smoke test - Install and run package (Linux/macOS)
+        if: runner.os != 'Windows'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          echo "=== Installing package locally ==="
+          pip install -e .
+
+          echo "=== Testing import ==="
+          python -c "import sqlshell; print('[OK] Import successful')"
+
+          echo "=== Testing CLI command ==="
+          which sqls
+          sqls --help || python -m sqlshell --help
+
+          echo "=== Testing critical modules ==="
+          python -c "
+          from sqlshell.db import database_manager
+          from sqlshell.utils import profile_column
+          print('[OK] All critical modules imported successfully')
+          "
+
+          echo "[OK] Smoke tests passed"
+
+      - name: Smoke test - Install and run package (Windows)
+        if: runner.os == 'Windows'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          Write-Host "=== Installing package locally ===" -ForegroundColor Cyan
+          pip install -e .
+
+          Write-Host "=== Testing import ===" -ForegroundColor Cyan
+          python -c "import sqlshell; print('[OK] Import successful')"
+
+          Write-Host "=== Testing CLI command ===" -ForegroundColor Cyan
+          where sqls
+          sqls --help
+          if ($LASTEXITCODE -ne 0) {
+            python -m sqlshell --help
+          }
+
+          Write-Host "=== Testing critical modules ===" -ForegroundColor Cyan
+          python -c "from sqlshell.db import database_manager; from sqlshell.utils import profile_column; print('[OK] All critical modules imported successfully')"
+
+          Write-Host "[OK] Smoke tests passed" -ForegroundColor Green
 

@@ -668,6 +668,14 @@ class Condition:
         val = row[self.feature]
         if pd.isna(val):
             return False
+
+        # Handle datetime values - convert to timestamp for comparison
+        if pd.api.types.is_datetime64_any_dtype(type(val)):
+            # Convert to timestamp (seconds since epoch)
+            if hasattr(val, 'tz') and val.tz is not None:
+                val = val.tz_convert('UTC')
+            val = pd.Timestamp(val).value / 1e9
+
         if self.operator == '==':
             return val == self.value
         elif self.operator == '<=':
@@ -720,6 +728,15 @@ class Rule:
         mask = np.ones(len(X), dtype=bool)
         for cond in self.conditions:
             col_vals = X[cond.feature]
+
+            # Handle datetime columns - convert to timestamp for comparison
+            if pd.api.types.is_datetime64_any_dtype(col_vals.dtype):
+                # Handle timezone-aware datetimes by converting to UTC first
+                if hasattr(col_vals.dtype, 'tz') and col_vals.dtype.tz is not None:
+                    col_vals = col_vals.dt.tz_convert('UTC')
+                # Convert to timestamp (seconds since epoch)
+                col_vals = col_vals.astype('int64') / 1e9
+
             if cond.operator == '==':
                 mask &= (col_vals == cond.value).values
             elif cond.operator == '<=':
@@ -727,7 +744,7 @@ class Rule:
             elif cond.operator == '>':
                 mask &= (col_vals > cond.value).values
             # Handle NaN values
-            mask &= ~col_vals.isna().values
+            mask &= ~pd.Series(col_vals).isna().values
         return mask
     
     def to_dict(self) -> Dict:
@@ -887,15 +904,30 @@ class CN2Classifier:
         self._condition_masks = {}
         self._feature_conditions = []
         n_samples = len(X)
-        
+
         for feat_idx, col in enumerate(X.columns):
             col_data = X[col].values
             dtype = X[col].dtype
+
+            # Check if datetime column (including timezone-aware datetime64)
+            is_datetime = pd.api.types.is_datetime64_any_dtype(dtype)
+
+            # Convert datetime to numeric (Unix timestamp) for processing
+            if is_datetime:
+                # Convert to Unix timestamp (seconds since epoch)
+                col_data_series = pd.Series(col_data)
+                # Handle timezone-aware datetimes by converting to UTC first
+                if hasattr(col_data_series.dtype, 'tz') and col_data_series.dtype.tz is not None:
+                    col_data_series = col_data_series.dt.tz_convert('UTC')
+                # Convert to timestamp (this handles both tz-aware and tz-naive)
+                col_data = col_data_series.astype('int64').values / 1e9  # Convert nanoseconds to seconds
+                dtype = col_data.dtype
+
             is_numeric = np.issubdtype(dtype, np.number)
-            
+
             # Handle NaN mask
             nan_mask = pd.isna(col_data)
-            
+
             if is_numeric:
                 # Get quantile thresholds (fewer bins = faster)
                 valid_data = col_data[~nan_mask]

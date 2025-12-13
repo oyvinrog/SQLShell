@@ -1803,7 +1803,13 @@ LIMIT 10
             for table_name in table_names:
                 try:
                     # Get the data as a dataframe
-                    query = f'SELECT * FROM "{table_name}"'
+                    # For database tables, use qualified name (e.g., db.table_name)
+                    source = self.db_manager.loaded_tables[table_name]
+                    if source.startswith('database:'):
+                        alias = source.split(':')[1]
+                        query = f'SELECT * FROM {alias}."{table_name}"'
+                    else:
+                        query = f'SELECT * FROM "{table_name}"'
                     df = self.db_manager.execute_query(query)
                     
                     if df is not None and not df.empty:
@@ -3848,16 +3854,22 @@ LIMIT 10
         try:
             # Show a loading indicator
             self.statusBar().showMessage(f'Analyzing table "{table_name}" columns...')
-            
+
             # Get the table data
             if table_name in self.db_manager.loaded_tables:
                 # Check if table needs reloading first
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
                 
                 if df is not None and not df.empty:
@@ -3895,11 +3907,17 @@ LIMIT 10
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
-                
+
                 if df is not None and not df.empty:
                     row_count = len(df)
                     
@@ -3938,11 +3956,17 @@ LIMIT 10
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
-                
+
                 if df is not None and not df.empty:
                     # Sample the data if it's larger than 10,000 rows
                     row_count = len(df)
@@ -3987,11 +4011,17 @@ LIMIT 10
                 if table_name in self.tables_list.tables_needing_reload:
                     # Reload the table immediately
                     self.reload_selected_table(table_name)
-                
+
                 # Get the data as a dataframe
-                query = f'SELECT * FROM "{table_name}"'
+                # For database tables, use qualified name (e.g., db.table_name)
+                source = self.db_manager.loaded_tables[table_name]
+                if source.startswith('database:'):
+                    alias = source.split(':')[1]
+                    query = f'SELECT * FROM {alias}."{table_name}"'
+                else:
+                    query = f'SELECT * FROM "{table_name}"'
                 df = self.db_manager.execute_query(query)
-                
+
                 if df is not None and not df.empty:
                     # Sample the data if it's larger than 1,000 rows for performance
                     row_count = len(df)
@@ -4286,6 +4316,75 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Apply Encoding Error: Error applying encoding - {str(e)}")
             self.statusBar().showMessage(f'Error applying encoding: {str(e)}')
+
+    def categorize_column(self, column_name):
+        """Categorize a column (bin numerical or group categorical)."""
+        try:
+            # Get the appropriate data (full table if preview mode, else query results)
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
+                return
+
+            # Show a loading indicator
+            self.statusBar().showMessage(f'Preparing categorization for "{column_name}"...')
+
+            # Get the current tab to save original row count
+            current_tab = self.get_current_tab()
+            if current_tab:
+                current_tab.original_df_rowcount = len(df)
+
+            # Check if the column exists
+            if column_name not in df.columns:
+                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
+                return
+
+            # Import and use the visualize_categorize function
+            from sqlshell.utils.profile_categorize import visualize_categorize
+
+            # Create and show the categorization visualization
+            # Store reference as instance variable to prevent garbage collection on Windows
+            self._categorize_visualization = visualize_categorize(df, column_name)
+
+            # Connect the categorizationApplied signal to our handler
+            self._categorize_visualization.categorizationApplied.connect(
+                self.apply_categorization_to_current_tab
+            )
+
+            self.statusBar().showMessage(
+                f'Categorization visualization ready for "{column_name}"'
+            )
+
+        except Exception as e:
+            show_error_notification(f"Categorization Error: {str(e)}")
+            self.statusBar().showMessage(f'Error categorizing column: {str(e)}')
+
+    def apply_categorization_to_current_tab(self, categorized_df):
+        """Apply the categorized dataframe to the current tab."""
+        try:
+            # Get the current tab
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                return
+
+            # Update the current tab's dataframe
+            current_tab.current_df = categorized_df
+
+            # Reset preview mode
+            current_tab.is_preview_mode = False
+            current_tab.preview_table_name = None
+
+            # Update the table display
+            self.populate_table(categorized_df)
+
+            # Update status
+            self.statusBar().showMessage(
+                f'Applied categorization. Table has {len(categorized_df)} rows '
+                f'and {len(categorized_df.columns)} columns.'
+            )
+
+        except Exception as e:
+            show_error_notification(f"Apply Categorization Error: {str(e)}")
+            self.statusBar().showMessage(f'Error applying categorization: {str(e)}')
 
     def discover_classification_rules(self, target_column):
         """Discover classification rules (IF-THEN rules) using CN2 algorithm"""

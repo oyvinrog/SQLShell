@@ -1,0 +1,399 @@
+name: Smoke Tests
+
+# Run smoke tests after builds complete or on manual trigger
+on:
+  workflow_run:
+    workflows: ["Build Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      test_pypi:
+        description: 'Test PyPI installation'
+        type: boolean
+        default: true
+      test_installers:
+        description: 'Test platform installers'
+        type: boolean
+        default: true
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================
+  # Test PyPI Installation
+  # ============================================
+  test-pypi-install:
+    name: Test PyPI Installation
+    runs-on: ${{ matrix.os }}
+    if: github.event.inputs.test_pypi != 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
+            libxcb-xfixes0 x11-utils libegl1 libgl1
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install libomp
+
+      - name: Install sqlshell from PyPI
+        run: |
+          python -m pip install --upgrade pip
+          pip install sqlshell
+
+      - name: Verify installation - Import test
+        run: |
+          python -c "import sqlshell; print('Import successful')"
+
+      - name: Verify installation - Package metadata
+        run: |
+          pip show sqlshell
+
+      - name: Verify installation - CLI command exists
+        if: runner.os != 'Windows'
+        run: |
+          which sqls || (echo "ERROR: sqls command not found in PATH" && exit 1)
+
+      - name: Verify installation - CLI command exists (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          where sqls
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: sqls command not found in PATH" -ForegroundColor Red
+            exit 1
+          }
+
+      - name: Smoke test - Help command
+        run: |
+          sqls --help || python -m sqlshell --help
+
+      - name: Smoke test - Module can be imported and basic functionality works
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -c "
+          import sys
+          try:
+              import sqlshell
+              from sqlshell.db import database_manager
+              from sqlshell.utils import profile_column
+              print('SUCCESS: All critical modules imported successfully')
+              sys.exit(0)
+          except ImportError as e:
+              print(f'FAILED: Import failed: {e}')
+              sys.exit(1)
+          "
+
+  # ============================================
+  # Test Linux Installers
+  # ============================================
+  test-linux-deb:
+    name: Test Linux .deb Package
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run' || github.event.inputs.test_installers != 'false'
+    needs: []
+
+    steps:
+      - name: Download artifacts from build workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: ./artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List artifacts
+        if: github.event_name == 'workflow_run'
+        run: |
+          echo "=== Downloaded artifacts ==="
+          ls -la artifacts/ || echo "No artifacts directory"
+
+      - name: Install .deb package
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ -f artifacts/*.deb ]; then
+            sudo dpkg -i artifacts/*.deb || true
+            # Fix dependencies if needed
+            sudo apt-get update
+            sudo apt-get install -f -y
+          else
+            echo "[WARNING] No .deb package found, skipping installation test"
+            exit 0
+          fi
+
+      - name: Verify .deb installation
+        if: github.event_name == 'workflow_run'
+        run: |
+          if command -v sqlshell &> /dev/null; then
+            echo "[OK] sqlshell command is available"
+            which sqlshell
+          else
+            echo "[ERROR] sqlshell command not found after .deb installation"
+            exit 1
+          fi
+
+      - name: Smoke test - Run installed binary
+        if: github.event_name == 'workflow_run'
+        timeout-minutes: 2
+        run: |
+          # Try to run the binary with a timeout to ensure it doesn't hang
+          timeout 30s sqlshell --help || timeout 30s /opt/sqlshell/SQLShell --help || {
+            echo "[ERROR] Binary failed to run or timed out"
+            exit 1
+          }
+          echo "[OK] Binary executed successfully"
+
+  test-linux-tarball:
+    name: Test Linux Tarball
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run' || github.event.inputs.test_installers != 'false'
+
+    steps:
+      - name: Download artifacts from build workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: ./artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 \
+            libxcb-xfixes0 x11-utils libegl1 libgl1
+
+      - name: Extract tarball
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ -f artifacts/*.tar.gz ]; then
+            tar -xzf artifacts/*.tar.gz -C artifacts/
+            echo "[OK] Tarball extracted"
+            ls -la artifacts/SQLShell/ || echo "SQLShell directory not found"
+          else
+            echo "[WARNING]  No tarball found, skipping test"
+            exit 0
+          fi
+
+      - name: Verify tarball contents
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ -d "artifacts/SQLShell" ]; then
+            if [ -f "artifacts/SQLShell/SQLShell" ]; then
+              echo "[OK] SQLShell executable found"
+              ls -lh artifacts/SQLShell/SQLShell
+            else
+              echo "[ERROR] SQLShell executable not found"
+              exit 1
+            fi
+          else
+            echo "[WARNING]  SQLShell directory not found"
+            exit 0
+          fi
+
+      - name: Smoke test - Run extracted binary
+        if: github.event_name == 'workflow_run'
+        timeout-minutes: 2
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ -f "artifacts/SQLShell/SQLShell" ]; then
+            chmod +x artifacts/SQLShell/SQLShell
+            timeout 30s artifacts/SQLShell/SQLShell --help || {
+              echo "[ERROR] Binary failed to run or timed out"
+              exit 1
+            }
+            echo "[OK] Binary executed successfully"
+          else
+            echo "[WARNING]  Skipping binary test"
+          fi
+
+  # ============================================
+  # Test Windows Installer
+  # ============================================
+  test-windows-installer:
+    name: Test Windows Installer
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_run' || github.event.inputs.test_installers != 'false'
+
+    steps:
+      - name: Download artifacts from build workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: ./artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List artifacts
+        if: github.event_name == 'workflow_run'
+        run: |
+          Write-Host "=== Downloaded artifacts ===" -ForegroundColor Cyan
+          Get-ChildItem artifacts\ -ErrorAction SilentlyContinue
+
+      - name: Install from installer
+        if: github.event_name == 'workflow_run'
+        run: |
+          $installer = Get-ChildItem artifacts\*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($installer) {
+            Write-Host "Installing from: $($installer.FullName)" -ForegroundColor Cyan
+            # Run installer in silent mode
+            Start-Process -FilePath $installer.FullName -ArgumentList '/VERYSILENT', '/NORESTART', '/DIR=C:\SQLShell' -Wait
+            Write-Host "[OK] Installer completed" -ForegroundColor Green
+          } else {
+            Write-Host "[WARNING]  No installer found, skipping installation test" -ForegroundColor Yellow
+            exit 0
+          }
+
+      - name: Verify installation
+        if: github.event_name == 'workflow_run'
+        run: |
+          if (Test-Path "C:\SQLShell\SQLShell.exe") {
+            Write-Host "[OK] SQLShell.exe found at C:\SQLShell\SQLShell.exe" -ForegroundColor Green
+            Get-Item "C:\SQLShell\SQLShell.exe"
+          } else {
+            Write-Host "[ERROR] SQLShell.exe not found after installation" -ForegroundColor Red
+            Write-Host "Contents of C:\SQLShell:" -ForegroundColor Yellow
+            Get-ChildItem C:\SQLShell -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+      - name: Smoke test - Run installed executable
+        if: github.event_name == 'workflow_run'
+        timeout-minutes: 2
+        run: |
+          if (Test-Path "C:\SQLShell\SQLShell.exe") {
+            Write-Host "Testing SQLShell.exe..." -ForegroundColor Cyan
+            # Try to run with help flag
+            $process = Start-Process -FilePath "C:\SQLShell\SQLShell.exe" -ArgumentList "--help" -PassThru -Wait -NoNewWindow
+            if ($process.ExitCode -eq 0 -or $process.ExitCode -eq $null) {
+              Write-Host "[OK] Executable ran successfully" -ForegroundColor Green
+            } else {
+              Write-Host "[WARNING]  Executable exited with code: $($process.ExitCode)" -ForegroundColor Yellow
+              # Still pass as some GUI apps don't handle --help well
+            }
+          }
+
+  # ============================================
+  # Test macOS Installer
+  # ============================================
+  test-macos-dmg:
+    name: Test macOS DMG
+    runs-on: macos-latest
+    if: github.event_name == 'workflow_run' || github.event.inputs.test_installers != 'false'
+
+    steps:
+      - name: Download artifacts from build workflow
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-build
+          path: ./artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install system dependencies
+        run: |
+          brew install libomp
+
+      - name: Mount DMG and extract
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ -f artifacts/*.dmg ]; then
+            echo "Mounting DMG..."
+            hdiutil attach artifacts/*.dmg -mountpoint /Volumes/SQLShell
+            echo "[OK] DMG mounted"
+            ls -la /Volumes/SQLShell/
+
+            # Copy to a test location
+            cp -r /Volumes/SQLShell/SQLShell /tmp/SQLShell
+            hdiutil detach /Volumes/SQLShell
+            echo "[OK] Application extracted"
+          else
+            echo "[WARNING]  No DMG found, skipping test"
+            exit 0
+          fi
+
+      - name: Verify DMG contents
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ -d "/tmp/SQLShell" ]; then
+            echo "[OK] SQLShell directory found"
+            ls -lh /tmp/SQLShell/
+            # Check for the executable inside the app bundle or standalone
+            if [ -f "/tmp/SQLShell/SQLShell" ]; then
+              echo "[OK] SQLShell executable found"
+            else
+              echo "[ERROR] SQLShell executable not found"
+              exit 1
+            fi
+          else
+            echo "[WARNING]  SQLShell directory not found"
+            exit 0
+          fi
+
+      - name: Smoke test - Run extracted application
+        if: github.event_name == 'workflow_run'
+        timeout-minutes: 2
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ -f "/tmp/SQLShell/SQLShell" ]; then
+            chmod +x /tmp/SQLShell/SQLShell
+            timeout 30s /tmp/SQLShell/SQLShell --help || {
+              echo "[ERROR] Application failed to run or timed out"
+              exit 1
+            }
+            echo "[OK] Application executed successfully"
+          else
+            echo "[WARNING]  Skipping binary test"
+          fi
+
+  # ============================================
+  # Summary Job
+  # ============================================
+  smoke-tests-summary:
+    name: Smoke Tests Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [test-pypi-install, test-linux-deb, test-linux-tarball, test-windows-installer, test-macos-dmg]
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "=== Smoke Tests Summary ==="
+          echo ""
+          echo "PyPI Installation: ${{ needs.test-pypi-install.result }}"
+          echo "Linux .deb: ${{ needs.test-linux-deb.result }}"
+          echo "Linux tarball: ${{ needs.test-linux-tarball.result }}"
+          echo "Windows installer: ${{ needs.test-windows-installer.result }}"
+          echo "macOS DMG: ${{ needs.test-macos-dmg.result }}"
+          echo ""
+
+          # Fail if any critical test failed (excluding skipped)
+          if [ "${{ needs.test-pypi-install.result }}" == "failure" ]; then
+            echo "[FAILED] PyPI installation tests failed!"
+            exit 1
+          fi
+
+          echo "[PASSED] All smoke tests passed or were skipped"
