@@ -59,7 +59,7 @@ jobs:
 
       - name: Verify installation - Import test
         run: |
-          python -c "import sqlshell; print('✓ Import successful')"
+          python -c "import sqlshell; print('Import successful')"
 
       - name: Verify installation - Package metadata
         run: |
@@ -93,10 +93,10 @@ jobs:
               import sqlshell
               from sqlshell.db import database_manager
               from sqlshell.utils import profile_column
-              print('✓ All critical modules imported successfully')
+              print('SUCCESS: All critical modules imported successfully')
               sys.exit(0)
           except ImportError as e:
-              print(f'✗ Import failed: {e}')
+              print(f'FAILED: Import failed: {e}')
               sys.exit(1)
           "
 
@@ -134,7 +134,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install -f -y
           else
-            echo "⚠️  No .deb package found, skipping installation test"
+            echo "[WARNING] No .deb package found, skipping installation test"
             exit 0
           fi
 
@@ -142,10 +142,10 @@ jobs:
         if: github.event_name == 'workflow_run'
         run: |
           if command -v sqlshell &> /dev/null; then
-            echo "✓ sqlshell command is available"
+            echo "[OK] sqlshell command is available"
             which sqlshell
           else
-            echo "✗ sqlshell command not found after .deb installation"
+            echo "[ERROR] sqlshell command not found after .deb installation"
             exit 1
           fi
 
@@ -155,10 +155,10 @@ jobs:
         run: |
           # Try to run the binary with a timeout to ensure it doesn't hang
           timeout 30s sqlshell --help || timeout 30s /opt/sqlshell/SQLShell --help || {
-            echo "✗ Binary failed to run or timed out"
+            echo "[ERROR] Binary failed to run or timed out"
             exit 1
           }
-          echo "✓ Binary executed successfully"
+          echo "[OK] Binary executed successfully"
 
   test-linux-tarball:
     name: Test Linux Tarball
@@ -187,10 +187,10 @@ jobs:
         run: |
           if [ -f artifacts/*.tar.gz ]; then
             tar -xzf artifacts/*.tar.gz -C artifacts/
-            echo "✓ Tarball extracted"
+            echo "[OK] Tarball extracted"
             ls -la artifacts/SQLShell/ || echo "SQLShell directory not found"
           else
-            echo "⚠️  No tarball found, skipping test"
+            echo "[WARNING]  No tarball found, skipping test"
             exit 0
           fi
 
@@ -199,14 +199,14 @@ jobs:
         run: |
           if [ -d "artifacts/SQLShell" ]; then
             if [ -f "artifacts/SQLShell/SQLShell" ]; then
-              echo "✓ SQLShell executable found"
+              echo "[OK] SQLShell executable found"
               ls -lh artifacts/SQLShell/SQLShell
             else
-              echo "✗ SQLShell executable not found"
+              echo "[ERROR] SQLShell executable not found"
               exit 1
             fi
           else
-            echo "⚠️  SQLShell directory not found"
+            echo "[WARNING]  SQLShell directory not found"
             exit 0
           fi
 
@@ -219,12 +219,12 @@ jobs:
           if [ -f "artifacts/SQLShell/SQLShell" ]; then
             chmod +x artifacts/SQLShell/SQLShell
             timeout 30s artifacts/SQLShell/SQLShell --help || {
-              echo "✗ Binary failed to run or timed out"
+              echo "[ERROR] Binary failed to run or timed out"
               exit 1
             }
-            echo "✓ Binary executed successfully"
+            echo "[OK] Binary executed successfully"
           else
-            echo "⚠️  Skipping binary test"
+            echo "[WARNING]  Skipping binary test"
           fi
 
   # ============================================
@@ -259,9 +259,9 @@ jobs:
             Write-Host "Installing from: $($installer.FullName)" -ForegroundColor Cyan
             # Run installer in silent mode
             Start-Process -FilePath $installer.FullName -ArgumentList '/VERYSILENT', '/NORESTART', '/DIR=C:\SQLShell' -Wait
-            Write-Host "✓ Installer completed" -ForegroundColor Green
+            Write-Host "[OK] Installer completed" -ForegroundColor Green
           } else {
-            Write-Host "⚠️  No installer found, skipping installation test" -ForegroundColor Yellow
+            Write-Host "[WARNING]  No installer found, skipping installation test" -ForegroundColor Yellow
             exit 0
           }
 
@@ -269,10 +269,10 @@ jobs:
         if: github.event_name == 'workflow_run'
         run: |
           if (Test-Path "C:\SQLShell\SQLShell.exe") {
-            Write-Host "✓ SQLShell.exe found at C:\SQLShell\SQLShell.exe" -ForegroundColor Green
+            Write-Host "[OK] SQLShell.exe found at C:\SQLShell\SQLShell.exe" -ForegroundColor Green
             Get-Item "C:\SQLShell\SQLShell.exe"
           } else {
-            Write-Host "✗ SQLShell.exe not found after installation" -ForegroundColor Red
+            Write-Host "[ERROR] SQLShell.exe not found after installation" -ForegroundColor Red
             Write-Host "Contents of C:\SQLShell:" -ForegroundColor Yellow
             Get-ChildItem C:\SQLShell -ErrorAction SilentlyContinue
             exit 1
@@ -287,9 +287,9 @@ jobs:
             # Try to run with help flag
             $process = Start-Process -FilePath "C:\SQLShell\SQLShell.exe" -ArgumentList "--help" -PassThru -Wait -NoNewWindow
             if ($process.ExitCode -eq 0 -or $process.ExitCode -eq $null) {
-              Write-Host "✓ Executable ran successfully" -ForegroundColor Green
+              Write-Host "[OK] Executable ran successfully" -ForegroundColor Green
             } else {
-              Write-Host "⚠️  Executable exited with code: $($process.ExitCode)" -ForegroundColor Yellow
+              Write-Host "[WARNING]  Executable exited with code: $($process.ExitCode)" -ForegroundColor Yellow
               # Still pass as some GUI apps don't handle --help well
             }
           }
@@ -322,15 +322,15 @@ jobs:
           if [ -f artifacts/*.dmg ]; then
             echo "Mounting DMG..."
             hdiutil attach artifacts/*.dmg -mountpoint /Volumes/SQLShell
-            echo "✓ DMG mounted"
+            echo "[OK] DMG mounted"
             ls -la /Volumes/SQLShell/
 
             # Copy to a test location
             cp -r /Volumes/SQLShell/SQLShell /tmp/SQLShell
             hdiutil detach /Volumes/SQLShell
-            echo "✓ Application extracted"
+            echo "[OK] Application extracted"
           else
-            echo "⚠️  No DMG found, skipping test"
+            echo "[WARNING]  No DMG found, skipping test"
             exit 0
           fi
 
@@ -338,17 +338,17 @@ jobs:
         if: github.event_name == 'workflow_run'
         run: |
           if [ -d "/tmp/SQLShell" ]; then
-            echo "✓ SQLShell directory found"
+            echo "[OK] SQLShell directory found"
             ls -lh /tmp/SQLShell/
             # Check for the executable inside the app bundle or standalone
             if [ -f "/tmp/SQLShell/SQLShell" ]; then
-              echo "✓ SQLShell executable found"
+              echo "[OK] SQLShell executable found"
             else
-              echo "✗ SQLShell executable not found"
+              echo "[ERROR] SQLShell executable not found"
               exit 1
             fi
           else
-            echo "⚠️  SQLShell directory not found"
+            echo "[WARNING]  SQLShell directory not found"
             exit 0
           fi
 
@@ -361,12 +361,12 @@ jobs:
           if [ -f "/tmp/SQLShell/SQLShell" ]; then
             chmod +x /tmp/SQLShell/SQLShell
             timeout 30s /tmp/SQLShell/SQLShell --help || {
-              echo "✗ Application failed to run or timed out"
+              echo "[ERROR] Application failed to run or timed out"
               exit 1
             }
-            echo "✓ Application executed successfully"
+            echo "[OK] Application executed successfully"
           else
-            echo "⚠️  Skipping binary test"
+            echo "[WARNING]  Skipping binary test"
           fi
 
   # ============================================
@@ -392,8 +392,8 @@ jobs:
 
           # Fail if any critical test failed (excluding skipped)
           if [ "${{ needs.test-pypi-install.result }}" == "failure" ]; then
-            echo "❌ PyPI installation tests failed!"
+            echo "[FAILED] PyPI installation tests failed!"
             exit 1
           fi
 
-          echo "✅ All smoke tests passed or were skipped"
+          echo "[PASSED] All smoke tests passed or were skipped"

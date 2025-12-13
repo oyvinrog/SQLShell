@@ -56,7 +56,7 @@ jobs:
           pip install -e .
 
           echo "=== Testing import ==="
-          python -c "import sqlshell; print('✓ Import successful')"
+          python -c "import sqlshell; print('[OK] Import successful')"
 
           echo "=== Testing CLI command ==="
           which sqls
@@ -66,10 +66,10 @@ jobs:
           python -c "
           from sqlshell.db import database_manager
           from sqlshell.utils import profile_column
-          print('✓ All critical modules imported successfully')
+          print('[OK] All critical modules imported successfully')
           "
 
-          echo "✓ Smoke tests passed"
+          echo "[OK] Smoke tests passed"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -143,7 +143,7 @@ jobs:
           pip install -e .
 
           echo "=== Testing import ==="
-          python -c "import sqlshell; print('✓ Import successful')"
+          python -c "import sqlshell; print('[OK] Import successful')"
 
           echo "=== Testing CLI command ==="
           which sqls
@@ -153,10 +153,10 @@ jobs:
           python -c "
           from sqlshell.db import database_manager
           from sqlshell.utils import profile_column
-          print('✓ All critical modules imported successfully')
+          print('[OK] All critical modules imported successfully')
           "
 
-          echo "✓ Smoke tests passed"
+          echo "[OK] Smoke tests passed"
 
       - name: Smoke test - Install and run package (Windows)
         if: runner.os == 'Windows'
@@ -167,7 +167,7 @@ jobs:
           pip install -e .
 
           Write-Host "=== Testing import ===" -ForegroundColor Cyan
-          python -c "import sqlshell; print('✓ Import successful')"
+          python -c "import sqlshell; print('[OK] Import successful')"
 
           Write-Host "=== Testing CLI command ===" -ForegroundColor Cyan
           where sqls
@@ -177,7 +177,7 @@ jobs:
           }
 
           Write-Host "=== Testing critical modules ===" -ForegroundColor Cyan
-          python -c "from sqlshell.db import database_manager; from sqlshell.utils import profile_column; print('✓ All critical modules imported successfully')"
+          python -c "from sqlshell.db import database_manager; from sqlshell.utils import profile_column; print('[OK] All critical modules imported successfully')"
 
-          Write-Host "✓ Smoke tests passed" -ForegroundColor Green
+          Write-Host "[OK] Smoke tests passed" -ForegroundColor Green
 
