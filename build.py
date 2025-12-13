@@ -152,7 +152,7 @@ def build_executable(onefile: bool = False):
             "--hidden-import", "sklearn",
             "--hidden-import", "duckdb",
             "--hidden-import", "PyQt6",
-            "--hidden-import", "pyarrow",
+            "--hidden-import", "fastparquet",
             "--hidden-import", "matplotlib",
             "--hidden-import", "seaborn",
             "--hidden-import", "nltk",
@@ -160,10 +160,14 @@ def build_executable(onefile: bool = False):
             "--collect-all", "duckdb",
             "--collect-all", "sklearn",
             "--collect-all", "PyQt6",
+            "--collect-all", "deltalake",
+            "--collect-all", "pyarrow",
             # Exclude unnecessary
             "--exclude-module", "tkinter",
             "--exclude-module", "test",
             "--exclude-module", "pytest",
+            # Note: Do NOT exclude pyarrow - deltalake needs it
+            # Instead, ensure it's included properly via collect-all
         ]
         
         # Add icon based on platform
@@ -516,6 +520,22 @@ def main():
 ║                      Version {APP_VERSION}                          ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
+    
+    # Run pre-build dependency check
+    print("\n" + "="*60)
+    print("Running pre-build dependency check...")
+    print("="*60 + "\n")
+    
+    test_script = SCRIPT_DIR / "test_frozen_app.py"
+    if test_script.exists():
+        result = run_command([sys.executable, str(test_script)])
+        if result != 0:
+            print("\n❌ Pre-build check failed!")
+            print("   Fix the issues above before building.")
+            sys.exit(1)
+        print("\n✓ Pre-build checks passed\n")
+    else:
+        print("⚠ test_frozen_app.py not found, skipping pre-build check\n")
     
     # Check dependencies
     check_dependencies()

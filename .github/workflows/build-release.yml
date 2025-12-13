@@ -126,6 +126,12 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
       
+      - name: Run pre-build dependency check
+        run: |
+          echo "=== Pre-build Dependency Validation ==="
+          python test_frozen_app.py
+          echo ""
+      
       - name: Install Qt dependencies (Linux)
         run: |
           sudo apt-get update

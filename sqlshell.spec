@@ -231,6 +231,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # Exclude unnecessary modules to reduce size
+        # Note: Do NOT exclude pyarrow - deltalake requires it
         'tkinter',
         'tcl',
         'tk',
