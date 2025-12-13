@@ -152,7 +152,7 @@ def build_executable(onefile: bool = False):
             "--hidden-import", "sklearn",
             "--hidden-import", "duckdb",
             "--hidden-import", "PyQt6",
-            "--hidden-import", "pyarrow",
+            "--hidden-import", "fastparquet",
             "--hidden-import", "matplotlib",
             "--hidden-import", "seaborn",
             "--hidden-import", "nltk",
