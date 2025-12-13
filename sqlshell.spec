@@ -383,10 +383,10 @@ if sys.platform.startswith('linux'):
 
     if exe_path.exists():
         try:
-            # Set RPATH to look in the same directory as the executable
-            # This allows the binary to find .so files without LD_LIBRARY_PATH
-            subprocess.run(['patchelf', '--set-rpath', '$ORIGIN', str(exe_path)], check=True)
-            print(f"[SQLShell Build] Set RPATH for: {exe_path}")
+            # Set RPATH to look in _internal directory where PyInstaller puts libraries
+            # $ORIGIN = directory where executable is located
+            subprocess.run(['patchelf', '--set-rpath', '$ORIGIN/_internal', str(exe_path)], check=True)
+            print(f"[SQLShell Build] Set RPATH to $ORIGIN/_internal for: {exe_path}")
         except FileNotFoundError:
             print("[SQLShell Build] WARNING: patchelf not found. Libraries may not be found at runtime.")
             print("[SQLShell Build] Install patchelf: sudo apt-get install patchelf")
