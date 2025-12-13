@@ -226,33 +226,30 @@ if sys.platform.startswith('linux'):
             if lib_path in collected_libs:
                 continue
             
-            # If it's a symlink, record it fHow or post-build recreation
+            # If it's a symlink, record it for post-build recreation
             if lib_file.is_symlink():
                 target = lib_file.resolve()
                 if target.exists() and str(target) not in collected_libs:
-                    # For symlinks, add the target file to PyQt6/Qt6/lib subdirectory
-                    # to preserve the directory structure that symlinks expect
-                    target_subpath = f"PyQt6/Qt6/lib/{target.name}"
-                    binaries.append((str(target), target_subpath))
+                    # Add the target file to root _internal/ directory
+                    binaries.append((str(target), '.'))
                     collected_libs.add(str(target))
                     collected_count += 1
-                    # Record symlink for post-build recreation
-                    symlink_map[lib_name] = f"PyQt6/Qt6/lib/{target.name}"
-                    print(f"[SQLShell Build] Adding library: {lib_name} -> {target.name} (will copy to {target_subpath})")
+                    # Record symlink for post-build recreation (also in root)
+                    symlink_map[lib_name] = target.name
+                    print(f"[SQLShell Build] Adding library: {lib_name} -> {target.name}")
                 elif str(target) in collected_libs:
                     # Target already added, still record symlink
-                    symlink_map[lib_name] = f"PyQt6/Qt6/lib/{target.name}"
+                    symlink_map[lib_name] = target.name
                     print(f"[SQLShell Build] Skipping duplicate: {lib_name} -> {target.name}")
             elif lib_file.is_file():
-                # Add the actual file to PyQt6/Qt6/lib subdirectory to match directory structure
-                file_subpath = f"PyQt6/Qt6/lib/{lib_name}"
-                binaries.append((lib_path, file_subpath))
+                # Add the actual file to root _internal/ directory
+                binaries.append((lib_path, '.'))
                 collected_libs.add(lib_path)
                 collected_count += 1
                 
                 # Print critical libraries for verification
                 if any(x in lib_name for x in ['libicu', 'libQt6', 'libssl', 'libcrypto', 'libEGL']):
-                    print(f"[SQLShell Build] Adding critical library: {lib_name} -> {file_subpath}")
+                    print(f"[SQLShell Build] Adding critical library: {lib_name}")
     
     if collected_count > 0:
         print(f"[SQLShell Build] Total Qt6 libraries collected: {collected_count}")
@@ -398,7 +395,7 @@ if sys.platform.startswith('linux'):
             print(f"[SQLShell Build] WARNING: Failed to set RPATH: {e}")
             
         # Recreate symlinks that were recorded during collection
-        # Symlinks should be in _internal/ directory
+        # Symlinks are in _internal/ directory, pointing to files also in _internal/
         internal_dir = dist_dir / '_internal'
         print(f"[SQLShell Build] Recreating {len(symlink_map)} symlinks in _internal/...")
         for symlink_name, target_name in symlink_map.items():
@@ -408,13 +405,13 @@ if sys.platform.startswith('linux'):
             # Only create if target exists and symlink doesn't
             if target_path.exists() and not symlink_path.exists():
                 try:
-                    # Create relative symlink
+                    # Create relative symlink (both in same directory)
                     symlink_path.symlink_to(target_name)
-                    print(f"[SQLShell Build] Created symlink: _internal/{symlink_name} -> {target_name}")
+                    print(f"[SQLShell Build] Created symlink: {symlink_name} -> {target_name}")
                 except (OSError, FileExistsError) as e:
                     print(f"[SQLShell Build] Could not create symlink {symlink_name}: {e}")
             elif not target_path.exists():
-                print(f"[SQLShell Build] WARNING: Target not found for {symlink_name}: {target_path}")
+                print(f"[SQLShell Build] WARNING: Target not found for {symlink_name}: {target_name}")
         
         # Verify ICU and EGL libraries are present in _internal
         icu_libs = list(internal_dir.glob('libicu*.so*'))
