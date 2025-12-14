@@ -203,7 +203,7 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(self.tables_list)
         
         # Browse button for quick file selection
-        self.browse_button = QPushButton("📂 Browse...")
+        self.browse_button = QPushButton("📂 Browse...  Ctrl+B")
         self.browse_button.setToolTip("Open data files (Excel, CSV, Parquet) or databases (SQLite, DuckDB)")
         self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_button.clicked.connect(self.browse_files)
@@ -3287,7 +3287,7 @@ LIMIT 10
             self.was_maximized = True
     
     def toggle_sidebar(self, checked=None):
-        """Toggle sidebar visibility (Ctrl+B)"""
+        """Toggle sidebar visibility (Ctrl+\\)"""
         if hasattr(self, 'left_panel'):
             if checked is None:
                 # Toggle based on current state
@@ -3300,7 +3300,7 @@ LIMIT 10
                 self.toggle_sidebar_action.setChecked(self.left_panel.isVisible())
             
             status = "shown" if self.left_panel.isVisible() else "hidden"
-            self.statusBar().showMessage(f"Sidebar {status} (Ctrl+B to toggle)", 2000)
+            self.statusBar().showMessage(f"Sidebar {status} (Ctrl+\\ to toggle)", 2000)
     
     def toggle_compact_mode(self, checked=None):
         """Toggle compact mode to maximize query/results space (Ctrl+Shift+C)"""

@@ -88,10 +88,15 @@ def create_view_menu(main_window):
     
     # Toggle sidebar visibility
     main_window.toggle_sidebar_action = view_menu.addAction('Toggle Sidebar')
-    main_window.toggle_sidebar_action.setShortcut('Ctrl+B')
+    main_window.toggle_sidebar_action.setShortcut('Ctrl+\\')
     main_window.toggle_sidebar_action.setCheckable(True)
     main_window.toggle_sidebar_action.setChecked(True)  # Sidebar visible by default
     main_window.toggle_sidebar_action.triggered.connect(main_window.toggle_sidebar)
+    
+    # Browse files
+    browse_action = view_menu.addAction('Browse Files...')
+    browse_action.setShortcut('Ctrl+B')
+    browse_action.triggered.connect(main_window.browse_files)
     
     # Compact mode - reduces padding and hides secondary UI elements
     main_window.compact_mode_action = view_menu.addAction('Compact Mode')
