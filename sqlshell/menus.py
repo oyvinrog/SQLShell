@@ -86,6 +86,14 @@ def create_view_menu(main_window):
     
     view_menu.addSeparator()
     
+    # Christmas theme toggle
+    main_window.christmas_theme_action = view_menu.addAction('🎄 Christmas Theme')
+    main_window.christmas_theme_action.setCheckable(True)
+    main_window.christmas_theme_action.setChecked(getattr(main_window, 'christmas_theme_enabled', False))
+    main_window.christmas_theme_action.triggered.connect(main_window.toggle_christmas_theme)
+    
+    view_menu.addSeparator()
+    
     # Toggle sidebar visibility
     main_window.toggle_sidebar_action = view_menu.addAction('Toggle Sidebar')
     main_window.toggle_sidebar_action.setShortcut('Ctrl+\\')

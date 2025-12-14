@@ -38,6 +38,7 @@ from sqlshell.styles import (get_application_stylesheet, get_tab_corner_styleshe
 from sqlshell.menus import setup_menubar
 from sqlshell.table_list import DraggableTablesList
 from sqlshell.notification_manager import init_notification_manager, show_error_notification, show_warning_notification, show_info_notification, show_success_notification
+from sqlshell.christmas_theme import ChristmasThemeManager
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -52,6 +53,7 @@ class SQLShell(QMainWindow):
         
         # User preferences
         self.auto_load_recent_project = True  # Default to auto-loading most recent project
+        self.christmas_theme_enabled = False  # Christmas theme disabled by default
         
         # File tracking for quick access
         self.recent_files = []  # Store list of recently opened files
@@ -86,6 +88,9 @@ class SQLShell(QMainWindow):
         # Initialize notification manager
         init_notification_manager(self)
         
+        # Initialize Christmas theme manager
+        self.christmas_theme_manager = ChristmasThemeManager(self)
+        
         # Create initial tab
         self.add_tab()
         
@@ -96,6 +101,10 @@ class SQLShell(QMainWindow):
         # Ensure AI autocomplete is properly set up for all editors
         # This must happen after any project loading to register the correct editors
         QTimer.singleShot(100, self.update_completer)
+        
+        # Enable Christmas theme if it was previously enabled (delay to ensure window is ready)
+        if self.christmas_theme_enabled:
+            QTimer.singleShot(200, lambda: self.toggle_christmas_theme(True))
 
     def apply_stylesheet(self):
         """Apply custom stylesheet to the application"""
@@ -1456,6 +1465,13 @@ LIMIT 10
                 f"Warning: Could not properly close database connection:\n{str(e)}")
             event.accept()
 
+    def resizeEvent(self, event):
+        """Handle window resize events."""
+        super().resizeEvent(event)
+        # Update Christmas theme decorations when window is resized
+        if hasattr(self, 'christmas_theme_manager') and self.christmas_theme_manager.enabled:
+            self.christmas_theme_manager.update_positions()
+
     def has_unsaved_changes(self):
         """Check if there are unsaved changes in the project"""
         if not self.current_project_file:
@@ -2734,6 +2750,7 @@ LIMIT 10
                     # Load user preferences
                     preferences = settings.get('preferences', {})
                     self.auto_load_recent_project = preferences.get('auto_load_recent_project', True)
+                    self.christmas_theme_enabled = preferences.get('christmas_theme_enabled', False)
                     
                     # Load window settings if available
                     window_settings = settings.get('window', {})
@@ -2756,6 +2773,7 @@ LIMIT 10
             if 'preferences' not in settings:
                 settings['preferences'] = {}
             settings['preferences']['auto_load_recent_project'] = self.auto_load_recent_project
+            settings['preferences']['christmas_theme_enabled'] = self.christmas_theme_enabled
             
             # Save window settings
             window_settings = self.save_window_state()
@@ -3475,6 +3493,28 @@ LIMIT 10
         
         status = "enabled" if checked else "disabled"
         self.statusBar().showMessage(f"Compact mode {status} (Ctrl+Shift+C to toggle)", 2000)
+    
+    def toggle_christmas_theme(self, checked=None):
+        """Toggle Christmas theme decorations."""
+        if checked is None:
+            checked = not self.christmas_theme_enabled
+        
+        self.christmas_theme_enabled = checked
+        
+        if checked:
+            self.christmas_theme_manager.enable()
+        else:
+            self.christmas_theme_manager.disable()
+        
+        # Update menu action state
+        if hasattr(self, 'christmas_theme_action'):
+            self.christmas_theme_action.setChecked(checked)
+        
+        # Save preference
+        self.save_recent_projects()
+        
+        status = "enabled 🎄" if checked else "disabled"
+        self.statusBar().showMessage(f"Christmas theme {status}", 2000)
             
     def change_zoom(self, factor):
         """Change the zoom level of the application by adjusting font sizes"""
