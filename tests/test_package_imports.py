@@ -46,7 +46,6 @@ class TestCriticalImports:
         'sqlshell.utils.profile_ohe',
         'sqlshell.utils.profile_ohe_advanced',
         'sqlshell.utils.profile_ohe_comparison',
-        'sqlshell.utils.profile_prediction',
         'sqlshell.utils.profile_similarity',
         'sqlshell.utils.profile_cn2',
         'sqlshell.utils.profile_categorize',
@@ -172,7 +171,6 @@ class TestPackageStructure:
             'profile_ohe.py',
             'profile_ohe_advanced.py',
             'profile_ohe_comparison.py',
-            'profile_prediction.py',
             'profile_similarity.py',
             'search_in_df.py',
         ]

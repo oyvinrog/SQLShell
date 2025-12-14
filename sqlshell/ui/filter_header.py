@@ -101,15 +101,9 @@ class FilterHeader(QHeaderView):
 
         # Add categorize action
         categorize_action = context_menu.addAction("Categorize Column")
-
-        # Add predict action
-        predict_action = context_menu.addAction("Predict Column")
         
         # Add CN2 rule discovery action
         discover_rules_action = context_menu.addAction("Discover Classification Rules (CN2)")
-        
-        # Add load model action
-        load_model_action = context_menu.addAction("Load Model & Predict")
         
         context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
@@ -177,15 +171,6 @@ class FilterHeader(QHeaderView):
                     if logical_index < len(current_tab.current_df.columns):
                         column_name = current_tab.current_df.columns[logical_index]
                         self.main_window.categorize_column(column_name)
-        elif action == predict_action:
-            # Call the predict_column method on the main window
-            if self.main_window and hasattr(self.main_window, "predict_column"):
-                # Get the column name from the table (if it has a current dataframe)
-                current_tab = self.main_window.get_current_tab()
-                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
-                    if logical_index < len(current_tab.current_df.columns):
-                        column_name = current_tab.current_df.columns[logical_index]
-                        self.main_window.predict_column(column_name)
         elif action == discover_rules_action:
             # Call the discover_classification_rules method on the main window
             if self.main_window and hasattr(self.main_window, "discover_classification_rules"):
@@ -195,10 +180,6 @@ class FilterHeader(QHeaderView):
                     if logical_index < len(current_tab.current_df.columns):
                         column_name = current_tab.current_df.columns[logical_index]
                         self.main_window.discover_classification_rules(column_name)
-        elif action == load_model_action:
-            # Call the load_and_apply_model method on the main window
-            if self.main_window and hasattr(self.main_window, "load_and_apply_model"):
-                self.main_window.load_and_apply_model()
         elif action == count_rows_action:
             # Get the current tab and show row count
             current_tab = self.main_window.get_current_tab()

@@ -99,7 +99,6 @@ hiddenimports = [
     'sqlshell.utils.profile_ohe',
     'sqlshell.utils.profile_ohe_advanced',
     'sqlshell.utils.profile_ohe_comparison',
-    'sqlshell.utils.profile_prediction',
     'sqlshell.utils.profile_similarity',
     'sqlshell.utils.search_in_df',
     'sqlshell.resources',
@@ -158,8 +157,6 @@ hiddenimports = [
     'nltk.corpus',
     'nltk.tokenize',
 
-    # ML model persistence
-    'joblib',  # Used by sklearn and profile_prediction.py
 
     # AI/LLM (optional - only loaded if user configures API key)
     'openai',
