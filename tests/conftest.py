@@ -271,8 +271,19 @@ def pytest_collection_modifyitems(config, items):
         if "gui" in item.nodeid or "qt" in item.nodeid.lower():
             item.add_marker(pytest.mark.gui)
         
-        # Mark performance tests
-        if "performance" in item.nodeid or "perf" in item.nodeid:
+        # Mark performance tests - check class name and test name, not filename
+        # This avoids marking all tests in a file just because filename contains "performance"
+        test_name = item.name.lower()
+        parent_name = item.parent.name.lower() if item.parent else ""
+        
+        # Only auto-mark if the class or test name suggests performance testing
+        is_performance_test = (
+            "performance" in test_name or 
+            "perf" in test_name or
+            (parent_name.startswith("test") and "performance" in parent_name)
+        )
+        
+        if is_performance_test:
             item.add_marker(pytest.mark.performance)
             item.add_marker(pytest.mark.slow)
         

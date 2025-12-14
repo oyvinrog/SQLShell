@@ -69,8 +69,8 @@ class AISettingsDialog(QDialog):
         self.api_key_input.setMinimumWidth(300)
         api_key_layout.addWidget(self.api_key_input)
         
-        self.show_key_btn = QPushButton("👁")
-        self.show_key_btn.setFixedWidth(40)
+        self.show_key_btn = QPushButton("Show")
+        self.show_key_btn.setFixedWidth(50)
         self.show_key_btn.setCheckable(True)
         self.show_key_btn.toggled.connect(self.toggle_key_visibility)
         self.show_key_btn.setToolTip("Show/Hide API Key")
@@ -116,8 +116,9 @@ class AISettingsDialog(QDialog):
         status_layout = QHBoxLayout(self.status_frame)
         status_layout.setContentsMargins(12, 8, 12, 8)
         
-        self.status_icon = QLabel("⚪")
+        self.status_icon = QLabel("●")
         self.status_icon.setFixedWidth(24)
+        self.status_icon.setStyleSheet("color: #999999; font-size: 16px;")
         status_layout.addWidget(self.status_icon)
         
         self.status_label = QLabel("Not configured")
@@ -188,10 +189,10 @@ class AISettingsDialog(QDialog):
         """Toggle API key visibility."""
         if visible:
             self.api_key_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.show_key_btn.setText("🔒")
+            self.show_key_btn.setText("Hide")
         else:
             self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.show_key_btn.setText("👁")
+            self.show_key_btn.setText("Show")
     
     def load_settings(self):
         """Load current settings into the dialog."""
@@ -215,7 +216,8 @@ class AISettingsDialog(QDialog):
     def update_status(self):
         """Update the status indicator."""
         if self.ai_manager.is_available:
-            self.status_icon.setText("🟢")
+            self.status_icon.setText("●")
+            self.status_icon.setStyleSheet("color: #52c41a; font-size: 16px;")
             self.status_label.setText("Ready - AI autocomplete is active")
             self.status_frame.setStyleSheet("""
                 QFrame {
@@ -225,7 +227,8 @@ class AISettingsDialog(QDialog):
                 }
             """)
         elif self.ai_manager.is_configured:
-            self.status_icon.setText("🟡")
+            self.status_icon.setText("●")
+            self.status_icon.setStyleSheet("color: #faad14; font-size: 16px;")
             self.status_label.setText("Configured but not validated")
             self.status_frame.setStyleSheet("""
                 QFrame {
@@ -235,7 +238,8 @@ class AISettingsDialog(QDialog):
                 }
             """)
         else:
-            self.status_icon.setText("⚪")
+            self.status_icon.setText("●")
+            self.status_icon.setStyleSheet("color: #999999; font-size: 16px;")
             self.status_label.setText("Not configured - enter your API key")
             self.status_frame.setStyleSheet("""
                 QFrame {

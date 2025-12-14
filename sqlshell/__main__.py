@@ -38,6 +38,7 @@ from sqlshell.styles import (get_application_stylesheet, get_tab_corner_styleshe
 from sqlshell.menus import setup_menubar
 from sqlshell.table_list import DraggableTablesList
 from sqlshell.notification_manager import init_notification_manager, show_error_notification, show_warning_notification, show_info_notification, show_success_notification
+from sqlshell.christmas_theme import ChristmasThemeManager
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -52,6 +53,7 @@ class SQLShell(QMainWindow):
         
         # User preferences
         self.auto_load_recent_project = True  # Default to auto-loading most recent project
+        self.christmas_theme_enabled = False  # Christmas theme disabled by default
         
         # File tracking for quick access
         self.recent_files = []  # Store list of recently opened files
@@ -86,6 +88,9 @@ class SQLShell(QMainWindow):
         # Initialize notification manager
         init_notification_manager(self)
         
+        # Initialize Christmas theme manager
+        self.christmas_theme_manager = ChristmasThemeManager(self)
+        
         # Create initial tab
         self.add_tab()
         
@@ -96,6 +101,10 @@ class SQLShell(QMainWindow):
         # Ensure AI autocomplete is properly set up for all editors
         # This must happen after any project loading to register the correct editors
         QTimer.singleShot(100, self.update_completer)
+        
+        # Enable Christmas theme if it was previously enabled (delay to ensure window is ready)
+        if self.christmas_theme_enabled:
+            QTimer.singleShot(200, lambda: self.toggle_christmas_theme(True))
 
     def apply_stylesheet(self):
         """Apply custom stylesheet to the application"""
@@ -203,7 +212,8 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(self.tables_list)
         
         # Browse button for quick file selection
-        self.browse_button = QPushButton("📂 Browse...")
+        self.browse_button = QPushButton("Browse...  Ctrl+B")
+        self.browse_button.setIcon(QIcon.fromTheme("folder-open"))
         self.browse_button.setToolTip("Open data files (Excel, CSV, Parquet) or databases (SQLite, DuckDB)")
         self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_button.clicked.connect(self.browse_files)
@@ -1456,6 +1466,13 @@ LIMIT 10
                 f"Warning: Could not properly close database connection:\n{str(e)}")
             event.accept()
 
+    def resizeEvent(self, event):
+        """Handle window resize events."""
+        super().resizeEvent(event)
+        # Update Christmas theme decorations when window is resized
+        if hasattr(self, 'christmas_theme_manager') and self.christmas_theme_manager.enabled:
+            self.christmas_theme_manager.update_positions()
+
     def has_unsaved_changes(self):
         """Check if there are unsaved changes in the project"""
         if not self.current_project_file:
@@ -1529,6 +1546,26 @@ LIMIT 10
                 analyze_fk_action = context_menu.addAction(f"Analyze Foreign Keys Between {len(table_items)} Tables")
                 analyze_fk_action.setIcon(QIcon.fromTheme("system-search"))
                 
+                context_menu.addSeparator()
+                
+                # Add Set Operations submenu (UNION, UNION ALL, EXCEPT, INTERSECT)
+                set_ops_menu = context_menu.addMenu(f"Combine {len(table_items)} Tables (Set Operations)")
+                set_ops_menu.setIcon(QIcon.fromTheme("view-split-left-right"))
+                
+                union_all_action = set_ops_menu.addAction("UNION ALL - Combine all rows (keeps duplicates)")
+                union_action = set_ops_menu.addAction("UNION - Combine rows (removes duplicates)")
+                except_action = set_ops_menu.addAction("EXCEPT - Rows in first but not others")
+                intersect_action = set_ops_menu.addAction("INTERSECT - Only rows in all tables")
+                
+                # Add Join All Tables option
+                join_menu = context_menu.addMenu(f"Join {len(table_items)} Tables")
+                join_menu.setIcon(QIcon.fromTheme("insert-link"))
+                
+                inner_join_action = join_menu.addAction("INNER JOIN - Only matching rows")
+                left_join_action = join_menu.addAction("LEFT JOIN - All from first, matching from others")
+                right_join_action = join_menu.addAction("RIGHT JOIN - All from last, matching from others")
+                full_join_action = join_menu.addAction("FULL JOIN - All rows from all tables")
+                
                 # Add separator and delete option
                 context_menu.addSeparator()
                 delete_multiple_action = context_menu.addAction(f"Delete {len(table_items)} Tables")
@@ -1539,6 +1576,22 @@ LIMIT 10
                 
                 if action == analyze_fk_action:
                     self.analyze_foreign_keys_between_tables(table_items)
+                elif action == union_all_action:
+                    self.generate_set_operation_for_tables(table_items, 'UNION ALL')
+                elif action == union_action:
+                    self.generate_set_operation_for_tables(table_items, 'UNION')
+                elif action == except_action:
+                    self.generate_set_operation_for_tables(table_items, 'EXCEPT')
+                elif action == intersect_action:
+                    self.generate_set_operation_for_tables(table_items, 'INTERSECT')
+                elif action == inner_join_action:
+                    self.generate_join_for_tables(table_items, 'INNER')
+                elif action == left_join_action:
+                    self.generate_join_for_tables(table_items, 'LEFT')
+                elif action == right_join_action:
+                    self.generate_join_for_tables(table_items, 'RIGHT')
+                elif action == full_join_action:
+                    self.generate_join_for_tables(table_items, 'FULL')
                 elif action == delete_multiple_action:
                     # Show confirmation dialog
                     table_names = [self.tables_list.get_table_name_from_item(item) for item in table_items]
@@ -1864,6 +1917,118 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Analysis Error: Error analyzing foreign keys - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing foreign keys: {str(e)}')
+
+    def generate_set_operation_for_tables(self, table_items, operation):
+        """Generate a SQL set operation (UNION, UNION ALL, EXCEPT, INTERSECT) for selected tables"""
+        try:
+            from sqlshell.utils.table_set_operations import generate_set_operation_sql, find_common_columns
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for set operations.")
+                return
+            
+            # Check for common columns first
+            common_cols = find_common_columns(self.db_manager, table_names)
+            if not common_cols:
+                QMessageBox.warning(self, "No Common Columns", 
+                                    f"The selected tables have no common columns.\n\n"
+                                    f"Set operations ({operation}) require tables to have "
+                                    "at least one column with the same name.")
+                return
+            
+            # Generate the SQL
+            sql = generate_set_operation_sql(self.db_manager, table_names, operation)
+            
+            # Add the SQL to the current query editor
+            current_tab = self.get_current_query_tab()
+            if current_tab:
+                current_text = current_tab.query_edit.toPlainText()
+                # Add a new line if there's already content
+                if current_text and not current_text.endswith("\n"):
+                    current_tab.query_edit.setPlainText(current_text + "\n\n" + sql)
+                else:
+                    current_tab.query_edit.setPlainText(current_text + sql)
+                # Set focus to the query editor
+                current_tab.query_edit.setFocus()
+                
+                self.statusBar().showMessage(
+                    f'{operation} query generated for {len(table_names)} tables '
+                    f'using {len(common_cols)} common columns: {", ".join(common_cols[:5])}'
+                    + ('...' if len(common_cols) > 5 else '')
+                )
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "Set Operation Error", str(e))
+        except Exception as e:
+            show_error_notification(f"Error: {str(e)}")
+            self.statusBar().showMessage(f'Error generating {operation} query: {str(e)}')
+
+    def generate_join_for_tables(self, table_items, join_type):
+        """Generate a JOIN query for selected tables with inferred relationships"""
+        try:
+            from sqlshell.utils.table_join_operations import generate_join_sql, infer_table_relationships
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for JOIN operations.")
+                return
+            
+            # Check for relationships first
+            relationships = infer_table_relationships(self.db_manager, table_names)
+            if not relationships:
+                QMessageBox.warning(self, "No Relationships Found", 
+                                    f"Could not infer any relationships between the selected tables.\n\n"
+                                    "For automatic JOIN generation, tables should have:\n"
+                                    "• Columns with matching names (e.g., 'user_id' in both tables)\n"
+                                    "• Foreign key naming patterns (e.g., 'customer_id' referencing 'customers.id')")
+                return
+            
+            # Generate the SQL
+            sql = generate_join_sql(self.db_manager, table_names, join_type, relationships)
+            
+            # Add the SQL to the current query editor
+            current_tab = self.get_current_query_tab()
+            if current_tab:
+                current_text = current_tab.query_edit.toPlainText()
+                # Add a new line if there's already content
+                if current_text and not current_text.endswith("\n"):
+                    current_tab.query_edit.setPlainText(current_text + "\n\n" + sql)
+                else:
+                    current_tab.query_edit.setPlainText(current_text + sql)
+                # Set focus to the query editor
+                current_tab.query_edit.setFocus()
+                
+                # Build a description of the relationships found
+                rel_desc = []
+                for rel in relationships[:3]:
+                    rel_desc.append(f"{rel['from_table']}.{rel['from_column']} → {rel['to_table']}.{rel['to_column']}")
+                
+                self.statusBar().showMessage(
+                    f'{join_type} JOIN query generated for {len(table_names)} tables. '
+                    f'Relationships: {"; ".join(rel_desc)}'
+                    + ('...' if len(relationships) > 3 else '')
+                )
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "Join Error", str(e))
+        except Exception as e:
+            show_error_notification(f"Error: {str(e)}")
+            self.statusBar().showMessage(f'Error generating {join_type} JOIN query: {str(e)}')
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
@@ -2586,6 +2751,7 @@ LIMIT 10
                     # Load user preferences
                     preferences = settings.get('preferences', {})
                     self.auto_load_recent_project = preferences.get('auto_load_recent_project', True)
+                    self.christmas_theme_enabled = preferences.get('christmas_theme_enabled', False)
                     
                     # Load window settings if available
                     window_settings = settings.get('window', {})
@@ -2608,6 +2774,7 @@ LIMIT 10
             if 'preferences' not in settings:
                 settings['preferences'] = {}
             settings['preferences']['auto_load_recent_project'] = self.auto_load_recent_project
+            settings['preferences']['christmas_theme_enabled'] = self.christmas_theme_enabled
             
             # Save window settings
             window_settings = self.save_window_state()
@@ -3287,7 +3454,7 @@ LIMIT 10
             self.was_maximized = True
     
     def toggle_sidebar(self, checked=None):
-        """Toggle sidebar visibility (Ctrl+B)"""
+        """Toggle sidebar visibility (Ctrl+\\)"""
         if hasattr(self, 'left_panel'):
             if checked is None:
                 # Toggle based on current state
@@ -3300,7 +3467,7 @@ LIMIT 10
                 self.toggle_sidebar_action.setChecked(self.left_panel.isVisible())
             
             status = "shown" if self.left_panel.isVisible() else "hidden"
-            self.statusBar().showMessage(f"Sidebar {status} (Ctrl+B to toggle)", 2000)
+            self.statusBar().showMessage(f"Sidebar {status} (Ctrl+\\ to toggle)", 2000)
     
     def toggle_compact_mode(self, checked=None):
         """Toggle compact mode to maximize query/results space (Ctrl+Shift+C)"""
@@ -3327,6 +3494,28 @@ LIMIT 10
         
         status = "enabled" if checked else "disabled"
         self.statusBar().showMessage(f"Compact mode {status} (Ctrl+Shift+C to toggle)", 2000)
+    
+    def toggle_christmas_theme(self, checked=None):
+        """Toggle Christmas theme decorations."""
+        if checked is None:
+            checked = not self.christmas_theme_enabled
+        
+        self.christmas_theme_enabled = checked
+        
+        if checked:
+            self.christmas_theme_manager.enable()
+        else:
+            self.christmas_theme_manager.disable()
+        
+        # Update menu action state
+        if hasattr(self, 'christmas_theme_action'):
+            self.christmas_theme_action.setChecked(checked)
+        
+        # Save preference
+        self.save_recent_projects()
+        
+        status = "enabled 🎄" if checked else "disabled"
+        self.statusBar().showMessage(f"Christmas theme {status}", 2000)
             
     def change_zoom(self, factor):
         """Change the zoom level of the application by adjusting font sizes"""
@@ -4482,141 +4671,6 @@ LIMIT 10
             show_error_notification(f"Rule Discovery Error: {str(e)}")
             self.statusBar().showMessage(f'Error discovering rules: {str(e)}')
 
-    def predict_column(self, column_name):
-        """Create a prediction model for a column and add predictions as new column"""
-        try:
-            # Get the appropriate data (full table if preview mode, else query results)
-            df, is_full_table = self.get_data_for_tool()
-            if df is None:
-                show_warning_notification("No data available for prediction. Please load some data first.")
-                return
-                
-            # Show a loading indicator
-            self.statusBar().showMessage(f'Preparing prediction model for "{column_name}"...')
-            
-            # Check if the column exists
-            if column_name not in df.columns:
-                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
-                return
-            
-            # Check if there are enough columns for prediction
-            if len(df.columns) < 2:
-                show_warning_notification("Need at least 2 columns for prediction (target + features).")
-                return
-            
-            # Import and use the create_prediction_dialog function from profile_prediction
-            from sqlshell.utils.profile_prediction import create_prediction_dialog
-            
-            # Create and show the prediction dialog with this window as parent
-            prediction_dialog = create_prediction_dialog(df, column_name, self)
-            
-            # Connect the predictionApplied signal to our handler
-            prediction_dialog.predictionApplied.connect(self.apply_prediction_to_current_tab)
-            
-            # Store reference to prevent garbage collection
-            self._current_prediction_dialog = prediction_dialog
-            
-            self.statusBar().showMessage(f'Prediction dialog ready for "{column_name}"')
-                
-        except Exception as e:
-            show_error_notification(f"Prediction Error: Error creating prediction model - {str(e)}")
-            self.statusBar().showMessage(f'Error predicting column: {str(e)}')
-
-    def apply_prediction_to_current_tab(self, predicted_df):
-        """Apply the predicted dataframe to the current tab"""
-        try:
-            # Get the current tab
-            current_tab = self.get_current_tab()
-            if not current_tab:
-                return
-            
-            # Try to find which table corresponds to this dataframe so we can update it
-            table_name = None
-            if hasattr(current_tab, 'current_df') and current_tab.current_df is not None:
-                # Check if the dataframe has a _query_source attribute
-                if hasattr(current_tab.current_df, '_query_source'):
-                    table_name = getattr(current_tab.current_df, '_query_source')
-                
-                # If no _query_source, try to find a table with matching columns
-                if not table_name:
-                    original_columns = [str(col) for col in current_tab.current_df.columns]
-                    for t_name, t_columns in self.db_manager.table_columns.items():
-                        if set(original_columns) == set(t_columns):
-                            table_name = t_name
-                            break
-            
-            # Update the current tab's dataframe with the predicted version
-            current_tab.current_df = predicted_df
-            
-            # Reset preview mode - we're now showing modified data
-            current_tab.is_preview_mode = False
-            current_tab.preview_table_name = None
-            
-            # Copy the _query_source attribute to the new dataframe
-            if table_name:
-                setattr(predicted_df, '_query_source', table_name)
-            
-            # Update the table display
-            self.populate_table(predicted_df)
-            
-            # Update the database table registration if we found a corresponding table
-            if table_name and table_name in self.db_manager.loaded_tables:
-                try:
-                    # Update the table in the database with the new dataframe
-                    if self.db_manager.connection_type == 'sqlite':
-                        predicted_df.to_sql(table_name, self.db_manager.conn, index=False, if_exists='replace')
-                    else:  # duckdb
-                        # Re-register the DataFrame with updated columns
-                        self.db_manager.conn.register(table_name, predicted_df)
-                    
-                    # Update the column metadata
-                    self.db_manager.table_columns[table_name] = [str(col) for col in predicted_df.columns.tolist()]
-                    
-                    # Update the autocompletion system
-                    self.update_completer()
-                    
-                except Exception as e:
-                    print(f"Warning: Could not update database table '{table_name}': {str(e)}")
-            
-            # Update status
-            new_columns = [col for col in predicted_df.columns if col.startswith('Predict ')]
-            if new_columns:
-                self.statusBar().showMessage(f'Applied predictions. Added column(s): {", ".join(new_columns)}')
-            else:
-                self.statusBar().showMessage(f'Applied predictions. Table has {len(predicted_df)} rows and {len(predicted_df.columns)} columns.')
-            
-        except Exception as e:
-            show_error_notification(f"Apply Prediction Error: Error applying predictions - {str(e)}")
-            self.statusBar().showMessage(f'Error applying predictions: {str(e)}')
-
-    def load_and_apply_model(self):
-        """Load a saved prediction model and apply it to the current dataset"""
-        try:
-            # Get the appropriate data (full table if preview mode, else query results)
-            df, is_full_table = self.get_data_for_tool()
-            if df is None:
-                show_warning_notification("No data available. Please load some data first.")
-                return
-            
-            # Import the load model function
-            from sqlshell.utils.profile_prediction import show_load_model_dialog
-            
-            # Show loading indicator
-            self.statusBar().showMessage('Loading prediction model...')
-            
-            # Load and apply the model
-            predicted_df = show_load_model_dialog(df, self)
-            
-            if predicted_df is not None:
-                # Apply the predictions using the existing method
-                self.apply_prediction_to_current_tab(predicted_df)
-                self.statusBar().showMessage('Model loaded and predictions applied successfully.')
-            else:
-                self.statusBar().showMessage('Model loading cancelled or failed.')
-                
-        except Exception as e:
-            show_error_notification(f"Load Model Error: Error loading prediction model - {str(e)}")
-            self.statusBar().showMessage(f'Error loading model: {str(e)}')
 
     def get_current_query_tab(self):
         """Get the currently active tab if it's a query tab (has query_edit attribute)"""

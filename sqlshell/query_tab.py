@@ -162,7 +162,8 @@ class QueryTab(QWidget):
             "• <b>F9</b> - Execute current statement<br>"
             "• <b>Ctrl+F</b> - Search in results<br>"
             "• <b>Ctrl+C</b> - Copy selected data<br>"
-            "• <b>Ctrl+B</b> - Toggle sidebar<br>"
+            "• <b>Ctrl+B</b> - Browse files<br>"
+            "• <b>Ctrl+\\</b> - Toggle sidebar<br>"
             "• <b>Ctrl+Shift+C</b> - Compact mode<br><br>"
             "<b>Table Interactions:</b><br>"
             "• Double-click header → Add column to query<br>"
@@ -403,7 +404,6 @@ class QueryTab(QWidget):
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction(f"Explain Column")
         encode_action = menu.addAction(f"One-Hot Encode")
-        predict_action = menu.addAction(f"Predict Column")
         discover_rules_action = menu.addAction(f"Discover Classification Rules (CN2)")
         
         # Execute the menu
@@ -423,11 +423,6 @@ class QueryTab(QWidget):
             # Call the encode text method on the parent
             if hasattr(self.parent, 'encode_text'):
                 self.parent.encode_text(col_name)
-        
-        elif action == predict_action:
-            # Call the predict column method on the parent
-            if hasattr(self.parent, 'predict_column'):
-                self.parent.predict_column(col_name)
         
         elif action == discover_rules_action:
             # Call the discover classification rules method on the parent
@@ -681,7 +676,6 @@ class QueryTab(QWidget):
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction(f"Explain Column")
         encode_action = menu.addAction(f"One-Hot Encode")
-        predict_action = menu.addAction(f"Predict Column")
         discover_rules_action = menu.addAction(f"Discover Classification Rules (CN2)")
         
         # Execute the menu
@@ -701,11 +695,6 @@ class QueryTab(QWidget):
             # Call the encode text method on the parent
             if hasattr(self.parent, 'encode_text'):
                 self.parent.encode_text(col_name)
-        
-        elif action == predict_action:
-            # Call the predict column method on the parent
-            if hasattr(self.parent, 'predict_column'):
-                self.parent.predict_column(col_name)
         
         elif action == discover_rules_action:
             # Call the discover classification rules method on the parent
