@@ -1529,6 +1529,26 @@ LIMIT 10
                 analyze_fk_action = context_menu.addAction(f"Analyze Foreign Keys Between {len(table_items)} Tables")
                 analyze_fk_action.setIcon(QIcon.fromTheme("system-search"))
                 
+                context_menu.addSeparator()
+                
+                # Add Set Operations submenu (UNION, UNION ALL, EXCEPT, INTERSECT)
+                set_ops_menu = context_menu.addMenu(f"Combine {len(table_items)} Tables (Set Operations)")
+                set_ops_menu.setIcon(QIcon.fromTheme("view-split-left-right"))
+                
+                union_all_action = set_ops_menu.addAction("UNION ALL - Combine all rows (keeps duplicates)")
+                union_action = set_ops_menu.addAction("UNION - Combine rows (removes duplicates)")
+                except_action = set_ops_menu.addAction("EXCEPT - Rows in first but not others")
+                intersect_action = set_ops_menu.addAction("INTERSECT - Only rows in all tables")
+                
+                # Add Join All Tables option
+                join_menu = context_menu.addMenu(f"Join {len(table_items)} Tables")
+                join_menu.setIcon(QIcon.fromTheme("insert-link"))
+                
+                inner_join_action = join_menu.addAction("INNER JOIN - Only matching rows")
+                left_join_action = join_menu.addAction("LEFT JOIN - All from first, matching from others")
+                right_join_action = join_menu.addAction("RIGHT JOIN - All from last, matching from others")
+                full_join_action = join_menu.addAction("FULL JOIN - All rows from all tables")
+                
                 # Add separator and delete option
                 context_menu.addSeparator()
                 delete_multiple_action = context_menu.addAction(f"Delete {len(table_items)} Tables")
@@ -1539,6 +1559,22 @@ LIMIT 10
                 
                 if action == analyze_fk_action:
                     self.analyze_foreign_keys_between_tables(table_items)
+                elif action == union_all_action:
+                    self.generate_set_operation_for_tables(table_items, 'UNION ALL')
+                elif action == union_action:
+                    self.generate_set_operation_for_tables(table_items, 'UNION')
+                elif action == except_action:
+                    self.generate_set_operation_for_tables(table_items, 'EXCEPT')
+                elif action == intersect_action:
+                    self.generate_set_operation_for_tables(table_items, 'INTERSECT')
+                elif action == inner_join_action:
+                    self.generate_join_for_tables(table_items, 'INNER')
+                elif action == left_join_action:
+                    self.generate_join_for_tables(table_items, 'LEFT')
+                elif action == right_join_action:
+                    self.generate_join_for_tables(table_items, 'RIGHT')
+                elif action == full_join_action:
+                    self.generate_join_for_tables(table_items, 'FULL')
                 elif action == delete_multiple_action:
                     # Show confirmation dialog
                     table_names = [self.tables_list.get_table_name_from_item(item) for item in table_items]
@@ -1864,6 +1900,118 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Analysis Error: Error analyzing foreign keys - {str(e)}")
             self.statusBar().showMessage(f'Error analyzing foreign keys: {str(e)}')
+
+    def generate_set_operation_for_tables(self, table_items, operation):
+        """Generate a SQL set operation (UNION, UNION ALL, EXCEPT, INTERSECT) for selected tables"""
+        try:
+            from sqlshell.utils.table_set_operations import generate_set_operation_sql, find_common_columns
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for set operations.")
+                return
+            
+            # Check for common columns first
+            common_cols = find_common_columns(self.db_manager, table_names)
+            if not common_cols:
+                QMessageBox.warning(self, "No Common Columns", 
+                                    f"The selected tables have no common columns.\n\n"
+                                    f"Set operations ({operation}) require tables to have "
+                                    "at least one column with the same name.")
+                return
+            
+            # Generate the SQL
+            sql = generate_set_operation_sql(self.db_manager, table_names, operation)
+            
+            # Add the SQL to the current query editor
+            current_tab = self.get_current_query_tab()
+            if current_tab:
+                current_text = current_tab.query_edit.toPlainText()
+                # Add a new line if there's already content
+                if current_text and not current_text.endswith("\n"):
+                    current_tab.query_edit.setPlainText(current_text + "\n\n" + sql)
+                else:
+                    current_tab.query_edit.setPlainText(current_text + sql)
+                # Set focus to the query editor
+                current_tab.query_edit.setFocus()
+                
+                self.statusBar().showMessage(
+                    f'{operation} query generated for {len(table_names)} tables '
+                    f'using {len(common_cols)} common columns: {", ".join(common_cols[:5])}'
+                    + ('...' if len(common_cols) > 5 else '')
+                )
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "Set Operation Error", str(e))
+        except Exception as e:
+            show_error_notification(f"Error: {str(e)}")
+            self.statusBar().showMessage(f'Error generating {operation} query: {str(e)}')
+
+    def generate_join_for_tables(self, table_items, join_type):
+        """Generate a JOIN query for selected tables with inferred relationships"""
+        try:
+            from sqlshell.utils.table_join_operations import generate_join_sql, infer_table_relationships
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for JOIN operations.")
+                return
+            
+            # Check for relationships first
+            relationships = infer_table_relationships(self.db_manager, table_names)
+            if not relationships:
+                QMessageBox.warning(self, "No Relationships Found", 
+                                    f"Could not infer any relationships between the selected tables.\n\n"
+                                    "For automatic JOIN generation, tables should have:\n"
+                                    "• Columns with matching names (e.g., 'user_id' in both tables)\n"
+                                    "• Foreign key naming patterns (e.g., 'customer_id' referencing 'customers.id')")
+                return
+            
+            # Generate the SQL
+            sql = generate_join_sql(self.db_manager, table_names, join_type, relationships)
+            
+            # Add the SQL to the current query editor
+            current_tab = self.get_current_query_tab()
+            if current_tab:
+                current_text = current_tab.query_edit.toPlainText()
+                # Add a new line if there's already content
+                if current_text and not current_text.endswith("\n"):
+                    current_tab.query_edit.setPlainText(current_text + "\n\n" + sql)
+                else:
+                    current_tab.query_edit.setPlainText(current_text + sql)
+                # Set focus to the query editor
+                current_tab.query_edit.setFocus()
+                
+                # Build a description of the relationships found
+                rel_desc = []
+                for rel in relationships[:3]:
+                    rel_desc.append(f"{rel['from_table']}.{rel['from_column']} → {rel['to_table']}.{rel['to_column']}")
+                
+                self.statusBar().showMessage(
+                    f'{join_type} JOIN query generated for {len(table_names)} tables. '
+                    f'Relationships: {"; ".join(rel_desc)}'
+                    + ('...' if len(relationships) > 3 else '')
+                )
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "Join Error", str(e))
+        except Exception as e:
+            show_error_notification(f"Error: {str(e)}")
+            self.statusBar().showMessage(f'Error generating {join_type} JOIN query: {str(e)}')
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
