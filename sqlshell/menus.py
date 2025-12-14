@@ -3,7 +3,19 @@ Menu creation and management for SQLShell application.
 This module contains functions to create and manage the application's menus.
 """
 
+import os
 from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtGui import QIcon
+
+
+def get_christmas_resource_path(filename):
+    """Get the full path to a Christmas theme resource."""
+    return os.path.join(
+        os.path.dirname(__file__), 
+        "resources", 
+        "christmas_theme", 
+        filename
+    )
 
 
 def get_version():
@@ -87,7 +99,10 @@ def create_view_menu(main_window):
     view_menu.addSeparator()
     
     # Christmas theme toggle
-    main_window.christmas_theme_action = view_menu.addAction('🎄 Christmas Theme')
+    main_window.christmas_theme_action = view_menu.addAction('Christmas Theme')
+    christmas_icon_path = get_christmas_resource_path("star.png")
+    if os.path.exists(christmas_icon_path):
+        main_window.christmas_theme_action.setIcon(QIcon(christmas_icon_path))
     main_window.christmas_theme_action.setCheckable(True)
     main_window.christmas_theme_action.setChecked(getattr(main_window, 'christmas_theme_enabled', False))
     main_window.christmas_theme_action.triggered.connect(main_window.toggle_christmas_theme)
@@ -190,7 +205,8 @@ def create_preferences_menu(main_window):
     preferences_menu.addSeparator()
     
     # AI Autocomplete settings
-    ai_settings_action = preferences_menu.addAction('🤖 AI Autocomplete Settings...')
+    ai_settings_action = preferences_menu.addAction('AI Autocomplete Settings...')
+    ai_settings_action.setIcon(QIcon.fromTheme("preferences-system"))
     ai_settings_action.triggered.connect(lambda: show_ai_settings(main_window))
     
     return preferences_menu

@@ -212,7 +212,8 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(self.tables_list)
         
         # Browse button for quick file selection
-        self.browse_button = QPushButton("📂 Browse...  Ctrl+B")
+        self.browse_button = QPushButton("Browse...  Ctrl+B")
+        self.browse_button.setIcon(QIcon.fromTheme("folder-open"))
         self.browse_button.setToolTip("Open data files (Excel, CSV, Parquet) or databases (SQLite, DuckDB)")
         self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_button.clicked.connect(self.browse_files)
