@@ -96,6 +96,12 @@ class CopyableTableWidget(QTableWidget):
             count_rows_action = QAction("Count Rows", self)
             count_rows_action.triggered.connect(self._show_row_count)
             menu.addAction(count_rows_action)
+            
+            # Add "Save as Table" action
+            save_as_table_action = QAction("Save as Table...", self)
+            save_as_table_action.setIcon(QIcon.fromTheme("document-save"))
+            save_as_table_action.triggered.connect(self._save_results_as_table)
+            menu.addAction(save_as_table_action)
         
         # Add table analysis options if we have data
         table_name = self._get_current_table_name()
@@ -122,8 +128,8 @@ class CopyableTableWidget(QTableWidget):
                     lambda: self._call_main_window_method('analyze_table_entropy', table_name)
                 )
                 
-                # Profile Table Structure
-                profile_table_action = analysis_menu.addAction("Profile Table Structure")
+                # Find Keys
+                profile_table_action = analysis_menu.addAction("Find Keys")
                 profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
                 profile_table_action.triggered.connect(
                     lambda: self._call_main_window_method('profile_table_structure', table_name)
@@ -151,8 +157,8 @@ class CopyableTableWidget(QTableWidget):
                     lambda: self._call_main_window_method('analyze_current_data_entropy')
                 )
                 
-                # Profile Data Structure
-                profile_table_action = analysis_menu.addAction("Profile Data Structure")
+                # Find Keys
+                profile_table_action = analysis_menu.addAction("Find Keys")
                 profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
                 profile_table_action.triggered.connect(
                     lambda: self._call_main_window_method('profile_current_data_structure')
@@ -212,6 +218,29 @@ class CopyableTableWidget(QTableWidget):
             # Not in preview mode, just show the current dataframe count
             row_count = len(parent_tab.current_df)
             QMessageBox.information(self, "Row Count", f"Total rows: {row_count:,}")
+    
+    def _save_results_as_table(self):
+        """Save the current query results as a new table in the database"""
+        parent_tab = getattr(self, '_parent_tab', None)
+        if not parent_tab:
+            return
+        
+        if not hasattr(parent_tab, 'current_df') or parent_tab.current_df is None:
+            QMessageBox.warning(self, "No Data", "No results to save as table.")
+            return
+        
+        df = parent_tab.current_df
+        if df.empty:
+            QMessageBox.warning(self, "No Data", "Results are empty. Nothing to save.")
+            return
+        
+        main_window = self._get_main_window()
+        if not main_window or not hasattr(main_window, 'save_results_as_table'):
+            QMessageBox.warning(self, "Error", "Could not access main window.")
+            return
+        
+        # Call the main window method to handle the save
+        main_window.save_results_as_table(df)
     
     def _get_unformatted_value(self, row, col):
         """Get the unformatted value from the original DataFrame if available"""

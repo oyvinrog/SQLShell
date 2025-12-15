@@ -295,12 +295,36 @@ jobs:
           python -c "
           from PIL import Image
           import os
+          # Try to use the highest quality source available
           icon_path = 'sqlshell/resources/icon.png'
-          if os.path.exists(icon_path):
+          iconset_512 = 'sqlshell/resources/icon.iconset/icon_512x512.png'
+          
+          # Prefer 512x512 source if available, otherwise use icon.png
+          if os.path.exists(iconset_512):
+              img = Image.open(iconset_512)
+              print(f'Using high-quality source: {iconset_512} ({img.size})')
+          elif os.path.exists(icon_path):
               img = Image.open(icon_path)
-              sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-              icons = [img.resize(size, Image.Resampling.LANCZOS) for size in sizes]
-              icons[0].save('sqlshell/resources/icon.ico', format='ICO', sizes=sizes)
+              print(f'Using source: {icon_path} ({img.size})')
+          else:
+              print('Warning: No icon source found!')
+              exit(1)
+          
+          # Ensure RGBA mode for best quality (add alpha channel if missing)
+          if img.mode != 'RGBA':
+              img = img.convert('RGBA')
+              print(f'Converted to RGBA mode')
+          
+          # Create all required sizes with high-quality LANCZOS resampling
+          sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+          icons = []
+          for size in sizes:
+              resized = img.resize(size, Image.Resampling.LANCZOS)
+              icons.append(resized)
+          
+          # Save as ICO with all sizes - use the largest icon as base
+          icons[-1].save('sqlshell/resources/icon.ico', format='ICO', sizes=sizes)
+          print(f'Created icon.ico with {len(sizes)} sizes')
           "
 
       - name: Build executable

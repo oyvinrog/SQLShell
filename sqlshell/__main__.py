@@ -1305,6 +1305,98 @@ LIMIT 10
             show_error_notification(f"Failed to export data: {str(e)}")
             self.statusBar().showMessage('Error exporting data')
 
+    def save_results_as_table(self, df=None):
+        """Save the current query results as a new table (Parquet file) in the database.
+        
+        The results are saved as a Parquet file so they persist across sessions.
+        
+        Args:
+            df: Optional DataFrame to save. If None, uses current tab's results.
+        """
+        # If no DataFrame provided, get from current tab
+        if df is None:
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                show_warning_notification("No active query tab.")
+                return
+            
+            if not hasattr(current_tab, 'current_df') or current_tab.current_df is None:
+                show_warning_notification("No query results to save.")
+                return
+            
+            df = current_tab.current_df
+        
+        if df.empty:
+            show_warning_notification("Results are empty. Nothing to save.")
+            return
+        
+        # Prompt user for file location
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, 
+            f"Save Results as Table ({len(df):,} rows, {len(df.columns)} columns)", 
+            "query_result.parquet",
+            "Parquet Files (*.parquet);;All Files (*)"
+        )
+        
+        if not file_name:
+            return
+        
+        # Ensure .parquet extension
+        if not file_name.lower().endswith('.parquet'):
+            file_name += '.parquet'
+        
+        try:
+            # Show loading indicator
+            self.statusBar().showMessage('Saving results as table...')
+            
+            # Save DataFrame as Parquet file (using fastparquet engine for consistency)
+            df.to_parquet(file_name, index=False, engine='fastparquet')
+            
+            # Generate table name from file name
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            table_name = self.db_manager.sanitize_table_name(base_name)
+            
+            # Ensure unique table name
+            original_name = table_name
+            counter = 1
+            while table_name in self.db_manager.loaded_tables:
+                table_name = f"{original_name}_{counter}"
+                counter += 1
+            
+            # Register the table in the database manager with the file path
+            self.db_manager.register_dataframe(df, table_name, file_name)
+            
+            # Update tracking with file path (so it can be reloaded)
+            self.db_manager.loaded_tables[table_name] = file_name
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
+            
+            # Add to the tables list in UI
+            self.tables_list.add_table_item(table_name, os.path.basename(file_name))
+            
+            # Update completer with new table and column names
+            self.update_completer()
+            
+            # Show success message
+            self.statusBar().showMessage(
+                f'Results saved as table "{table_name}" ({len(df):,} rows)'
+            )
+            
+            QMessageBox.information(
+                self,
+                "Table Created",
+                f"Query results have been saved as:\n\n"
+                f"File: {file_name}\n"
+                f"Table: {table_name}\n\n"
+                f"Rows: {len(df):,}\nColumns: {len(df.columns)}\n\n"
+                "You can now query this table like any other table.\n"
+                "The file will be available when you reopen SQLShell.",
+                QMessageBox.StandardButton.Ok
+            )
+            
+        except Exception as e:
+            show_error_notification(f"Failed to save as table: {str(e)}")
+            self.statusBar().showMessage('Error saving results as table')
+
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame with proper data types"""
         # Get the current tab
@@ -1566,6 +1658,11 @@ LIMIT 10
                 right_join_action = join_menu.addAction("RIGHT JOIN - All from last, matching from others")
                 full_join_action = join_menu.addAction("FULL JOIN - All rows from all tables")
                 
+                # Add Compare Datasets option
+                context_menu.addSeparator()
+                compare_datasets_action = context_menu.addAction(f"Compare {len(table_items)} Datasets")
+                compare_datasets_action.setIcon(QIcon.fromTheme("edit-find-replace"))
+                
                 # Add separator and delete option
                 context_menu.addSeparator()
                 delete_multiple_action = context_menu.addAction(f"Delete {len(table_items)} Tables")
@@ -1592,6 +1689,8 @@ LIMIT 10
                     self.generate_join_for_tables(table_items, 'RIGHT')
                 elif action == full_join_action:
                     self.generate_join_for_tables(table_items, 'FULL')
+                elif action == compare_datasets_action:
+                    self.compare_datasets_for_tables(table_items)
                 elif action == delete_multiple_action:
                     # Show confirmation dialog
                     table_names = [self.tables_list.get_table_name_from_item(item) for item in table_items]
@@ -1650,7 +1749,7 @@ LIMIT 10
         analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
         
         # Add table profiler action
-        profile_table_action = context_menu.addAction("Profile Table Structure")
+        profile_table_action = context_menu.addAction("Find Keys")
         profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
         
         # Add distributions profiler action
@@ -2029,6 +2128,87 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Error: {str(e)}")
             self.statusBar().showMessage(f'Error generating {join_type} JOIN query: {str(e)}')
+
+    def compare_datasets_for_tables(self, table_items):
+        """Compare datasets using pandas with visual difference display"""
+        try:
+            from sqlshell.utils.profile_compare import compare_datasets, DatasetComparator
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for dataset comparison.")
+                return
+            
+            # Load dataframes for each table
+            dataframes = []
+            for table_name in table_names:
+                try:
+                    # Get dataframe from database manager
+                    source = self.db_manager.loaded_tables.get(table_name, '')
+                    if source.startswith('database:'):
+                        alias = source.split(':')[1]
+                        query = f'SELECT * FROM {alias}."{table_name}"'
+                    else:
+                        query = f'SELECT * FROM "{table_name}"'
+                    
+                    df = self.db_manager.execute_query(query)
+                    dataframes.append(df)
+                except Exception as e:
+                    QMessageBox.warning(self, "Load Error", 
+                                        f"Could not load table '{table_name}': {str(e)}")
+                    return
+            
+            # Find common columns
+            common_cols = set(dataframes[0].columns)
+            for df in dataframes[1:]:
+                common_cols = common_cols.intersection(set(df.columns))
+            
+            if not common_cols:
+                QMessageBox.warning(self, "No Common Columns", 
+                                    f"The selected tables have no common columns.\n\n"
+                                    "Dataset comparison requires tables to have at least one "
+                                    "column with the same name to use as join keys.")
+                return
+            
+            self.statusBar().showMessage(f'Comparing {len(table_names)} datasets...')
+            
+            # Perform comparison and show results
+            results, widget = compare_datasets(
+                dataframes, 
+                names=table_names, 
+                key_columns=list(common_cols),
+                parent=self,
+                show_window=True
+            )
+            
+            if "error" in results:
+                QMessageBox.warning(self, "Comparison Error", results["error"])
+                return
+            
+            # Store reference to keep widget alive
+            if not hasattr(self, '_comparison_widgets'):
+                self._comparison_widgets = []
+            self._comparison_widgets.append(widget)
+            
+            stats = results.get('summary_stats', {})
+            self.statusBar().showMessage(
+                f'Comparison complete: {stats.get("total_rows", 0)} total rows, '
+                f'{stats.get("indicator_counts", {}).get("all", 0)} matching in all datasets'
+            )
+            
+        except ImportError as e:
+            QMessageBox.warning(self, "Import Error", 
+                                f"Could not import comparison module: {str(e)}")
+        except Exception as e:
+            show_error_notification(f"Error: {str(e)}")
+            self.statusBar().showMessage(f'Error comparing datasets: {str(e)}')
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
@@ -4085,10 +4265,10 @@ LIMIT 10
             self.statusBar().showMessage(f'Error analyzing table: {str(e)}')
             
     def profile_table_structure(self, table_name):
-        """Analyze a table's structure to identify candidate keys and functional dependencies"""
+        """Find candidate keys and functional dependencies in a table"""
         try:
             # Show a loading indicator
-            self.statusBar().showMessage(f'Profiling table structure for "{table_name}"...')
+            self.statusBar().showMessage(f'Finding keys for "{table_name}"...')
             
             # Get the table data
             if table_name in self.db_manager.loaded_tables:
@@ -4115,13 +4295,13 @@ LIMIT 10
                     
                     # The profiler will automatically select the best optimization level
                     # and handle sampling intelligently based on dataset characteristics
-                    self.statusBar().showMessage(f'Analyzing table structure for "{table_name}" ({row_count:,} rows)...')
+                    self.statusBar().showMessage(f'Analyzing keys for "{table_name}" ({row_count:,} rows)...')
                     vis = visualize_profile(df)
                     
                     # Store a reference to prevent garbage collection
                     self._keys_profile_window = vis
                     
-                    self.statusBar().showMessage(f'Table structure profile generated for "{table_name}" ({row_count:,} rows)')
+                    self.statusBar().showMessage(f'Keys found for "{table_name}" ({row_count:,} rows)')
                 else:
                     show_warning_notification(f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
@@ -4130,7 +4310,7 @@ LIMIT 10
                 self.statusBar().showMessage(f'Table "{table_name}" not found')
                 
         except Exception as e:
-            show_error_notification(f"Profile Error: Error profiling table structure - {str(e)}")
+            show_error_notification(f"Error: Could not find keys - {str(e)}")
             self.statusBar().showMessage(f'Error profiling table: {str(e)}')
     
     def profile_distributions(self, table_name):
@@ -4282,22 +4462,22 @@ LIMIT 10
             df = current_tab.current_df.copy()
             row_count = len(df)
             
-            self.statusBar().showMessage(f'Profiling data structure ({row_count:,} rows)...')
+            self.statusBar().showMessage(f'Finding keys ({row_count:,} rows)...')
             
             # Import the structure profiler
             from sqlshell.utils.profile_keys import visualize_profile
             
             # Create and show the visualization
-            self.statusBar().showMessage(f'Analyzing data structure ({row_count:,} rows)...')
+            self.statusBar().showMessage(f'Analyzing keys ({row_count:,} rows)...')
             vis = visualize_profile(df)
             
             # Store a reference to prevent garbage collection
             self._keys_profile_window = vis
             
-            self.statusBar().showMessage(f'Data structure profile generated ({row_count:,} rows)')
+            self.statusBar().showMessage(f'Keys found ({row_count:,} rows)')
                 
         except Exception as e:
-            show_error_notification(f"Profile Error: Error profiling data structure - {str(e)}")
+            show_error_notification(f"Error: Could not find keys - {str(e)}")
             self.statusBar().showMessage(f'Error profiling data: {str(e)}')
 
     def profile_current_data_distributions(self):

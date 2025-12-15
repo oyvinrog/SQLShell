@@ -93,17 +93,17 @@ class FilterHeader(QHeaderView):
         # Add count rows action
         count_rows_action = context_menu.addAction("Count Rows")
         
-        # Add explain column action
-        explain_action = context_menu.addAction("Explain Column")
+        # Add explain column action - finds correlations with other columns
+        explain_action = context_menu.addAction("Find Related Columns")
         
-        # Add encode text action
-        encode_action = context_menu.addAction("Encode Text")
+        # Add encode text action - creates binary 0/1 columns from categories
+        encode_action = context_menu.addAction("One-Hot Encode")
 
-        # Add categorize action
-        categorize_action = context_menu.addAction("Categorize Column")
+        # Add categorize action - bins numbers or groups rare categories
+        categorize_action = context_menu.addAction("Bin/Group Values")
         
-        # Add CN2 rule discovery action
-        discover_rules_action = context_menu.addAction("Discover Classification Rules (CN2)")
+        # Add CN2 rule discovery action - finds IF-THEN prediction rules
+        discover_rules_action = context_menu.addAction("Find IF-THEN Rules")
         
         context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
