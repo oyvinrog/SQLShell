@@ -1566,6 +1566,11 @@ LIMIT 10
                 right_join_action = join_menu.addAction("RIGHT JOIN - All from last, matching from others")
                 full_join_action = join_menu.addAction("FULL JOIN - All rows from all tables")
                 
+                # Add Compare Datasets option
+                context_menu.addSeparator()
+                compare_datasets_action = context_menu.addAction(f"Compare {len(table_items)} Datasets")
+                compare_datasets_action.setIcon(QIcon.fromTheme("edit-find-replace"))
+                
                 # Add separator and delete option
                 context_menu.addSeparator()
                 delete_multiple_action = context_menu.addAction(f"Delete {len(table_items)} Tables")
@@ -1592,6 +1597,8 @@ LIMIT 10
                     self.generate_join_for_tables(table_items, 'RIGHT')
                 elif action == full_join_action:
                     self.generate_join_for_tables(table_items, 'FULL')
+                elif action == compare_datasets_action:
+                    self.compare_datasets_for_tables(table_items)
                 elif action == delete_multiple_action:
                     # Show confirmation dialog
                     table_names = [self.tables_list.get_table_name_from_item(item) for item in table_items]
@@ -2029,6 +2036,87 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Error: {str(e)}")
             self.statusBar().showMessage(f'Error generating {join_type} JOIN query: {str(e)}')
+
+    def compare_datasets_for_tables(self, table_items):
+        """Compare datasets using pandas with visual difference display"""
+        try:
+            from sqlshell.utils.profile_compare import compare_datasets, DatasetComparator
+            
+            # Extract table names from selected items
+            table_names = []
+            for item in table_items:
+                table_name = self.tables_list.get_table_name_from_item(item)
+                if table_name:
+                    table_names.append(table_name)
+            
+            if len(table_names) < 2:
+                QMessageBox.warning(self, "Not Enough Tables", 
+                                    "At least two tables are required for dataset comparison.")
+                return
+            
+            # Load dataframes for each table
+            dataframes = []
+            for table_name in table_names:
+                try:
+                    # Get dataframe from database manager
+                    source = self.db_manager.loaded_tables.get(table_name, '')
+                    if source.startswith('database:'):
+                        alias = source.split(':')[1]
+                        query = f'SELECT * FROM {alias}."{table_name}"'
+                    else:
+                        query = f'SELECT * FROM "{table_name}"'
+                    
+                    df = self.db_manager.execute_query(query)
+                    dataframes.append(df)
+                except Exception as e:
+                    QMessageBox.warning(self, "Load Error", 
+                                        f"Could not load table '{table_name}': {str(e)}")
+                    return
+            
+            # Find common columns
+            common_cols = set(dataframes[0].columns)
+            for df in dataframes[1:]:
+                common_cols = common_cols.intersection(set(df.columns))
+            
+            if not common_cols:
+                QMessageBox.warning(self, "No Common Columns", 
+                                    f"The selected tables have no common columns.\n\n"
+                                    "Dataset comparison requires tables to have at least one "
+                                    "column with the same name to use as join keys.")
+                return
+            
+            self.statusBar().showMessage(f'Comparing {len(table_names)} datasets...')
+            
+            # Perform comparison and show results
+            results, widget = compare_datasets(
+                dataframes, 
+                names=table_names, 
+                key_columns=list(common_cols),
+                parent=self,
+                show_window=True
+            )
+            
+            if "error" in results:
+                QMessageBox.warning(self, "Comparison Error", results["error"])
+                return
+            
+            # Store reference to keep widget alive
+            if not hasattr(self, '_comparison_widgets'):
+                self._comparison_widgets = []
+            self._comparison_widgets.append(widget)
+            
+            stats = results.get('summary_stats', {})
+            self.statusBar().showMessage(
+                f'Comparison complete: {stats.get("total_rows", 0)} total rows, '
+                f'{stats.get("indicator_counts", {}).get("all", 0)} matching in all datasets'
+            )
+            
+        except ImportError as e:
+            QMessageBox.warning(self, "Import Error", 
+                                f"Could not import comparison module: {str(e)}")
+        except Exception as e:
+            show_error_notification(f"Error: {str(e)}")
+            self.statusBar().showMessage(f'Error comparing datasets: {str(e)}')
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
