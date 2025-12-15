@@ -70,6 +70,11 @@ def create_file_menu(main_window):
     load_data_action.setShortcut('Ctrl+L')
     load_data_action.triggered.connect(main_window.show_load_dialog)
     
+    # Paste data from clipboard action
+    paste_data_action = file_menu.addAction('Paste Data from Clipboard')
+    paste_data_action.setShortcut('Ctrl+Shift+V')
+    paste_data_action.triggered.connect(main_window.paste_data_from_clipboard)
+    
     file_menu.addSeparator()
     
     exit_action = file_menu.addAction('Exit')
