@@ -122,8 +122,8 @@ class CopyableTableWidget(QTableWidget):
                     lambda: self._call_main_window_method('analyze_table_entropy', table_name)
                 )
                 
-                # Profile Table Structure
-                profile_table_action = analysis_menu.addAction("Profile Table Structure")
+                # Find Keys
+                profile_table_action = analysis_menu.addAction("Find Keys")
                 profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
                 profile_table_action.triggered.connect(
                     lambda: self._call_main_window_method('profile_table_structure', table_name)
@@ -151,8 +151,8 @@ class CopyableTableWidget(QTableWidget):
                     lambda: self._call_main_window_method('analyze_current_data_entropy')
                 )
                 
-                # Profile Data Structure
-                profile_table_action = analysis_menu.addAction("Profile Data Structure")
+                # Find Keys
+                profile_table_action = analysis_menu.addAction("Find Keys")
                 profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
                 profile_table_action.triggered.connect(
                     lambda: self._call_main_window_method('profile_current_data_structure')

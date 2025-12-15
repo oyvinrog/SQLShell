@@ -1650,7 +1650,7 @@ LIMIT 10
         analyze_entropy_action.setIcon(QIcon.fromTheme("system-search"))
         
         # Add table profiler action
-        profile_table_action = context_menu.addAction("Profile Table Structure")
+        profile_table_action = context_menu.addAction("Find Keys")
         profile_table_action.setIcon(QIcon.fromTheme("edit-find"))
         
         # Add distributions profiler action
@@ -4085,10 +4085,10 @@ LIMIT 10
             self.statusBar().showMessage(f'Error analyzing table: {str(e)}')
             
     def profile_table_structure(self, table_name):
-        """Analyze a table's structure to identify candidate keys and functional dependencies"""
+        """Find candidate keys and functional dependencies in a table"""
         try:
             # Show a loading indicator
-            self.statusBar().showMessage(f'Profiling table structure for "{table_name}"...')
+            self.statusBar().showMessage(f'Finding keys for "{table_name}"...')
             
             # Get the table data
             if table_name in self.db_manager.loaded_tables:
@@ -4115,13 +4115,13 @@ LIMIT 10
                     
                     # The profiler will automatically select the best optimization level
                     # and handle sampling intelligently based on dataset characteristics
-                    self.statusBar().showMessage(f'Analyzing table structure for "{table_name}" ({row_count:,} rows)...')
+                    self.statusBar().showMessage(f'Analyzing keys for "{table_name}" ({row_count:,} rows)...')
                     vis = visualize_profile(df)
                     
                     # Store a reference to prevent garbage collection
                     self._keys_profile_window = vis
                     
-                    self.statusBar().showMessage(f'Table structure profile generated for "{table_name}" ({row_count:,} rows)')
+                    self.statusBar().showMessage(f'Keys found for "{table_name}" ({row_count:,} rows)')
                 else:
                     show_warning_notification(f"Table '{table_name}' has no data to analyze.")
                     self.statusBar().showMessage(f'Table "{table_name}" is empty - cannot analyze')
@@ -4130,7 +4130,7 @@ LIMIT 10
                 self.statusBar().showMessage(f'Table "{table_name}" not found')
                 
         except Exception as e:
-            show_error_notification(f"Profile Error: Error profiling table structure - {str(e)}")
+            show_error_notification(f"Error: Could not find keys - {str(e)}")
             self.statusBar().showMessage(f'Error profiling table: {str(e)}')
     
     def profile_distributions(self, table_name):
@@ -4282,22 +4282,22 @@ LIMIT 10
             df = current_tab.current_df.copy()
             row_count = len(df)
             
-            self.statusBar().showMessage(f'Profiling data structure ({row_count:,} rows)...')
+            self.statusBar().showMessage(f'Finding keys ({row_count:,} rows)...')
             
             # Import the structure profiler
             from sqlshell.utils.profile_keys import visualize_profile
             
             # Create and show the visualization
-            self.statusBar().showMessage(f'Analyzing data structure ({row_count:,} rows)...')
+            self.statusBar().showMessage(f'Analyzing keys ({row_count:,} rows)...')
             vis = visualize_profile(df)
             
             # Store a reference to prevent garbage collection
             self._keys_profile_window = vis
             
-            self.statusBar().showMessage(f'Data structure profile generated ({row_count:,} rows)')
+            self.statusBar().showMessage(f'Keys found ({row_count:,} rows)')
                 
         except Exception as e:
-            show_error_notification(f"Profile Error: Error profiling data structure - {str(e)}")
+            show_error_notification(f"Error: Could not find keys - {str(e)}")
             self.statusBar().showMessage(f'Error profiling data: {str(e)}')
 
     def profile_current_data_distributions(self):

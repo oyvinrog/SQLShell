@@ -402,9 +402,9 @@ class QueryTab(QWidget):
         sql_menu = menu.addMenu("Generate SQL")
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
-        explain_action = menu.addAction(f"Explain Column")
-        encode_action = menu.addAction(f"One-Hot Encode")
-        discover_rules_action = menu.addAction(f"Discover Classification Rules (CN2)")
+        explain_action = menu.addAction("Find Related Columns")
+        encode_action = menu.addAction("One-Hot Encode")
+        discover_rules_action = menu.addAction("Find IF-THEN Rules")
         
         # Execute the menu
         action = menu.exec(header.mapToGlobal(position))
@@ -674,9 +674,9 @@ class QueryTab(QWidget):
         sql_menu = menu.addMenu("Generate SQL")
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
-        explain_action = menu.addAction(f"Explain Column")
-        encode_action = menu.addAction(f"One-Hot Encode")
-        discover_rules_action = menu.addAction(f"Discover Classification Rules (CN2)")
+        explain_action = menu.addAction("Find Related Columns")
+        encode_action = menu.addAction("One-Hot Encode")
+        discover_rules_action = menu.addAction("Find IF-THEN Rules")
         
         # Execute the menu
         action = menu.exec(position)
