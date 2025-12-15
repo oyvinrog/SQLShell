@@ -1305,6 +1305,98 @@ LIMIT 10
             show_error_notification(f"Failed to export data: {str(e)}")
             self.statusBar().showMessage('Error exporting data')
 
+    def save_results_as_table(self, df=None):
+        """Save the current query results as a new table (Parquet file) in the database.
+        
+        The results are saved as a Parquet file so they persist across sessions.
+        
+        Args:
+            df: Optional DataFrame to save. If None, uses current tab's results.
+        """
+        # If no DataFrame provided, get from current tab
+        if df is None:
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                show_warning_notification("No active query tab.")
+                return
+            
+            if not hasattr(current_tab, 'current_df') or current_tab.current_df is None:
+                show_warning_notification("No query results to save.")
+                return
+            
+            df = current_tab.current_df
+        
+        if df.empty:
+            show_warning_notification("Results are empty. Nothing to save.")
+            return
+        
+        # Prompt user for file location
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, 
+            f"Save Results as Table ({len(df):,} rows, {len(df.columns)} columns)", 
+            "query_result.parquet",
+            "Parquet Files (*.parquet);;All Files (*)"
+        )
+        
+        if not file_name:
+            return
+        
+        # Ensure .parquet extension
+        if not file_name.lower().endswith('.parquet'):
+            file_name += '.parquet'
+        
+        try:
+            # Show loading indicator
+            self.statusBar().showMessage('Saving results as table...')
+            
+            # Save DataFrame as Parquet file (using fastparquet engine for consistency)
+            df.to_parquet(file_name, index=False, engine='fastparquet')
+            
+            # Generate table name from file name
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            table_name = self.db_manager.sanitize_table_name(base_name)
+            
+            # Ensure unique table name
+            original_name = table_name
+            counter = 1
+            while table_name in self.db_manager.loaded_tables:
+                table_name = f"{original_name}_{counter}"
+                counter += 1
+            
+            # Register the table in the database manager with the file path
+            self.db_manager.register_dataframe(df, table_name, file_name)
+            
+            # Update tracking with file path (so it can be reloaded)
+            self.db_manager.loaded_tables[table_name] = file_name
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
+            
+            # Add to the tables list in UI
+            self.tables_list.add_table_item(table_name, os.path.basename(file_name))
+            
+            # Update completer with new table and column names
+            self.update_completer()
+            
+            # Show success message
+            self.statusBar().showMessage(
+                f'Results saved as table "{table_name}" ({len(df):,} rows)'
+            )
+            
+            QMessageBox.information(
+                self,
+                "Table Created",
+                f"Query results have been saved as:\n\n"
+                f"File: {file_name}\n"
+                f"Table: {table_name}\n\n"
+                f"Rows: {len(df):,}\nColumns: {len(df.columns)}\n\n"
+                "You can now query this table like any other table.\n"
+                "The file will be available when you reopen SQLShell.",
+                QMessageBox.StandardButton.Ok
+            )
+            
+        except Exception as e:
+            show_error_notification(f"Failed to save as table: {str(e)}")
+            self.statusBar().showMessage('Error saving results as table')
+
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame with proper data types"""
         # Get the current tab
