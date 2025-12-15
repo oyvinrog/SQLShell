@@ -83,8 +83,7 @@ class QueryTab(QWidget):
         
         # Create the DuckDB documentation panel
         self.docs_panel = DocsPanel()
-        self.docs_panel.hide()  # Hidden by default
-        self._docs_panel_visible = False
+        self._docs_panel_visible = True  # Visible by default
         
         # Connect docs panel signals
         self.docs_panel.close_requested.connect(self.toggle_docs_panel)
@@ -100,8 +99,8 @@ class QueryTab(QWidget):
         self.editor_docs_splitter.addWidget(self.query_edit)
         self.editor_docs_splitter.addWidget(self.docs_panel)
         
-        # Set initial sizes (editor takes most space, docs panel is hidden)
-        self.editor_docs_splitter.setSizes([700, 0])
+        # Set initial sizes (editor ~70%, docs panel ~30%)
+        self.editor_docs_splitter.setSizes([700, 300])
         
         self.query_layout.addWidget(self.editor_docs_splitter)
         
@@ -169,6 +168,7 @@ class QueryTab(QWidget):
         self.docs_btn.setFixedHeight(btn_height)
         self.docs_btn.setStyleSheet(btn_style)
         self.docs_btn.setCheckable(True)
+        self.docs_btn.setChecked(True)  # Checked by default since panel is open
         self.button_layout.addWidget(self.docs_btn)
         
         # F1 shortcut to toggle docs panel

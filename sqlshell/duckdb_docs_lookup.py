@@ -27,7 +27,7 @@ class DocEntry:
 DUCKDB_DOCS: Dict[str, DocEntry] = {}
 
 
-def _build_docs_database():
+def _build_docs_database():d
     """Build the documentation database with DuckDB functions and syntax."""
     global DUCKDB_DOCS
     

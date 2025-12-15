@@ -139,7 +139,7 @@ def create_view_menu(main_window):
     main_window.docs_panel_action = view_menu.addAction('📚 DuckDB Documentation')
     main_window.docs_panel_action.setShortcut('F1')
     main_window.docs_panel_action.setCheckable(True)
-    main_window.docs_panel_action.setChecked(False)
+    main_window.docs_panel_action.setChecked(True)  # Open by default
     main_window.docs_panel_action.triggered.connect(main_window.toggle_docs_panel)
     
     view_menu.addSeparator()
