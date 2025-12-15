@@ -135,6 +135,15 @@ def create_view_menu(main_window):
     
     view_menu.addSeparator()
     
+    # DuckDB Documentation Panel
+    main_window.docs_panel_action = view_menu.addAction('📚 DuckDB Documentation')
+    main_window.docs_panel_action.setShortcut('F1')
+    main_window.docs_panel_action.setCheckable(True)
+    main_window.docs_panel_action.setChecked(False)
+    main_window.docs_panel_action.triggered.connect(main_window.toggle_docs_panel)
+    
+    view_menu.addSeparator()
+    
     # Maximized window option
     maximize_action = view_menu.addAction('Maximize Window')
     maximize_action.setShortcut('F11')

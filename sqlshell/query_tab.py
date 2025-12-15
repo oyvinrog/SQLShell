@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter, QApplication, 
                              QToolButton, QMenu)
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 import re
 import pandas as pd
 import numpy as np
@@ -14,6 +14,7 @@ from sqlshell.ui import FilterHeader
 from sqlshell.styles import get_row_count_label_stylesheet
 from sqlshell.editor_integration import integrate_execution_functionality
 from sqlshell.widgets import CopyableTableWidget
+from sqlshell.docs_panel import DocsPanel
 
 class QueryTab(QWidget):
     def __init__(self, parent, results_title="RESULTS"):
@@ -49,6 +50,11 @@ class QueryTab(QWidget):
         self.query_layout.setContentsMargins(8, 6, 8, 6)
         self.query_layout.setSpacing(6)
         
+        # Create horizontal splitter for editor and docs panel
+        self.editor_docs_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.editor_docs_splitter.setHandleWidth(4)
+        self.editor_docs_splitter.setChildrenCollapsible(True)
+        
         # Query input
         self.query_edit = SQLEditor()
         # Apply syntax highlighting to the query editor
@@ -75,7 +81,29 @@ class QueryTab(QWidget):
         # Connect keyboard events for direct handling of Ctrl+Enter
         self.query_edit.installEventFilter(self)
         
-        self.query_layout.addWidget(self.query_edit)
+        # Create the DuckDB documentation panel
+        self.docs_panel = DocsPanel()
+        self.docs_panel.hide()  # Hidden by default
+        self._docs_panel_visible = False
+        
+        # Connect docs panel signals
+        self.docs_panel.close_requested.connect(self.toggle_docs_panel)
+        
+        # Connect editor text changes to docs panel (with debouncing)
+        self._docs_update_timer = QTimer()
+        self._docs_update_timer.setSingleShot(True)
+        self._docs_update_timer.timeout.connect(self._update_docs_from_editor)
+        self.query_edit.textChanged.connect(self._on_editor_text_changed)
+        self.query_edit.cursorPositionChanged.connect(self._on_cursor_position_changed)
+        
+        # Add editor and docs panel to the horizontal splitter
+        self.editor_docs_splitter.addWidget(self.query_edit)
+        self.editor_docs_splitter.addWidget(self.docs_panel)
+        
+        # Set initial sizes (editor takes most space, docs panel is hidden)
+        self.editor_docs_splitter.setSizes([700, 0])
+        
+        self.query_layout.addWidget(self.editor_docs_splitter)
         
         # Ultra-compact button row (22px height)
         self.button_layout = QHBoxLayout()
@@ -133,6 +161,19 @@ class QueryTab(QWidget):
         
         self.button_layout.addWidget(self.export_excel_btn)
         self.button_layout.addWidget(self.export_parquet_btn)
+        
+        # Docs panel toggle button
+        self.docs_btn = QPushButton('📚 Docs')
+        self.docs_btn.setToolTip('Toggle DuckDB documentation panel (F1)')
+        self.docs_btn.clicked.connect(self.toggle_docs_panel)
+        self.docs_btn.setFixedHeight(btn_height)
+        self.docs_btn.setStyleSheet(btn_style)
+        self.docs_btn.setCheckable(True)
+        self.button_layout.addWidget(self.docs_btn)
+        
+        # F1 shortcut to toggle docs panel
+        self.docs_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F1), self)
+        self.docs_shortcut.activated.connect(self.toggle_docs_panel)
         
         self.query_layout.addLayout(self.button_layout)
         
@@ -261,6 +302,8 @@ class QueryTab(QWidget):
             self.clear_btn.setFixedWidth(28)
             self.export_excel_btn.setVisible(False)
             self.export_parquet_btn.setVisible(False)
+            self.docs_btn.setText("📚")
+            self.docs_btn.setFixedWidth(28)
         else:
             # Normal mode
             self.query_layout.setContentsMargins(8, 6, 8, 6)
@@ -279,6 +322,9 @@ class QueryTab(QWidget):
             self.clear_btn.setMaximumWidth(16777215)
             self.export_excel_btn.setVisible(True)
             self.export_parquet_btn.setVisible(True)
+            self.docs_btn.setText("📚 Docs")
+            self.docs_btn.setMinimumWidth(0)
+            self.docs_btn.setMaximumWidth(16777215)
         
     def get_query_text(self):
         """Get the current query text"""
@@ -891,3 +937,89 @@ class QueryTab(QWidget):
         if self.execution_integration:
             return self.execution_integration.execute_current_statement()
         return None 
+    
+    # ==================== Documentation Panel Methods ====================
+    
+    def toggle_docs_panel(self):
+        """Toggle the visibility of the DuckDB documentation panel."""
+        self._docs_panel_visible = not self._docs_panel_visible
+        
+        if self._docs_panel_visible:
+            self.docs_panel.show()
+            # Animate to show the panel
+            current_sizes = self.editor_docs_splitter.sizes()
+            total_width = sum(current_sizes)
+            # Give docs panel about 30% of the space
+            docs_width = min(350, max(280, int(total_width * 0.30)))
+            self.editor_docs_splitter.setSizes([total_width - docs_width, docs_width])
+            self.docs_btn.setChecked(True)
+            # Update docs panel with current editor content
+            self._update_docs_from_editor()
+            if hasattr(self.parent, 'statusBar'):
+                self.parent.statusBar().showMessage('DuckDB documentation panel opened (F1 to toggle)', 2000)
+        else:
+            self.docs_panel.hide()
+            # Give all space to editor
+            current_sizes = self.editor_docs_splitter.sizes()
+            total_width = sum(current_sizes)
+            self.editor_docs_splitter.setSizes([total_width, 0])
+            self.docs_btn.setChecked(False)
+            if hasattr(self.parent, 'statusBar'):
+                self.parent.statusBar().showMessage('DuckDB documentation panel closed', 2000)
+    
+    def show_docs_panel(self):
+        """Show the documentation panel if hidden."""
+        if not self._docs_panel_visible:
+            self.toggle_docs_panel()
+    
+    def hide_docs_panel(self):
+        """Hide the documentation panel if visible."""
+        if self._docs_panel_visible:
+            self.toggle_docs_panel()
+    
+    def _on_editor_text_changed(self):
+        """Handle editor text changes - debounce before updating docs."""
+        if self._docs_panel_visible:
+            # Debounce to avoid excessive updates
+            self._docs_update_timer.start(350)
+    
+    def _on_cursor_position_changed(self):
+        """Handle cursor position changes in the editor."""
+        if self._docs_panel_visible:
+            # Shorter debounce for cursor moves
+            self._docs_update_timer.start(200)
+    
+    def _update_docs_from_editor(self):
+        """Update the docs panel based on current editor content."""
+        if not self._docs_panel_visible:
+            return
+        
+        try:
+            # Get text before cursor
+            cursor = self.query_edit.textCursor()
+            position = cursor.position()
+            full_text = self.query_edit.toPlainText()
+            text_before_cursor = full_text[:position]
+            
+            # Update the docs panel
+            self.docs_panel.update_from_cursor_position(text_before_cursor)
+        except Exception as e:
+            # Silently handle any errors to avoid disrupting the user
+            pass
+    
+    def search_docs(self, query: str):
+        """
+        Search the documentation for a specific query.
+        
+        Args:
+            query: The search term to look up
+        """
+        if not self._docs_panel_visible:
+            self.show_docs_panel()
+        
+        # Set the search query in the docs panel
+        self.docs_panel.search_input.setText(query)
+    
+    def is_docs_panel_visible(self) -> bool:
+        """Check if the documentation panel is currently visible."""
+        return self._docs_panel_visible

@@ -3761,6 +3761,16 @@ LIMIT 10
         status = "enabled" if checked else "disabled"
         self.statusBar().showMessage(f"Compact mode {status} (Ctrl+Shift+C to toggle)", 2000)
     
+    def toggle_docs_panel(self, checked=None):
+        """Toggle the DuckDB documentation panel for the current tab (F1)"""
+        current_tab = self.tab_widget.currentWidget()
+        if current_tab and hasattr(current_tab, 'toggle_docs_panel'):
+            current_tab.toggle_docs_panel()
+            
+            # Update menu action state
+            if hasattr(self, 'docs_panel_action') and hasattr(current_tab, 'is_docs_panel_visible'):
+                self.docs_panel_action.setChecked(current_tab.is_docs_panel_visible())
+    
     def toggle_christmas_theme(self, checked=None):
         """Toggle Christmas theme decorations."""
         if checked is None:
