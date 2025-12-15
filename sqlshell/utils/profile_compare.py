@@ -440,88 +440,289 @@ def _print_text_summary(results):
     print("=" * 60)
 
 
+# Only define DrillDownSummaryWidget if PyQt6 is available
+if PYQT6_AVAILABLE:
+    class DrillDownSummaryWidget(QWidget):
+        """Interactive summary widget with drill-down capability."""
+        
+        def __init__(self, results, parent=None):
+            super().__init__(parent)
+            self.results = results
+            self.setup_ui()
+        
+        def setup_ui(self):
+            layout = QVBoxLayout(self)
+            
+            # Create splitter for summary and detail view
+            splitter = QSplitter(Qt.Orientation.Horizontal)
+            
+            # Left panel: Summary with clickable items
+            left_panel = QWidget()
+            left_layout = QVBoxLayout(left_panel)
+            
+            scroll = QScrollArea()
+            scroll_widget = QWidget()
+            scroll_layout = QVBoxLayout(scroll_widget)
+            
+            stats = self.results.get('summary_stats', {})
+            names = self.results.get('dataset_names', [])
+            
+            # Dataset info
+            info_group = QGroupBox("Dataset Information")
+            info_layout = QVBoxLayout(info_group)
+            
+            shapes = self.results.get('original_shapes', [])
+            for i, (name, shape) in enumerate(zip(names, shapes)):
+                label = QLabel(f"<b>{name}:</b> {shape[0]} rows × {shape[1]} columns")
+                info_layout.addWidget(label)
+            
+            common_cols = self.results.get('common_columns', [])
+            key_cols = self.results.get('key_columns', [])
+            info_layout.addWidget(QLabel(f"<b>Common columns:</b> {len(common_cols)}"))
+            info_layout.addWidget(QLabel(f"<b>Key columns used:</b> {', '.join(key_cols[:5])}{'...' if len(key_cols) > 5 else ''}"))
+            
+            scroll_layout.addWidget(info_group)
+            
+            # Match summary with clickable buttons
+            match_group = QGroupBox("Match Summary (Click to drill down)")
+            match_layout = QVBoxLayout(match_group)
+            
+            total_rows = stats.get('total_rows', 0)
+            match_layout.addWidget(QLabel(f"<b>Total rows after full join:</b> {total_rows}"))
+            
+            indicator_counts = stats.get('indicator_counts', {})
+            
+            # Create clickable buttons for each indicator
+            for indicator, count in indicator_counts.items():
+                pct = (count / total_rows * 100) if total_rows > 0 else 0
+                
+                btn = QPushButton(f"▶ {indicator}: {count} rows ({pct:.1f}%)")
+                btn.setFlat(True)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                
+                if indicator == 'all':
+                    btn.setStyleSheet("""
+                        QPushButton { 
+                            text-align: left; 
+                            padding: 8px; 
+                            background-color: #e8f5e9; 
+                            border: 1px solid #a5d6a7;
+                            border-radius: 4px;
+                            font-weight: bold;
+                        }
+                        QPushButton:hover { background-color: #c8e6c9; }
+                    """)
+                elif '_only' in indicator:
+                    btn.setStyleSheet("""
+                        QPushButton { 
+                            text-align: left; 
+                            padding: 8px; 
+                            background-color: #fff3e0; 
+                            border: 1px solid #ffcc80;
+                            border-radius: 4px;
+                            font-weight: bold;
+                            color: #e65100;
+                        }
+                        QPushButton:hover { background-color: #ffe0b2; }
+                    """)
+                else:
+                    btn.setStyleSheet("""
+                        QPushButton { 
+                            text-align: left; 
+                            padding: 8px; 
+                            background-color: #e3f2fd; 
+                            border: 1px solid #90caf9;
+                            border-radius: 4px;
+                            font-weight: bold;
+                        }
+                        QPushButton:hover { background-color: #bbdefb; }
+                    """)
+                
+                # Connect click to drill-down
+                btn.clicked.connect(lambda checked, ind=indicator: self.show_indicator_details(ind))
+                match_layout.addWidget(btn)
+            
+            scroll_layout.addWidget(match_group)
+            
+            # Difference summary (if 2 datasets)
+            if 'diff_stats' in stats:
+                diff_group = QGroupBox("Cell-Level Differences (Matched Rows)")
+                diff_layout = QVBoxLayout(diff_group)
+                
+                diff = stats['diff_stats']
+                
+                # Clickable button for rows with differences
+                if diff['rows_with_differences'] > 0:
+                    diff_btn = QPushButton(f"▶ Rows with differences: {diff['rows_with_differences']}")
+                    diff_btn.setFlat(True)
+                    diff_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    diff_btn.setStyleSheet("""
+                        QPushButton { 
+                            text-align: left; 
+                            padding: 8px; 
+                            background-color: #ffebee; 
+                            border: 1px solid #ef9a9a;
+                            border-radius: 4px;
+                            font-weight: bold;
+                            color: #c62828;
+                        }
+                        QPushButton:hover { background-color: #ffcdd2; }
+                    """)
+                    diff_btn.clicked.connect(self.show_diff_details)
+                    diff_layout.addWidget(diff_btn)
+                
+                diff_layout.addWidget(QLabel(f"<b>Columns with differences:</b> {diff['columns_with_differences']}"))
+                diff_layout.addWidget(QLabel(f"<b>Total cell differences:</b> {diff['total_cell_differences']}"))
+                
+                # Column-level diff details
+                col_diffs = self.results.get('diff_analysis', {}).get('column_diffs', {})
+                if col_diffs:
+                    diff_layout.addWidget(QLabel("<br><b>Differences by Column:</b>"))
+                    for col, info in sorted(col_diffs.items(), key=lambda x: -x[1]['diff_count']):
+                        if info['diff_count'] > 0:
+                            label = QLabel(f"  • <b>{col}:</b> {info['diff_count']} differences ({info['diff_percentage']:.1f}%)")
+                            label.setStyleSheet("color: #cc3300;")
+                            diff_layout.addWidget(label)
+                
+                scroll_layout.addWidget(diff_group)
+            
+            # Add instruction
+            instruction = QLabel("<i>Click on any category above to see the matching rows →</i>")
+            instruction.setStyleSheet("color: #666; padding: 10px;")
+            scroll_layout.addWidget(instruction)
+            
+            scroll_layout.addStretch()
+            scroll_widget.setLayout(scroll_layout)
+            scroll.setWidget(scroll_widget)
+            scroll.setWidgetResizable(True)
+            left_layout.addWidget(scroll)
+            
+            # Right panel: Detail view
+            self.detail_panel = QWidget()
+            self.detail_layout = QVBoxLayout(self.detail_panel)
+            
+            self.detail_header = QLabel("<h3>Select a category to view details</h3>")
+            self.detail_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.detail_header.setStyleSheet("color: #666; padding: 20px;")
+            self.detail_layout.addWidget(self.detail_header)
+            
+            self.detail_table = QTableView()
+            self.detail_table.hide()
+            self.detail_layout.addWidget(self.detail_table)
+            
+            splitter.addWidget(left_panel)
+            splitter.addWidget(self.detail_panel)
+            splitter.setSizes([400, 600])
+            
+            layout.addWidget(splitter)
+        
+        def show_indicator_details(self, indicator):
+            """Show rows matching the selected indicator."""
+            merged_df = self.results.get('merged_df', pd.DataFrame())
+            
+            if merged_df.empty:
+                return
+            
+            # Filter rows by indicator
+            filtered_df = merged_df[merged_df['_indicator'] == indicator].copy()
+            
+            # Update header
+            count = len(filtered_df)
+            self.detail_header.setText(f"<h3>{indicator}: {count} rows</h3>")
+            self.detail_header.setStyleSheet("color: #333; padding: 10px; background-color: #f5f5f5; border-radius: 4px;")
+            
+            # Populate table
+            self._populate_table(filtered_df, indicator)
+        
+        def show_diff_details(self):
+            """Show rows that have cell-level differences."""
+            merged_df = self.results.get('merged_df', pd.DataFrame())
+            diff_analysis = self.results.get('diff_analysis', {})
+            row_diffs = diff_analysis.get('row_diffs', [])
+            
+            if merged_df.empty or not row_diffs:
+                return
+            
+            # Get indices of rows with differences
+            diff_indices = [rd['index'] for rd in row_diffs]
+            
+            # Filter to only rows with differences
+            filtered_df = merged_df.loc[merged_df.index.isin(diff_indices)].copy()
+            
+            # Update header
+            count = len(filtered_df)
+            self.detail_header.setText(f"<h3>Rows with cell differences: {count} rows</h3>")
+            self.detail_header.setStyleSheet("color: #c62828; padding: 10px; background-color: #ffebee; border-radius: 4px;")
+            
+            # Populate table with diff highlighting
+            self._populate_table(filtered_df, 'diff', row_diffs)
+        
+        def _populate_table(self, df, indicator, row_diffs=None):
+            """Populate the detail table with data."""
+            self.detail_table.show()
+            
+            model = QStandardItemModel()
+            
+            # Set headers
+            headers = list(df.columns)
+            model.setHorizontalHeaderLabels(headers)
+            
+            # Limit rows for performance
+            display_rows = min(500, len(df))
+            
+            # Build a set of diff cells for highlighting
+            diff_cells = set()
+            if row_diffs:
+                names = self.results.get('dataset_names', [])
+                for rd in row_diffs:
+                    idx = rd['index']
+                    for diff in rd['differences']:
+                        col = diff['column']
+                        # Both column variants should be highlighted
+                        if len(names) >= 2:
+                            diff_cells.add((idx, f"{col}_{names[0]}"))
+                            diff_cells.add((idx, f"{col}_{names[1]}"))
+            
+            # Color mapping
+            colors = {
+                'all': QColor(200, 255, 200),  # Light green
+                'diff': QColor(255, 235, 238),  # Light red
+            }
+            only_color = QColor(255, 243, 224)  # Light orange
+            diff_cell_color = QColor(255, 200, 200)  # Highlight red for diff cells
+            
+            for row_idx, (orig_idx, row) in enumerate(df.head(display_rows).iterrows()):
+                for col_idx, (col_name, value) in enumerate(row.items()):
+                    if pd.isna(value):
+                        item = QStandardItem("NULL")
+                        item.setForeground(QBrush(QColor(150, 150, 150)))
+                    else:
+                        item = QStandardItem(str(value))
+                    
+                    # Highlight diff cells
+                    if (orig_idx, col_name) in diff_cells:
+                        item.setBackground(QBrush(diff_cell_color))
+                        item.setFont(QFont("", -1, QFont.Weight.Bold))
+                    elif indicator == 'all':
+                        item.setBackground(QBrush(colors['all']))
+                    elif indicator == 'diff':
+                        pass  # Don't color non-diff cells
+                    elif '_only' in str(indicator):
+                        item.setBackground(QBrush(only_color))
+                    
+                    model.setItem(row_idx, col_idx, item)
+            
+            self.detail_table.setModel(model)
+            self.detail_table.setAlternatingRowColors(True)
+            self.detail_table.setSortingEnabled(True)
+            self.detail_table.resizeColumnsToContents()
+
+
 def _create_summary_tab(results):
-    """Create the summary overview tab."""
-    widget = QWidget()
-    layout = QVBoxLayout(widget)
-    
-    scroll = QScrollArea()
-    scroll_widget = QWidget()
-    scroll_layout = QVBoxLayout(scroll_widget)
-    
-    stats = results.get('summary_stats', {})
-    names = results.get('dataset_names', [])
-    
-    # Dataset info
-    info_group = QGroupBox("Dataset Information")
-    info_layout = QVBoxLayout(info_group)
-    
-    shapes = results.get('original_shapes', [])
-    for i, (name, shape) in enumerate(zip(names, shapes)):
-        label = QLabel(f"<b>{name}:</b> {shape[0]} rows × {shape[1]} columns")
-        info_layout.addWidget(label)
-    
-    common_cols = results.get('common_columns', [])
-    key_cols = results.get('key_columns', [])
-    info_layout.addWidget(QLabel(f"<b>Common columns:</b> {len(common_cols)}"))
-    info_layout.addWidget(QLabel(f"<b>Key columns used:</b> {', '.join(key_cols[:5])}{'...' if len(key_cols) > 5 else ''}"))
-    
-    scroll_layout.addWidget(info_group)
-    
-    # Match summary
-    match_group = QGroupBox("Match Summary")
-    match_layout = QVBoxLayout(match_group)
-    
-    total_rows = stats.get('total_rows', 0)
-    match_layout.addWidget(QLabel(f"<b>Total rows after full join:</b> {total_rows}"))
-    
-    indicator_counts = stats.get('indicator_counts', {})
-    
-    # Calculate matched rows (rows in 'all')
-    matched = indicator_counts.get('all', 0)
-    matched_pct = (matched / total_rows * 100) if total_rows > 0 else 0
-    
-    match_layout.addWidget(QLabel(f"<b>Rows in ALL datasets:</b> {matched} ({matched_pct:.1f}%)"))
-    
-    # Rows only in specific datasets
-    for indicator, count in indicator_counts.items():
-        if indicator != 'all':
-            pct = (count / total_rows * 100) if total_rows > 0 else 0
-            if '_only' in indicator:
-                match_layout.addWidget(QLabel(f"<span style='color: #cc6600;'><b>{indicator}:</b> {count} ({pct:.1f}%)</span>"))
-            else:
-                match_layout.addWidget(QLabel(f"<b>{indicator}:</b> {count} ({pct:.1f}%)"))
-    
-    scroll_layout.addWidget(match_group)
-    
-    # Difference summary (if 2 datasets)
-    if 'diff_stats' in stats:
-        diff_group = QGroupBox("Cell-Level Differences (Matched Rows)")
-        diff_layout = QVBoxLayout(diff_group)
-        
-        diff = stats['diff_stats']
-        diff_layout.addWidget(QLabel(f"<b>Rows with at least one difference:</b> {diff['rows_with_differences']}"))
-        diff_layout.addWidget(QLabel(f"<b>Columns with differences:</b> {diff['columns_with_differences']}"))
-        diff_layout.addWidget(QLabel(f"<b>Total cell differences:</b> {diff['total_cell_differences']}"))
-        
-        # Column-level diff details
-        col_diffs = results.get('diff_analysis', {}).get('column_diffs', {})
-        if col_diffs:
-            diff_layout.addWidget(QLabel("<br><b>Differences by Column:</b>"))
-            for col, info in sorted(col_diffs.items(), key=lambda x: -x[1]['diff_count']):
-                if info['diff_count'] > 0:
-                    label = QLabel(f"  • <b>{col}:</b> {info['diff_count']} differences ({info['diff_percentage']:.1f}%)")
-                    label.setStyleSheet("color: #cc3300;")
-                    diff_layout.addWidget(label)
-        
-        scroll_layout.addWidget(diff_group)
-    
-    scroll_widget.setLayout(scroll_layout)
-    scroll.setWidget(scroll_widget)
-    scroll.setWidgetResizable(True)
-    layout.addWidget(scroll)
-    
-    return widget
+    """Create the summary overview tab with drill-down capability."""
+    if PYQT6_AVAILABLE:
+        return DrillDownSummaryWidget(results)
+    return None
 
 
 def _create_merged_data_tab(results):
