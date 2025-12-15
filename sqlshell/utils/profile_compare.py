@@ -368,14 +368,45 @@ def visualize_comparison(comparison_results, parent=None, show_window=True):
     if app is None:
         app = QApplication([])
     
-    # Create main widget
+    # Create main widget as a proper window
     main_widget = QWidget(parent)
+    # Set window flags to make it a proper closeable window
+    main_widget.setWindowFlags(
+        Qt.WindowType.Window |
+        Qt.WindowType.WindowCloseButtonHint |
+        Qt.WindowType.WindowMinMaxButtonsHint |
+        Qt.WindowType.WindowTitleHint
+    )
+    main_widget.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+    
     main_layout = QVBoxLayout(main_widget)
     
-    # Add header
+    # Add header with close button
+    header_layout = QHBoxLayout()
     header = QLabel("<h2>Dataset Comparison Results</h2>")
     header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    main_layout.addWidget(header)
+    header_layout.addWidget(header)
+    
+    # Add explicit close button in case window controls don't work
+    close_btn = QPushButton("✕ Close")
+    close_btn.setFixedWidth(80)
+    close_btn.setStyleSheet("""
+        QPushButton {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #d32f2f;
+        }
+    """)
+    close_btn.clicked.connect(main_widget.close)
+    header_layout.addWidget(close_btn)
+    
+    main_layout.addLayout(header_layout)
     
     # Create tab widget
     tab_widget = QTabWidget()
@@ -409,6 +440,8 @@ def visualize_comparison(comparison_results, parent=None, show_window=True):
     
     if show_window:
         main_widget.show()
+        main_widget.raise_()  # Bring to front
+        main_widget.activateWindow()  # Give focus
     
     return main_widget
 
