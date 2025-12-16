@@ -349,9 +349,55 @@
             padding: 0;
         }
 
-        .demo-content img {
+        .demo-content img,
+        .demo-content video {
             width: 100%;
+            display: block;
             height: auto;
+        }
+
+        .demo-content video {
+            background: black;
+        }
+
+        .demo-switcher {
+            display: flex;
+            gap: 0.75rem;
+            padding: 1rem 1.25rem 0.5rem;
+            background: rgba(0, 0, 0, 0.25);
+            border-bottom: 1px solid var(--border-subtle);
+            flex-wrap: wrap;
+        }
+
+        .demo-tab {
+            padding: 0.6rem 1rem;
+            border-radius: 999px;
+            border: 1px solid var(--border-subtle);
+            background: rgba(0, 180, 255, 0.08);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .demo-tab:hover {
+            color: var(--accent-primary);
+            border-color: var(--border-glow);
+        }
+
+        .demo-tab.active {
+            color: white;
+            border-color: var(--border-glow);
+            box-shadow: 0 0 20px rgba(0, 180, 255, 0.2);
+            background: linear-gradient(135deg, rgba(0, 180, 255, 0.35), rgba(124, 58, 237, 0.35));
+        }
+
+        .demo-video {
+            display: none;
+        }
+
+        .demo-video.active {
             display: block;
         }
 
@@ -884,7 +930,18 @@
                 <span class="demo-title">SQLShell — query.sql</span>
             </div>
             <div class="demo-content">
-                <img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png" alt="SQLShell Interface Demo">
+                <div class="demo-switcher">
+                    <button class="demo-tab active" data-target="video-find">Find Related Columns</button>
+                    <button class="demo-tab" data-target="video-combine">Combine & Compare</button>
+                </div>
+                <video id="video-find" class="demo-video active" controls autoplay muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                    <source src="assets/find_related_columns.mp4" type="video/mp4">
+                    Your browser does not support the video tag. <a href="assets/find_related_columns.mp4">Download the demo video</a>.
+                </video>
+                <video id="video-combine" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                    <source src="assets/combine_and_compare.mp4" type="video/mp4">
+                    Your browser does not support the video tag. <a href="assets/combine_and_compare.mp4">Download the demo video</a>.
+                </video>
             </div>
         </div>
     </section>
@@ -1187,6 +1244,27 @@
             }
         });
 
+        // Demo tab switcher
+        const demoTabs = document.querySelectorAll('.demo-tab');
+        const demoVideos = document.querySelectorAll('.demo-video');
+
+        demoTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetId = tab.dataset.target;
+                demoTabs.forEach(t => t.classList.toggle('active', t === tab));
+                demoVideos.forEach(video => {
+                    const isActive = video.id === targetId;
+                    video.classList.toggle('active', isActive);
+                    if (isActive) {
+                        video.play().catch(() => {});
+                    } else {
+                        video.pause();
+                        video.currentTime = 0;
+                    }
+                });
+            });
+        });
+
         // Animate elements on scroll
         const observerOptions = {
             threshold: 0.1,
@@ -1211,4 +1289,3 @@
     </script>
 </body>
 </html>
-
