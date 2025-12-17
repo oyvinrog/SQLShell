@@ -444,6 +444,9 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           if [ -f "/tmp/SQLShell/SQLShell" ]; then
+            echo "Runner arch: $(uname -m)"
+            echo "Binary info:"
+            file /tmp/SQLShell/SQLShell || true
             chmod +x /tmp/SQLShell/SQLShell
             # Use gtimeout from coreutils (macOS doesn't have timeout by default)
             gtimeout 30s /tmp/SQLShell/SQLShell --help || {
