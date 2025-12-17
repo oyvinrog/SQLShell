@@ -70,6 +70,11 @@ def create_file_menu(main_window):
     load_data_action.setShortcut('Ctrl+L')
     load_data_action.triggered.connect(main_window.show_load_dialog)
     
+    # Paste data from clipboard action
+    paste_data_action = file_menu.addAction('Paste Data from Clipboard')
+    paste_data_action.setShortcut('Ctrl+Shift+V')
+    paste_data_action.triggered.connect(main_window.paste_data_from_clipboard)
+    
     file_menu.addSeparator()
     
     exit_action = file_menu.addAction('Exit')
@@ -127,6 +132,15 @@ def create_view_menu(main_window):
     main_window.compact_mode_action.setCheckable(True)
     main_window.compact_mode_action.setChecked(False)
     main_window.compact_mode_action.triggered.connect(main_window.toggle_compact_mode)
+    
+    view_menu.addSeparator()
+    
+    # DuckDB Documentation Panel
+    main_window.docs_panel_action = view_menu.addAction('📚 DuckDB Documentation')
+    main_window.docs_panel_action.setShortcut('F1')
+    main_window.docs_panel_action.setCheckable(True)
+    main_window.docs_panel_action.setChecked(True)  # Open by default
+    main_window.docs_panel_action.triggered.connect(main_window.toggle_docs_panel)
     
     view_menu.addSeparator()
     

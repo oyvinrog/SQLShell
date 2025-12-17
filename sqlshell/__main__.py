@@ -1397,6 +1397,92 @@ LIMIT 10
             show_error_notification(f"Failed to save as table: {str(e)}")
             self.statusBar().showMessage('Error saving results as table')
 
+    def paste_data_from_clipboard(self):
+        """Paste tabular data from clipboard and create a new table.
+        
+        This method:
+        - Verifies that clipboard contains tabular data
+        - Auto-detects format (tab, comma, semicolon, pipe separated)
+        - Auto-detects if first row is a header
+        - Prompts user for table name
+        - Creates the table and adds it to the database
+        """
+        from PyQt6.QtWidgets import QApplication
+        from sqlshell.utils.clipboard_data_parser import ClipboardDataParser
+        
+        # Get clipboard text
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+        
+        if not text or not text.strip():
+            show_warning_notification("Clipboard is empty")
+            return
+        
+        # Quick verification that it looks like data
+        if not ClipboardDataParser.is_likely_data(text):
+            show_warning_notification(
+                "Clipboard content doesn't appear to be tabular data.\n"
+                "Please copy data from a spreadsheet, CSV file, or similar tabular source."
+            )
+            return
+        
+        # Parse the data
+        df, message = ClipboardDataParser.parse_clipboard_data(text)
+        
+        if df is None:
+            show_error_notification(f"Could not parse clipboard data: {message}")
+            return
+        
+        # Show preview and ask for confirmation
+        preview = ClipboardDataParser.get_data_preview(df, max_rows=5)
+        
+        # Prompt for table name
+        table_name, ok = QInputDialog.getText(
+            self,
+            "Paste Data as Table",
+            f"Data detected: {message}\n\n"
+            f"Preview (first 5 rows):\n{preview}\n\n"
+            f"Enter a name for the new table:",
+            text="clipboard_data"
+        )
+        
+        if not ok or not table_name:
+            return
+        
+        # Sanitize and ensure unique table name
+        table_name = self.db_manager.sanitize_table_name(table_name)
+        original_name = table_name
+        counter = 1
+        while table_name in self.db_manager.loaded_tables:
+            table_name = f"{original_name}_{counter}"
+            counter += 1
+        
+        try:
+            # Register the DataFrame in the database
+            self.db_manager.register_dataframe(df, table_name, 'clipboard')
+            
+            # Update tracking
+            self.db_manager.loaded_tables[table_name] = 'clipboard'
+            self.db_manager.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
+            
+            # Add to the tables list in UI
+            self.tables_list.add_table_item(table_name, f"📋 {table_name}")
+            
+            # Update completer with new table and column names
+            self.update_completer()
+            
+            # Show success message
+            show_success_notification(
+                f'Created table "{table_name}" with {len(df):,} rows × {len(df.columns)} columns'
+            )
+            self.statusBar().showMessage(
+                f'Pasted data as table "{table_name}" ({len(df):,} rows, {len(df.columns)} columns)'
+            )
+            
+        except Exception as e:
+            show_error_notification(f"Failed to create table from clipboard: {str(e)}")
+            self.statusBar().showMessage('Error pasting clipboard data')
+
     def get_table_data_as_dataframe(self):
         """Helper function to convert table widget data to a DataFrame with proper data types"""
         # Get the current tab
@@ -3674,6 +3760,16 @@ LIMIT 10
         
         status = "enabled" if checked else "disabled"
         self.statusBar().showMessage(f"Compact mode {status} (Ctrl+Shift+C to toggle)", 2000)
+    
+    def toggle_docs_panel(self, checked=None):
+        """Toggle the DuckDB documentation panel for the current tab (F1)"""
+        current_tab = self.tab_widget.currentWidget()
+        if current_tab and hasattr(current_tab, 'toggle_docs_panel'):
+            current_tab.toggle_docs_panel()
+            
+            # Update menu action state
+            if hasattr(self, 'docs_panel_action') and hasattr(current_tab, 'is_docs_panel_visible'):
+                self.docs_panel_action.setChecked(current_tab.is_docs_panel_visible())
     
     def toggle_christmas_theme(self, checked=None):
         """Toggle Christmas theme decorations."""
