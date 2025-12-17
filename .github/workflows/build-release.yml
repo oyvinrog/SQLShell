@@ -121,6 +121,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          architecture: 'arm64'
           cache: 'pip'
 
       - name: Install dependencies
@@ -494,13 +495,13 @@ jobs:
           cp -r dist/SQLShell dmg-contents/
           
           # Create DMG
-          hdiutil create -volname "SQLShell" -srcfolder dmg-contents -ov -format UDZO dist/SQLShell-macos-x64.dmg
+          hdiutil create -volname "SQLShell" -srcfolder dmg-contents -ov -format UDZO dist/SQLShell-macos-arm64.dmg
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: dist/SQLShell-macos-x64.dmg
+          path: dist/SQLShell-macos-arm64.dmg
 
   upload-release:
     needs: [build-linux, build-windows, build-macos]
@@ -533,7 +534,7 @@ jobs:
           mv artifacts/linux-build/sqlshell-linux-amd64.deb artifacts/sqlshell_${VERSION}_amd64.deb || true
           
           # Rename macOS artifact
-          mv artifacts/macos-build/SQLShell-macos-x64.dmg artifacts/SQLShell-${VERSION}-macos-x64.dmg || true
+          mv artifacts/macos-build/SQLShell-macos-arm64.dmg artifacts/SQLShell-${VERSION}-macos-arm64.dmg || true
           
           # Windows artifact (already versioned)
           mv artifacts/windows-build/*.exe artifacts/ || true
@@ -550,4 +551,3 @@ jobs:
             artifacts/SQLShell-*-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

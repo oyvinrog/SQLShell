@@ -9,7 +9,7 @@
 ;   iscc sqlshell_inno.iss
 
 #define MyAppName "SQLShell"
-#define MyAppVersion "0.5.1"
+#define MyAppVersion "5.0.2"
 #define MyAppPublisher "SQLShell Team"
 #define MyAppURL "https://github.com/oyvinrog/SQLShell"
 #define MyAppExeName "SQLShell.exe"
