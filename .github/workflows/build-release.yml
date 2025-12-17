@@ -113,7 +113,7 @@ jobs:
   # ============================================
   build-linux:
     # Force x64 runners to avoid accidental arm64 toolchains
-    runs-on: [ubuntu-22.04, X64]
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
