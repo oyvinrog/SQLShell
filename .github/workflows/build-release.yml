@@ -112,10 +112,16 @@ jobs:
   # Build Platform Installers
   # ============================================
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: [ubuntu-22.04, X64]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Debug runner arch
+        run: |
+          echo "Runner OS: $RUNNER_OS"
+          echo "Runner arch: $RUNNER_ARCH"
+          uname -a
 
       - name: Set up Python
         uses: actions/setup-python@v5
