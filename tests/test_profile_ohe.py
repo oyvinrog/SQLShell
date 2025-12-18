@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from sqlshell.utils.profile_ohe import find_related_ohe_features
+from sqlshell.utils.profile_ohe import find_related_ohe_features, build_drilldown_query
 
 
 def test_related_ohe_drilldown_alignment_with_missing_target():
@@ -45,3 +45,17 @@ def test_related_ohe_drilldown_alignment_with_missing_target():
 
     assert present_mean == expected_present
     assert absent_mean == expected_absent
+
+
+def test_build_drilldown_query_word_and_category():
+    query_word = build_drilldown_query("repos", "description", "has_python")
+    assert "FROM repos" in query_word
+    assert "description" in query_word
+    assert "LIKE '%python%'" in query_word
+
+    query_cat = build_drilldown_query("repos", "language", "is_Rust")
+    assert "language" in query_cat
+    assert "= 'Rust'" in query_cat
+
+    # Handles tables we cannot resolve
+    assert build_drilldown_query(None, "col", "has_word") is None

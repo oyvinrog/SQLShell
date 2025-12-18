@@ -963,9 +963,35 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
     }
 
 
+def build_drilldown_query(table_name, source_column, feature_name):
+    """Build a SELECT query for drilldown based on an encoded feature."""
+    if not table_name:
+        return None
+    
+    # Quote the column if it has special characters
+    if any(ch in source_column for ch in (' ', '-', '.')):
+        col_expr = f'"{source_column}"'
+    else:
+        col_expr = source_column
+    
+    if feature_name.startswith("has_"):
+        token = feature_name[len("has_"):]
+        token = token.replace("'", "''")
+        condition = f"{col_expr} LIKE '%{token}%'"
+    elif feature_name.startswith("is_"):
+        token = feature_name[len("is_"):]
+        token = token.replace("'", "''")
+        condition = f"{col_expr} = '{token}'"
+    else:
+        token = feature_name.replace("'", "''")
+        condition = f"{col_expr} = '{token}'"
+    
+    return f"SELECT *\nFROM {table_name}\nWHERE {condition}"
+
+
 class RelatedOneHotEncodingsWindow(QMainWindow):
     """Simple window to display related one-hot encodings for a target column."""
-    def __init__(self, target_column, analysis_result):
+    def __init__(self, target_column, analysis_result, table_name=None, drill_query_callback=None):
         super().__init__()
         self.setWindowTitle(f"Related One-Hot Encodings - {target_column}")
         self.setGeometry(120, 120, 900, 700)
@@ -974,6 +1000,8 @@ class RelatedOneHotEncodingsWindow(QMainWindow):
         self.target_values = analysis_result.get("target_values")
         self.sample_df = analysis_result.get("sample_df")
         self.results = analysis_result.get("results", [])
+        self.table_name = table_name
+        self.drill_query_callback = drill_query_callback
         
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -1096,6 +1124,7 @@ class RelatedOneHotEncodingsWindow(QMainWindow):
         fig = plt.Figure(figsize=(7.5, 5))
         canvas = FigureCanvas(fig)
         ax = fig.add_subplot(111)
+        layout.addWidget(canvas)
         
         if pd.api.types.is_numeric_dtype(target_series):
             target_numeric = pd.to_numeric(target_series, errors='coerce')
@@ -1127,12 +1156,34 @@ class RelatedOneHotEncodingsWindow(QMainWindow):
             ax.legend()
         
         fig.tight_layout()
-        layout.addWidget(canvas)
+        
+        # Drilldown button to open matching rows in the editor
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        open_btn = QPushButton("Open matching rows in editor")
+        open_btn.clicked.connect(lambda: self.run_drilldown_query(feature_name, source_col))
+        button_layout.addWidget(open_btn)
+        layout.addLayout(button_layout)
+
         dialog.setLayout(layout)
         dialog.exec()
 
+    def run_drilldown_query(self, feature_name, source_col):
+        """Send a drilldown query to the main editor if possible."""
+        if not self.drill_query_callback:
+            QMessageBox.information(self, "Action Unavailable", "Cannot run query from here.")
+            return
+        
+        query = build_drilldown_query(self.table_name, source_col, feature_name)
+        if not query:
+            QMessageBox.information(self, "Table Not Found", "Could not determine the source table to query.")
+            return
+        
+        self.drill_query_callback(query)
 
-def visualize_related_ohe(df, target_column, sample_size=2000, max_features=20):
+
+def visualize_related_ohe(df, target_column, sample_size=2000, max_features=20, 
+                          table_name=None, drill_query_callback=None):
     """
     Visualize related one-hot encodings that correlate with/predict a target column.
     
@@ -1149,7 +1200,9 @@ def visualize_related_ohe(df, target_column, sample_size=2000, max_features=20):
         )
         return None
     
-    vis = RelatedOneHotEncodingsWindow(target_column, analysis_result)
+    vis = RelatedOneHotEncodingsWindow(
+        target_column, analysis_result, table_name=table_name, drill_query_callback=drill_query_callback
+    )
     vis.show()
     return vis
 
