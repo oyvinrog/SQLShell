@@ -821,9 +821,10 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
         df = df.sample(n=sample_size, random_state=42)
     df = df.reset_index(drop=True)
     
-    target_series = df[target_column].copy()
-    target_raw = target_series.reset_index(drop=True)
+    # Keep a copy of the sampled/cleaned data for drilldowns
     sample_df = df.copy()
+    target_raw = sample_df[target_column].reset_index(drop=True)
+    target_series = target_raw.copy()
     unique_target_values = target_series.dropna().nunique()
     if unique_target_values < 2:
         raise ValueError(f"Column '{target_column}' needs at least 2 distinct values for analysis")
@@ -957,7 +958,7 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
         "target_discretized": target_discretized,
         "columns_considered": len(candidate_columns),
         "skipped_columns": skipped_columns,
-        "target_values": target_raw.reset_index(drop=True),
+        "target_values": target_raw,
         "sample_df": sample_df
     }
 
