@@ -239,12 +239,27 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QTableWidget, QTableWidgetItem, QLabel, QPushButton,
                            QComboBox, QSplitter, QTabWidget, QScrollArea,
                            QFrame, QSizePolicy, QButtonGroup, QRadioButton,
-                           QMessageBox, QHeaderView, QApplication, QTextEdit)
+                           QMessageBox, QHeaderView, QApplication, QTextEdit,
+                           QDialog)
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
+class NumericTableItem(QTableWidgetItem):
+    """Table item that sorts numerically using the stored value."""
+    def __init__(self, value, fmt="{:.3f}"):
+        display_value = fmt.format(value) if isinstance(value, (int, float, np.number)) else str(value)
+        super().__init__(display_value)
+        self._value = value
+
+    def __lt__(self, other):
+        try:
+            return float(self._value) < float(other._value)
+        except Exception:
+            return super().__lt__(other)
+
 
 class OneHotEncodingVisualization(QMainWindow):
     # Add signal to notify when encoding should be applied
@@ -807,6 +822,8 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
     df = df.reset_index(drop=True)
     
     target_series = df[target_column].copy()
+    target_raw = target_series.reset_index(drop=True)
+    sample_df = df.copy()
     unique_target_values = target_series.dropna().nunique()
     if unique_target_values < 2:
         raise ValueError(f"Column '{target_column}' needs at least 2 distinct values for analysis")
@@ -910,7 +927,7 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
         target_aligned = target_numeric.reset_index(drop=True)
         
         for feature in encoded_cols:
-            feature_series = pd.to_numeric(encoded_df[feature], errors='coerce')
+            feature_series = pd.to_numeric(encoded_df[feature], errors='coerce').reset_index(drop=True)
             if feature_series.nunique() < 2:
                 continue
             corr_val = feature_series.corr(target_aligned)
@@ -924,7 +941,8 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
                 "correlation": corr_val,
                 "abs_correlation": abs(corr_val),
                 "coverage": coverage,
-                "note": "; ".join(notes) if notes else ""
+                "note": "; ".join(notes) if notes else "",
+                "feature_series": feature_series
             })
     
     # Rank by absolute correlation strength
@@ -938,7 +956,9 @@ def find_related_ohe_features(df, target_column, sample_size=2000, max_features=
         "total_rows": total_rows,
         "target_discretized": target_discretized,
         "columns_considered": len(candidate_columns),
-        "skipped_columns": skipped_columns
+        "skipped_columns": skipped_columns,
+        "target_values": target_raw.reset_index(drop=True),
+        "sample_df": sample_df
     }
 
 
@@ -948,6 +968,11 @@ class RelatedOneHotEncodingsWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Related One-Hot Encodings - {target_column}")
         self.setGeometry(120, 120, 900, 700)
+        self.analysis_result = analysis_result
+        self.target_column = target_column
+        self.target_values = analysis_result.get("target_values")
+        self.sample_df = analysis_result.get("sample_df")
+        self.results = analysis_result.get("results", [])
         
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -970,46 +995,50 @@ class RelatedOneHotEncodingsWindow(QMainWindow):
             layout.addWidget(discretize_label)
         
         # Results table
-        results = analysis_result["results"]
-        table = QTableWidget(len(results), 5)
-        table.setHorizontalHeaderLabels([
+        results = self.results
+        self.table = QTableWidget(len(results), 5)
+        self.table.setHorizontalHeaderLabels([
             "Rank", "Source Column", "Encoded Feature", "Correlation", "Coverage"
         ])
         
         for i, res in enumerate(results):
-            rank_item = QTableWidgetItem(str(i + 1))
+            rank_item = NumericTableItem(i + 1, fmt="{:.0f}")
             rank_item.setFlags(rank_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 0, rank_item)
+            self.table.setItem(i, 0, rank_item)
             
             source_item = QTableWidgetItem(res["source_column"])
             source_item.setFlags(source_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 1, source_item)
+            self.table.setItem(i, 1, source_item)
             
             feature_item = QTableWidgetItem(res["feature"])
             feature_item.setToolTip(res.get("note", ""))
             feature_item.setFlags(feature_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 2, feature_item)
+            self.table.setItem(i, 2, feature_item)
             
-            corr_item = QTableWidgetItem(f"{res['correlation']:.3f}")
+            corr_item = NumericTableItem(res["correlation"])
             corr_item.setFlags(corr_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 3, corr_item)
+            self.table.setItem(i, 3, corr_item)
             
-            coverage_item = QTableWidgetItem(f"{res['coverage']:.1f}%")
+            coverage_item = NumericTableItem(res["coverage"], fmt="{:.1f}%")
             coverage_item.setFlags(coverage_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 4, coverage_item)
+            self.table.setItem(i, 4, coverage_item)
         
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        table.verticalHeader().setVisible(False)
-        layout.addWidget(table, 1)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
+        self.table.cellDoubleClicked.connect(self.show_feature_drilldown)
+        layout.addWidget(self.table, 1)
         
         # Additional context and skipped columns info
         notes = [
             "Higher absolute correlation means the encoded feature aligns strongly with the target classes.",
-            "Coverage shows how often the encoded feature is present in the sampled data."
+            "Coverage shows how often the encoded feature is present in the sampled data.",
+            "Double-click any row to compare target values with and without that encoded feature."
         ]
         if analysis_result["skipped_columns"]:
             skipped_preview = ", ".join(f"{col} ({reason})" for col, reason in analysis_result["skipped_columns"][:3])
@@ -1022,6 +1051,84 @@ class RelatedOneHotEncodingsWindow(QMainWindow):
         notes_label.setWordWrap(True)
         notes_label.setStyleSheet("color: #7F8C8D;")
         layout.addWidget(notes_label)
+
+    def show_feature_drilldown(self, row, column):
+        """Show a small bar chart comparing target values with/without the encoded feature."""
+        results = self.results
+        if not results:
+            return
+        
+        # Use table values to find the correct result even after sorting
+        source_text = self.table.item(row, 1).text() if self.table.item(row, 1) else None
+        feature_text = self.table.item(row, 2).text() if self.table.item(row, 2) else None
+        if not source_text or not feature_text:
+            return
+        res = next((r for r in results
+                    if r.get("source_column") == source_text and r.get("feature") == feature_text),
+                   None)
+        if res is None:
+            QMessageBox.information(self, "Drilldown Unavailable", "Could not match the selected feature.")
+            return
+        
+        feature_series = res.get("feature_series")
+        target_series = self.target_values
+        source_col = res.get("source_column", "")
+        feature_name = res.get("feature", "")
+        
+        if feature_series is None or target_series is None:
+            QMessageBox.information(self, "Drilldown Unavailable", "Could not load data for this feature.")
+            return
+        
+        # Align lengths defensively
+        min_len = min(len(feature_series), len(target_series))
+        feature_series = pd.to_numeric(feature_series[:min_len], errors='coerce').fillna(0)
+        target_series = target_series[:min_len]
+        
+        mask_present = feature_series != 0
+        mask_absent = ~mask_present
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{feature_name} vs {self.target_column}")
+        dialog.resize(780, 540)
+        layout = QVBoxLayout(dialog)
+        
+        fig = plt.Figure(figsize=(7.5, 5))
+        canvas = FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        
+        if pd.api.types.is_numeric_dtype(target_series):
+            target_numeric = pd.to_numeric(target_series, errors='coerce')
+            present_mean = target_numeric[mask_present].mean()
+            absent_mean = target_numeric[mask_absent].mean()
+            bars = ["Feature Present", "Feature Absent"]
+            values = [present_mean, absent_mean]
+            ax.bar(bars, values, color=["#2E86DE", "#95A5A6"])
+            ax.set_ylabel(f"Average {self.target_column}")
+            ax.set_title(f"{feature_name} (from {source_col})")
+            for idx, val in enumerate(values):
+                ax.text(idx, val, f"{val:.2f}", ha='center', va='bottom')
+        else:
+            # Compare distribution of top categories
+            target_str = target_series.astype(str)
+            present_counts = target_str[mask_present].value_counts(normalize=True).head(5)
+            absent_counts = target_str[mask_absent].value_counts(normalize=True).head(5)
+            categories = list(dict.fromkeys(list(present_counts.index) + list(absent_counts.index)))
+            x = np.arange(len(categories))
+            width = 0.4
+            ax.bar(x - width/2, [present_counts.get(cat, 0) for cat in categories],
+                   width, label="Feature Present", color="#2E86DE")
+            ax.bar(x + width/2, [absent_counts.get(cat, 0) for cat in categories],
+                   width, label="Feature Absent", color="#95A5A6")
+            ax.set_xticks(x)
+            ax.set_xticklabels(categories, rotation=30, ha='right')
+            ax.set_ylabel("Share of rows")
+            ax.set_title(f"{feature_name} (from {source_col})")
+            ax.legend()
+        
+        fig.tight_layout()
+        layout.addWidget(canvas)
+        dialog.setLayout(layout)
+        dialog.exec()
 
 
 def visualize_related_ohe(df, target_column, sample_size=2000, max_features=20):
