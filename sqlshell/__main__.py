@@ -4757,6 +4757,56 @@ LIMIT 10
             show_error_notification(f"Encoding Error: Error creating one-hot encoding - {str(e)}")
             self.statusBar().showMessage(f'Error encoding column: {str(e)}')
 
+    def find_related_one_hot_encodings(self, target_column):
+        """Find one-hot encoded signals in other columns that predict the selected column"""
+        try:
+            df, is_full_table = self.get_data_for_tool()
+            if df is None:
+                show_warning_notification("No data available. Please load a table or run a query first.")
+                return
+            
+            if target_column not in df.columns:
+                show_warning_notification(f"Column '{target_column}' not found in the current dataset.")
+                return
+
+            # Figure out the source table if possible so drilldowns can run SQL
+            table_name = None
+            current_tab = self.get_current_tab()
+            if current_tab:
+                if current_tab.is_preview_mode and current_tab.preview_table_name:
+                    table_name = current_tab.preview_table_name
+                elif current_tab.current_df is not None and hasattr(current_tab.current_df, '_query_source'):
+                    table_name = getattr(current_tab.current_df, '_query_source')
+            
+            self.statusBar().showMessage(f'Finding related one-hot encodings for "{target_column}"...')
+            
+            from sqlshell.utils.profile_ohe import visualize_related_ohe
+            self._related_ohe_window = visualize_related_ohe(
+                df, target_column, table_name=table_name, drill_query_callback=self.run_sql_in_editor
+            )
+            
+            if self._related_ohe_window is None:
+                self.statusBar().showMessage(f'No predictive one-hot encodings found for "{target_column}"')
+            else:
+                self.statusBar().showMessage(f'Related one-hot encodings ready for "{target_column}"')
+                
+        except Exception as e:
+            show_error_notification(f"One-Hot Analysis Error: {str(e)}")
+            self.statusBar().showMessage(f'Error finding related one-hot encodings: {str(e)}')
+
+    def run_sql_in_editor(self, query_text):
+        """Set the provided SQL in the current editor and execute it."""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab:
+                show_warning_notification("No active query tab to run the drilldown.")
+                return
+            
+            current_tab.set_query_text(query_text)
+            self.execute_query()
+        except Exception as e:
+            show_error_notification(f"Could not run drilldown query: {str(e)}")
+
     def apply_encoding_to_current_tab(self, encoded_df):
         """Apply the encoded dataframe to the current tab"""
         try:

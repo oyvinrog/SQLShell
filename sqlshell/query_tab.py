@@ -449,6 +449,7 @@ class QueryTab(QWidget):
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction("Find Related Columns")
+        related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
         encode_action = menu.addAction("One-Hot Encode")
         discover_rules_action = menu.addAction("Find IF-THEN Rules")
         
@@ -464,6 +465,11 @@ class QueryTab(QWidget):
             # Call the explain column method on the parent
             if hasattr(self.parent, 'explain_column'):
                 self.parent.explain_column(col_name)
+                
+        elif action == related_ohe_action:
+            # Find related one-hot encodings that predict this column
+            if hasattr(self.parent, 'find_related_one_hot_encodings'):
+                self.parent.find_related_one_hot_encodings(col_name)
                 
         elif action == encode_action:
             # Call the encode text method on the parent
@@ -721,6 +727,7 @@ class QueryTab(QWidget):
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
         explain_action = menu.addAction("Find Related Columns")
+        related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
         encode_action = menu.addAction("One-Hot Encode")
         discover_rules_action = menu.addAction("Find IF-THEN Rules")
         
@@ -736,6 +743,11 @@ class QueryTab(QWidget):
             # Call the explain column method on the parent
             if hasattr(self.parent, 'explain_column'):
                 self.parent.explain_column(col_name)
+                
+        elif action == related_ohe_action:
+            # Find related one-hot encodings that predict this column
+            if hasattr(self.parent, 'find_related_one_hot_encodings'):
+                self.parent.find_related_one_hot_encodings(col_name)
                 
         elif action == encode_action:
             # Call the encode text method on the parent

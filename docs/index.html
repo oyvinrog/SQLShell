@@ -401,6 +401,206 @@
             display: block;
         }
 
+        .hero-demo {
+            position: relative;
+            padding: 1.5rem;
+            display: grid;
+            gap: 1.5rem;
+            align-items: center;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        }
+
+        .hero-demo img {
+            width: 100%;
+            display: block;
+            border-radius: 12px;
+            border: 1px solid var(--border-subtle);
+            box-shadow: var(--shadow-card);
+        }
+
+        .hero-demo-text {
+            text-align: left;
+        }
+
+        .hero-demo-text h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+        }
+
+        .hero-demo-text p {
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .hero-demo-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        /* Demo Dock */
+        .demo-dock {
+            position: fixed;
+            right: 1.5rem;
+            bottom: 1.5rem;
+            width: min(420px, calc(100% - 2rem));
+            z-index: 1200;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            box-shadow: var(--shadow-glow), var(--shadow-card);
+            backdrop-filter: blur(10px);
+        }
+
+        .demo-dock-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: rgba(0, 0, 0, 0.35);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .demo-dock-title {
+            font-weight: 600;
+        }
+
+        .demo-dock-subtitle {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .demo-dock-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .demo-dock-btn {
+            border: 1px solid var(--border-subtle);
+            background: rgba(0, 180, 255, 0.1);
+            color: var(--accent-primary);
+            border-radius: 10px;
+            padding: 0.4rem 0.75rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .demo-dock-btn:hover {
+            border-color: var(--border-glow);
+            background: rgba(0, 180, 255, 0.15);
+        }
+
+        .demo-dock-body {
+            padding: 0 0 0.75rem;
+        }
+
+        .demo-dock .demo-switcher {
+            padding: 0.75rem 1rem 0.25rem;
+        }
+
+        .demo-dock .demo-tab {
+            padding: 0.5rem 0.85rem;
+            font-size: 0.85rem;
+        }
+
+        .demo-dock .demo-video {
+            border-radius: 0 0 14px 14px;
+            max-height: 240px;
+        }
+
+        .demo-dock.collapsed .demo-dock-body {
+            display: none;
+        }
+
+        /* Demo Modal */
+        .demo-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1400;
+            padding: 2rem;
+        }
+
+        .demo-modal.open {
+            display: flex;
+        }
+
+        .demo-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(6px);
+        }
+
+        .demo-modal-window {
+            position: relative;
+            width: min(1100px, 95vw);
+            background: var(--bg-card);
+            border: 1px solid var(--border-glow);
+            border-radius: 18px;
+            box-shadow: var(--shadow-glow), var(--shadow-card);
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .demo-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            background: rgba(0, 0, 0, 0.35);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .demo-modal-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .demo-modal-close {
+            border: 1px solid var(--border-subtle);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border-radius: 10px;
+            padding: 0.45rem 0.8rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .demo-modal-close:hover {
+            border-color: var(--border-glow);
+            background: rgba(0, 180, 255, 0.1);
+        }
+
+        .demo-modal .demo-switcher {
+            padding: 1rem 1.25rem 0.5rem;
+        }
+
+        .demo-modal .demo-tab {
+            padding: 0.65rem 1.05rem;
+            font-size: 0.95rem;
+        }
+
+        .demo-modal-window {
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .demo-modal .demo-video {
+            max-height: 80vh;
+            object-fit: contain;
+            background: black;
+        }
+
+        body.modal-open {
+            overflow: hidden;
+        }
+
         /* Features Section */
         .features {
             position: relative;
@@ -830,6 +1030,12 @@
             }
         }
 
+        @media (max-width: 900px) {
+            .demo-dock {
+                display: none;
+            }
+        }
+
         /* Scrollbar */
         ::-webkit-scrollbar {
             width: 8px;
@@ -920,31 +1126,99 @@
         </div>
     </section>
 
-    <!-- Demo Section -->
+    <!-- Demo Section (CTA only, videos moved to dock/modal) -->
     <section class="demo">
         <div class="demo-window">
             <div class="demo-titlebar">
                 <div class="demo-dot red"></div>
                 <div class="demo-dot yellow"></div>
                 <div class="demo-dot green"></div>
-                <span class="demo-title">SQLShell — query.sql</span>
+                <span class="demo-title">SQLShell — demos</span>
             </div>
-            <div class="demo-content">
-                <div class="demo-switcher">
-                    <button class="demo-tab active" data-target="video-find">Find Related Columns</button>
-                    <button class="demo-tab" data-target="video-combine">Combine & Compare</button>
+            <div class="hero-demo demo-content">
+                <img src="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png" alt="SQLShell demo preview">
+                <div class="hero-demo-text">
+                    <h3>See SQLShell in action</h3>
+                    <p>Open the floating demo dock or launch full-screen demos to explore quick search, related columns, and more.</p>
+                    <div class="hero-demo-actions">
+                        <button class="btn btn-primary demo-modal-open" type="button">Open full demos</button>
+                        <button class="btn btn-secondary demo-dock-show" type="button">Show dock</button>
+                    </div>
                 </div>
-                <video id="video-find" class="demo-video active" controls autoplay muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
-                    <source src="assets/find_related_columns.mp4" type="video/mp4">
-                    Your browser does not support the video tag. <a href="assets/find_related_columns.mp4">Download the demo video</a>.
-                </video>
-                <video id="video-combine" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
-                    <source src="assets/combine_and_compare.mp4" type="video/mp4">
-                    Your browser does not support the video tag. <a href="assets/combine_and_compare.mp4">Download the demo video</a>.
-                </video>
             </div>
         </div>
     </section>
+
+    <!-- Floating Demo Dock -->
+    <div class="demo demo-dock" aria-label="SQLShell quick demo dock">
+        <div class="demo-dock-header">
+            <div>
+                <div class="demo-dock-title">Quick Demos</div>
+                <div class="demo-dock-subtitle">Switch videos without scrolling</div>
+            </div>
+            <div class="demo-dock-actions">
+                <button class="demo-dock-btn demo-dock-large" type="button">Large view</button>
+                <button class="demo-dock-btn demo-dock-toggle" type="button">Hide demo</button>
+            </div>
+        </div>
+        <div class="demo-dock-body">
+            <div class="demo-switcher">
+                <button class="demo-tab active" data-target="video-quick-dock">Quick Search</button>
+                <button class="demo-tab" data-target="video-find-dock">Find Related Columns</button>
+                <button class="demo-tab" data-target="video-ohe-dock">Find Related (One-Hot)</button>
+                <button class="demo-tab" data-target="video-combine-dock">Combine & Compare</button>
+            </div>
+            <video id="video-quick-dock" class="demo-video active" controls autoplay muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/quick_search.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/quick_search.mp4">Download the demo video</a>.
+            </video>
+            <video id="video-find-dock" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/find_related_columns.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/find_related_columns.mp4">Download the demo video</a>.
+            </video>
+            <video id="video-ohe-dock" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/find_related_ohe.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/find_related_ohe.mp4">Download the demo video</a>.
+            </video>
+            <video id="video-combine-dock" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/combine_and_compare.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/combine_and_compare.mp4">Download the demo video</a>.
+            </video>
+        </div>
+    </div>
+
+    <!-- Large Demo Modal -->
+    <div class="demo-modal" aria-hidden="true">
+        <div class="demo-modal-backdrop"></div>
+        <div class="demo demo-modal-window" role="dialog" aria-modal="true" aria-label="SQLShell demo player">
+            <div class="demo-modal-header">
+                <div class="demo-modal-title">SQLShell demos</div>
+                <button class="demo-modal-close" type="button">Close</button>
+            </div>
+            <div class="demo-switcher">
+                <button class="demo-tab active" data-target="video-quick-modal">Quick Search</button>
+                <button class="demo-tab" data-target="video-find-modal">Find Related Columns</button>
+                <button class="demo-tab" data-target="video-ohe-modal">Find Related (One-Hot)</button>
+                <button class="demo-tab" data-target="video-combine-modal">Combine & Compare</button>
+            </div>
+            <video id="video-quick-modal" class="demo-video active" controls autoplay muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/quick_search.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/quick_search.mp4">Download the demo video</a>.
+            </video>
+            <video id="video-find-modal" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/find_related_columns.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/find_related_columns.mp4">Download the demo video</a>.
+            </video>
+            <video id="video-ohe-modal" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/find_related_ohe.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/find_related_ohe.mp4">Download the demo video</a>.
+            </video>
+            <video id="video-combine-modal" class="demo-video" controls muted loop playsinline preload="metadata" poster="https://raw.githubusercontent.com/oyvinrog/SQLShell/main/assets/images/sqlshell_demo.png">
+                <source src="assets/combine_and_compare.mp4" type="video/mp4">
+                Your browser does not support the video tag. <a href="assets/combine_and_compare.mp4">Download the demo video</a>.
+            </video>
+        </div>
+    </div>
 
     <!-- Features Section -->
     <section class="features" id="features">
@@ -1244,25 +1518,106 @@
             }
         });
 
-        // Demo tab switcher
-        const demoTabs = document.querySelectorAll('.demo-tab');
-        const demoVideos = document.querySelectorAll('.demo-video');
+        // Demo tab switcher (per container)
+        const setupDemo = (container) => {
+            const demoTabs = Array.from(container.querySelectorAll('.demo-tab'));
+            const demoVideos = Array.from(container.querySelectorAll('.demo-video'));
+            if (!demoTabs.length || !demoVideos.length) return;
 
-        demoTabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const targetId = tab.dataset.target;
-                demoTabs.forEach(t => t.classList.toggle('active', t === tab));
-                demoVideos.forEach(video => {
-                    const isActive = video.id === targetId;
-                    video.classList.toggle('active', isActive);
-                    if (isActive) {
-                        video.play().catch(() => {});
-                    } else {
-                        video.pause();
-                        video.currentTime = 0;
-                    }
+            demoTabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const targetId = tab.dataset.target;
+                    demoTabs.forEach(t => t.classList.toggle('active', t === tab));
+                    demoVideos.forEach(video => {
+                        const isActive = video.id === targetId;
+                        video.classList.toggle('active', isActive);
+                        if (isActive) {
+                            video.play().catch(() => {});
+                        } else {
+                            video.pause();
+                            video.currentTime = 0;
+                        }
+                    });
                 });
             });
+        };
+
+        document.querySelectorAll('.demo').forEach(setupDemo);
+
+        const pauseVideos = (videos) => {
+            videos.forEach(video => {
+                video.pause();
+                video.currentTime = 0;
+            });
+        };
+
+        const openDemoModal = (targetId) => {
+            const modal = document.querySelector('.demo-modal');
+            if (!modal) return;
+            const modalTabs = Array.from(modal.querySelectorAll('.demo-tab'));
+            modal.classList.add('open');
+            document.body.classList.add('modal-open');
+            if (targetId) {
+                const modalTab = modalTabs.find(tab => tab.dataset.target === targetId);
+                modalTab?.click();
+            } else {
+                const firstVideo = modal.querySelector('.demo-video.active');
+                firstVideo?.play().catch(() => {});
+            }
+        };
+
+        // Demo dock toggle + large view
+        const demoDock = document.querySelector('.demo-dock');
+        if (demoDock) {
+            const toggleButton = demoDock.querySelector('.demo-dock-toggle');
+            const largeButton = demoDock.querySelector('.demo-dock-large');
+            toggleButton?.addEventListener('click', () => {
+                const isCollapsed = demoDock.classList.toggle('collapsed');
+                toggleButton.textContent = isCollapsed ? 'Open demo' : 'Hide demo';
+            });
+            largeButton?.addEventListener('click', () => {
+                const dockActive = demoDock.querySelector('.demo-tab.active');
+                const activeBase = dockActive?.dataset.target?.replace(/-dock$/, '') || 'video-quick';
+                const modalTarget = `${activeBase}-modal`;
+                openDemoModal(modalTarget);
+            });
+        }
+
+        // External dock opener
+        document.querySelectorAll('.demo-dock-show').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!demoDock) return;
+                demoDock.classList.remove('collapsed');
+                const toggleButton = demoDock.querySelector('.demo-dock-toggle');
+                if (toggleButton) toggleButton.textContent = 'Hide demo';
+            });
+        });
+
+        // Demo modal controls
+        const demoModal = document.querySelector('.demo-modal');
+        if (demoModal) {
+            const closeButton = demoModal.querySelector('.demo-modal-close');
+            const backdrop = demoModal.querySelector('.demo-modal-backdrop');
+            const modalVideos = Array.from(demoModal.querySelectorAll('.demo-video'));
+
+            const closeModal = () => {
+                demoModal.classList.remove('open');
+                document.body.classList.remove('modal-open');
+                pauseVideos(modalVideos);
+            };
+
+            closeButton?.addEventListener('click', closeModal);
+            backdrop?.addEventListener('click', closeModal);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && demoModal.classList.contains('open')) {
+                    closeModal();
+                }
+            });
+        }
+
+        // Hero CTA opens modal
+        document.querySelectorAll('.demo-modal-open').forEach(btn => {
+            btn.addEventListener('click', () => openDemoModal('video-quick-modal'));
         });
 
         // Animate elements on scroll

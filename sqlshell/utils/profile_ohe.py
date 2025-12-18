@@ -239,12 +239,27 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QTableWidget, QTableWidgetItem, QLabel, QPushButton,
                            QComboBox, QSplitter, QTabWidget, QScrollArea,
                            QFrame, QSizePolicy, QButtonGroup, QRadioButton,
-                           QMessageBox, QHeaderView, QApplication, QTextEdit)
+                           QMessageBox, QHeaderView, QApplication, QTextEdit,
+                           QDialog)
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
+class NumericTableItem(QTableWidgetItem):
+    """Table item that sorts numerically using the stored value."""
+    def __init__(self, value, fmt="{:.3f}"):
+        display_value = fmt.format(value) if isinstance(value, (int, float, np.number)) else str(value)
+        super().__init__(display_value)
+        self._value = value
+
+    def __lt__(self, other):
+        try:
+            return float(self._value) < float(other._value)
+        except Exception:
+            return super().__lt__(other)
+
 
 class OneHotEncodingVisualization(QMainWindow):
     # Add signal to notify when encoding should be applied
@@ -781,6 +796,415 @@ Recommendations:
             return (self.encoded_df[feature_name] == 1).sum() / len(self.encoded_df) * 100
         else:
             return (self.encoded_df[feature_name] == "Yes").sum() / len(self.encoded_df) * 100
+
+
+def find_related_ohe_features(df, target_column, sample_size=2000, max_features=20):
+    """
+    Find one-hot encoded signals in other columns that help predict the target column.
+    
+    Returns a dictionary with ranked features and analysis metadata.
+    """
+    if target_column not in df.columns:
+        raise ValueError(f"Column '{target_column}' not found in dataframe")
+    
+    if df.empty:
+        raise ValueError("No data available to analyze")
+    
+    # Drop rows without the target to avoid noisy correlations
+    df = df.dropna(subset=[target_column])
+    total_rows = len(df)
+    if total_rows == 0:
+        raise ValueError(f"Column '{target_column}' has no non-null values to analyze")
+    
+    # Sample for speed on large datasets
+    if len(df) > sample_size:
+        df = df.sample(n=sample_size, random_state=42)
+    df = df.reset_index(drop=True)
+    
+    # Keep a copy of the sampled/cleaned data for drilldowns
+    sample_df = df.copy()
+    target_raw = sample_df[target_column].reset_index(drop=True)
+    target_series = target_raw.copy()
+    unique_target_values = target_series.dropna().nunique()
+    if unique_target_values < 2:
+        raise ValueError(f"Column '{target_column}' needs at least 2 distinct values for analysis")
+    
+    # Prepare target for correlation (bin dense numeric targets)
+    target_discretized = False
+    if pd.api.types.is_numeric_dtype(target_series) and unique_target_values > 15:
+        try:
+            target_series = pd.qcut(target_series, q=5, duplicates='drop')
+        except Exception:
+            # Fallback to equal-width bins
+            target_series = pd.cut(target_series, bins=5, duplicates='drop')
+        target_discretized = True
+    
+    # Ensure categorical targets can accept the placeholder before filling missing values
+    if not pd.api.types.is_numeric_dtype(target_series):
+        if pd.api.types.is_categorical_dtype(target_series):
+            if "_MISSING_" not in target_series.cat.categories:
+                target_series = target_series.cat.add_categories(["_MISSING_"])
+        target_series = target_series.fillna("_MISSING_")
+    
+    if pd.api.types.is_numeric_dtype(target_series):
+        target_numeric = pd.to_numeric(target_series, errors='coerce')
+        target_numeric = target_numeric.fillna(target_numeric.mean())
+    else:
+        target_numeric = pd.Categorical(target_series).codes.astype(float)
+        target_numeric = pd.Series(target_numeric, index=target_series.index)
+    
+    candidate_columns = [col for col in df.columns if col != target_column]
+    results = []
+    skipped_columns = []
+    max_categories = 60  # Avoid exploding one-hot columns on very high-cardinality categoricals
+    
+    # Iterate over candidate feature columns
+    for col in candidate_columns:
+        series = df[col]
+        non_null_unique = series.dropna().nunique()
+        if non_null_unique < 2:
+            continue
+        
+        string_values = None
+        
+        working_subset = df[[target_column, col]].copy()
+        notes = []
+        
+        # Detect text-like columns so we don't skip them even with many unique values
+        is_text = False
+        try:
+            string_values = series.dropna().astype(str)
+            if len(string_values) > 0:
+                sample_values = string_values.head(200)
+                avg_length = sample_values.str.len().mean()
+                contains_spaces = any(' ' in val for val in sample_values)
+                if contains_spaces or (pd.notna(avg_length) and avg_length > 15):
+                    is_text = True
+        except Exception:
+            # If detection fails, assume it's not text
+            is_text = False
+        
+        # Prepare the column for one-hot encoding
+        if pd.api.types.is_numeric_dtype(series):
+            # Bin numeric data to make it suitable for OHE
+            try:
+                bins = min(4, max(2, series.dropna().nunique()))
+                working_subset[col] = pd.qcut(series, q=bins, duplicates='drop').astype(str)
+            except Exception:
+                try:
+                    bins = min(4, max(2, series.dropna().nunique()))
+                    working_subset[col] = pd.cut(series, bins=bins, duplicates='drop').astype(str)
+                except Exception as e:
+                    skipped_columns.append((col, f"binning failed: {str(e)}"))
+                    continue
+            notes.append("numeric binned")
+        else:
+            unique_count = string_values.nunique() if string_values is not None else non_null_unique
+            if not is_text and unique_count > max_categories:
+                skipped_columns.append((col, f"high cardinality ({unique_count} unique values)"))
+                continue
+            if pd.api.types.is_categorical_dtype(series):
+                # Ensure the special missing marker exists to avoid setitem errors
+                if "_MISSING_" not in series.cat.categories:
+                    series = series.cat.add_categories(["_MISSING_"])
+                series = series.fillna("_MISSING_")
+            else:
+                series = series.fillna("_MISSING_")
+            working_subset[col] = series
+        
+        # Apply basic OHE to the candidate column
+        try:
+            encoded_df = get_ohe(working_subset.copy(), col, binary_format="numeric", algorithm="basic")
+        except Exception as e:
+            skipped_columns.append((col, f"encoding failed: {str(e)}"))
+            continue
+        
+        encoded_cols = [c for c in encoded_df.columns if c.startswith('has_') or c.startswith('is_')]
+        if not encoded_cols:
+            continue
+        
+        # Align target values and ensure numeric dtype
+        encoded_df = encoded_df.reset_index(drop=True)
+        target_aligned = target_numeric.reset_index(drop=True)
+        
+        for feature in encoded_cols:
+            feature_series = pd.to_numeric(encoded_df[feature], errors='coerce').reset_index(drop=True)
+            if feature_series.nunique() < 2:
+                continue
+            corr_val = feature_series.corr(target_aligned)
+            if pd.isna(corr_val):
+                continue
+            
+            coverage = float(feature_series.mean()) * 100.0  # Percentage of rows with feature=1
+            results.append({
+                "feature": feature,
+                "source_column": col,
+                "correlation": corr_val,
+                "abs_correlation": abs(corr_val),
+                "coverage": coverage,
+                "note": "; ".join(notes) if notes else "",
+                "feature_series": feature_series
+            })
+    
+    # Rank by absolute correlation strength
+    results = sorted(results, key=lambda x: x["abs_correlation"], reverse=True)
+    if max_features:
+        results = results[:max_features]
+    
+    return {
+        "results": results,
+        "sample_size": len(df),
+        "total_rows": total_rows,
+        "target_discretized": target_discretized,
+        "columns_considered": len(candidate_columns),
+        "skipped_columns": skipped_columns,
+        "target_values": target_raw,
+        "sample_df": sample_df
+    }
+
+
+def build_drilldown_query(table_name, source_column, feature_name):
+    """Build a SELECT query for drilldown based on an encoded feature."""
+    if not table_name:
+        return None
+    
+    # Quote the column if it has special characters
+    if any(ch in source_column for ch in (' ', '-', '.')):
+        col_expr = f'"{source_column}"'
+    else:
+        col_expr = source_column
+    
+    if feature_name.startswith("has_"):
+        token = feature_name[len("has_"):]
+        token = token.replace("'", "''")
+        condition = f"{col_expr} LIKE '%{token}%'"
+    elif feature_name.startswith("is_"):
+        token = feature_name[len("is_"):]
+        token = token.replace("'", "''")
+        condition = f"{col_expr} = '{token}'"
+    else:
+        token = feature_name.replace("'", "''")
+        condition = f"{col_expr} = '{token}'"
+    
+    return f"SELECT *\nFROM {table_name}\nWHERE {condition}"
+
+
+class RelatedOneHotEncodingsWindow(QMainWindow):
+    """Simple window to display related one-hot encodings for a target column."""
+    def __init__(self, target_column, analysis_result, table_name=None, drill_query_callback=None):
+        super().__init__()
+        self.setWindowTitle(f"Related One-Hot Encodings - {target_column}")
+        self.setGeometry(120, 120, 900, 700)
+        self.analysis_result = analysis_result
+        self.target_column = target_column
+        self.target_values = analysis_result.get("target_values")
+        self.sample_df = analysis_result.get("sample_df")
+        self.results = analysis_result.get("results", [])
+        self.table_name = table_name
+        self.drill_query_callback = drill_query_callback
+        
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QVBoxLayout(main_widget)
+        
+        # Summary text
+        sampled_text = ""
+        if analysis_result["sample_size"] < analysis_result["total_rows"]:
+            sampled_text = f" (sampled {analysis_result['sample_size']:,} of {analysis_result['total_rows']:,} rows)"
+        summary_label = QLabel(
+            f"Analyzed {analysis_result['columns_considered']} columns{sampled_text} to find one-hot signals "
+            f"that help predict '{target_column}'."
+        )
+        summary_label.setWordWrap(True)
+        layout.addWidget(summary_label)
+        
+        if analysis_result["target_discretized"]:
+            discretize_label = QLabel("Numeric target was auto-binned to make correlations meaningful.")
+            discretize_label.setStyleSheet("color: #7F8C8D;")
+            layout.addWidget(discretize_label)
+        
+        # Results table
+        results = self.results
+        self.table = QTableWidget(len(results), 5)
+        self.table.setHorizontalHeaderLabels([
+            "Rank", "Source Column", "Encoded Feature", "Correlation", "Coverage"
+        ])
+        
+        for i, res in enumerate(results):
+            rank_item = NumericTableItem(i + 1, fmt="{:.0f}")
+            rank_item.setFlags(rank_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 0, rank_item)
+            
+            source_item = QTableWidgetItem(res["source_column"])
+            source_item.setFlags(source_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 1, source_item)
+            
+            feature_item = QTableWidgetItem(res["feature"])
+            feature_item.setToolTip(res.get("note", ""))
+            feature_item.setFlags(feature_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 2, feature_item)
+            
+            corr_item = NumericTableItem(res["correlation"])
+            corr_item.setFlags(corr_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 3, corr_item)
+            
+            coverage_item = NumericTableItem(res["coverage"], fmt="{:.1f}%")
+            coverage_item.setFlags(coverage_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 4, coverage_item)
+        
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSortingEnabled(True)
+        self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
+        self.table.cellDoubleClicked.connect(self.show_feature_drilldown)
+        layout.addWidget(self.table, 1)
+        
+        # Additional context and skipped columns info
+        notes = [
+            "Higher absolute correlation means the encoded feature aligns strongly with the target classes.",
+            "Coverage shows how often the encoded feature is present in the sampled data.",
+            "Double-click any row to compare target values with and without that encoded feature."
+        ]
+        if analysis_result["skipped_columns"]:
+            skipped_preview = ", ".join(f"{col} ({reason})" for col, reason in analysis_result["skipped_columns"][:3])
+            more_skipped = ""
+            if len(analysis_result["skipped_columns"]) > 3:
+                more_skipped = f" ... and {len(analysis_result['skipped_columns']) - 3} more"
+            notes.append(f"Skipped columns: {skipped_preview}{more_skipped}")
+        
+        notes_label = QLabel("\n".join(f"• {n}" for n in notes))
+        notes_label.setWordWrap(True)
+        notes_label.setStyleSheet("color: #7F8C8D;")
+        layout.addWidget(notes_label)
+
+    def show_feature_drilldown(self, row, column):
+        """Show a small bar chart comparing target values with/without the encoded feature."""
+        results = self.results
+        if not results:
+            return
+        
+        # Use table values to find the correct result even after sorting
+        source_text = self.table.item(row, 1).text() if self.table.item(row, 1) else None
+        feature_text = self.table.item(row, 2).text() if self.table.item(row, 2) else None
+        if not source_text or not feature_text:
+            return
+        res = next((r for r in results
+                    if r.get("source_column") == source_text and r.get("feature") == feature_text),
+                   None)
+        if res is None:
+            QMessageBox.information(self, "Drilldown Unavailable", "Could not match the selected feature.")
+            return
+        
+        feature_series = res.get("feature_series")
+        target_series = self.target_values
+        source_col = res.get("source_column", "")
+        feature_name = res.get("feature", "")
+        
+        if feature_series is None or target_series is None:
+            QMessageBox.information(self, "Drilldown Unavailable", "Could not load data for this feature.")
+            return
+        
+        # Align lengths defensively
+        min_len = min(len(feature_series), len(target_series))
+        feature_series = pd.to_numeric(feature_series[:min_len], errors='coerce').fillna(0)
+        target_series = target_series[:min_len]
+        
+        mask_present = feature_series != 0
+        mask_absent = ~mask_present
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{feature_name} vs {self.target_column}")
+        dialog.resize(780, 540)
+        layout = QVBoxLayout(dialog)
+        
+        fig = plt.Figure(figsize=(7.5, 5))
+        canvas = FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        layout.addWidget(canvas)
+        
+        if pd.api.types.is_numeric_dtype(target_series):
+            target_numeric = pd.to_numeric(target_series, errors='coerce')
+            present_mean = target_numeric[mask_present].mean()
+            absent_mean = target_numeric[mask_absent].mean()
+            bars = ["Feature Present", "Feature Absent"]
+            values = [present_mean, absent_mean]
+            ax.bar(bars, values, color=["#2E86DE", "#95A5A6"])
+            ax.set_ylabel(f"Average {self.target_column}")
+            ax.set_title(f"{feature_name} (from {source_col})")
+            for idx, val in enumerate(values):
+                ax.text(idx, val, f"{val:.2f}", ha='center', va='bottom')
+        else:
+            # Compare distribution of top categories
+            target_str = target_series.astype(str)
+            present_counts = target_str[mask_present].value_counts(normalize=True).head(5)
+            absent_counts = target_str[mask_absent].value_counts(normalize=True).head(5)
+            categories = list(dict.fromkeys(list(present_counts.index) + list(absent_counts.index)))
+            x = np.arange(len(categories))
+            width = 0.4
+            ax.bar(x - width/2, [present_counts.get(cat, 0) for cat in categories],
+                   width, label="Feature Present", color="#2E86DE")
+            ax.bar(x + width/2, [absent_counts.get(cat, 0) for cat in categories],
+                   width, label="Feature Absent", color="#95A5A6")
+            ax.set_xticks(x)
+            ax.set_xticklabels(categories, rotation=30, ha='right')
+            ax.set_ylabel("Share of rows")
+            ax.set_title(f"{feature_name} (from {source_col})")
+            ax.legend()
+        
+        fig.tight_layout()
+        
+        # Drilldown button to open matching rows in the editor
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        open_btn = QPushButton("Open matching rows in editor")
+        open_btn.clicked.connect(lambda: self.run_drilldown_query(feature_name, source_col))
+        button_layout.addWidget(open_btn)
+        layout.addLayout(button_layout)
+
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def run_drilldown_query(self, feature_name, source_col):
+        """Send a drilldown query to the main editor if possible."""
+        if not self.drill_query_callback:
+            QMessageBox.information(self, "Action Unavailable", "Cannot run query from here.")
+            return
+        
+        query = build_drilldown_query(self.table_name, source_col, feature_name)
+        if not query:
+            QMessageBox.information(self, "Table Not Found", "Could not determine the source table to query.")
+            return
+        
+        self.drill_query_callback(query)
+
+
+def visualize_related_ohe(df, target_column, sample_size=2000, max_features=20, 
+                          table_name=None, drill_query_callback=None):
+    """
+    Visualize related one-hot encodings that correlate with/predict a target column.
+    
+    Returns:
+        QMainWindow: The visualization window, or None if no features were found.
+    """
+    analysis_result = find_related_ohe_features(df, target_column, sample_size, max_features)
+    if not analysis_result["results"]:
+        QMessageBox.information(
+            None,
+            "No Predictive Encodings Found",
+            f"No related one-hot encodings found for '{target_column}'. "
+            "Try a different column or increase variability in the data."
+        )
+        return None
+    
+    vis = RelatedOneHotEncodingsWindow(
+        target_column, analysis_result, table_name=table_name, drill_query_callback=drill_query_callback
+    )
+    vis.show()
+    return vis
 
 def visualize_ohe(df, column, binary_format="numeric", algorithm="basic"):
     """

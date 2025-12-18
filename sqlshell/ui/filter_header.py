@@ -96,6 +96,9 @@ class FilterHeader(QHeaderView):
         # Add explain column action - finds correlations with other columns
         explain_action = context_menu.addAction("Find Related Columns")
         
+        # Add related OHE finder - finds encoded signals that predict the column
+        related_ohe_action = context_menu.addAction("Find Related One-Hot Encodings")
+        
         # Add encode text action - creates binary 0/1 columns from categories
         encode_action = context_menu.addAction("One-Hot Encode")
 
@@ -153,6 +156,14 @@ class FilterHeader(QHeaderView):
                     if logical_index < len(current_tab.current_df.columns):
                         column_name = current_tab.current_df.columns[logical_index]
                         self.main_window.explain_column(column_name)
+        elif action == related_ohe_action:
+            # Find related one-hot encodings that can predict this column
+            if self.main_window and hasattr(self.main_window, "find_related_one_hot_encodings"):
+                current_tab = self.main_window.get_current_tab()
+                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
+                    if logical_index < len(current_tab.current_df.columns):
+                        column_name = current_tab.current_df.columns[logical_index]
+                        self.main_window.find_related_one_hot_encodings(column_name)
         elif action == encode_action:
             # Call the encode_text method on the main window
             if self.main_window and hasattr(self.main_window, "encode_text"):
