@@ -333,6 +333,27 @@ class QueryTab(QWidget):
     def set_query_text(self, text):
         """Set the query text"""
         self.query_edit.setPlainText(text)
+    
+    def get_column_name_by_index(self, column_index):
+        """
+        Get the column name at the given index from the DataFrame that will be used by tools.
+        This ensures we get the correct column name after renames/deletes.
+        
+        Args:
+            column_index: The index of the column
+            
+        Returns:
+            The column name, or None if the index is invalid or no data is available
+        """
+        if hasattr(self.parent, 'get_data_for_tool'):
+            df, _ = self.parent.get_data_for_tool()
+            if df is not None and 0 <= column_index < len(df.columns):
+                return df.columns[column_index]
+        # Fallback to current_df if get_data_for_tool is not available
+        if hasattr(self, 'current_df') and self.current_df is not None:
+            if 0 <= column_index < len(self.current_df.columns):
+                return self.current_df.columns[column_index]
+        return None
         
     def execute_query(self):
         """Execute the current query"""
@@ -573,8 +594,10 @@ class QueryTab(QWidget):
 
     def handle_cell_double_click(self, row, column):
         """Handle double-click on a cell to add column to query editor"""
-        # Get column name
-        col_name = self.results_table.horizontalHeaderItem(column).text()
+        # Get column name from the correct DataFrame (handles renames/deletes)
+        col_name = self.get_column_name_by_index(column)
+        if col_name is None:
+            return
         
         # Check if the column name needs quoting (contains spaces or special characters)
         quoted_col_name = col_name
@@ -679,15 +702,10 @@ class QueryTab(QWidget):
         if not header:
             return
         
-        # Get the column name
-        if not hasattr(self, 'current_df') or self.current_df is None:
+        # Get the column name from the correct DataFrame (handles renames/deletes)
+        col_name = self.get_column_name_by_index(idx)
+        if col_name is None:
             return
-        
-        if idx >= len(self.current_df.columns):
-            return
-        
-        # Get column name
-        col_name = self.current_df.columns[idx]
         
         # Check if column name needs quoting (contains spaces or special chars)
         quoted_col_name = col_name
@@ -756,22 +774,26 @@ class QueryTab(QWidget):
         
         elif action == explain_action:
             # Call the explain column method on the parent
-            if hasattr(self.parent, 'explain_column'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'explain_column'):
                 self.parent.explain_column(col_name)
                 
         elif action == related_ohe_action:
             # Find related one-hot encodings that predict this column
-            if hasattr(self.parent, 'find_related_one_hot_encodings'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'find_related_one_hot_encodings'):
                 self.parent.find_related_one_hot_encodings(col_name)
                 
         elif action == encode_action:
             # Call the encode text method on the parent
-            if hasattr(self.parent, 'encode_text'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'encode_text'):
                 self.parent.encode_text(col_name)
         
         elif action == discover_rules_action:
             # Call the discover classification rules method on the parent
-            if hasattr(self.parent, 'discover_classification_rules'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'discover_classification_rules'):
                 self.parent.discover_classification_rules(col_name)
         
         elif action == sort_asc_action:
@@ -806,7 +828,8 @@ class QueryTab(QWidget):
 
         elif action == delete_column_action:
             # Request column deletion from the main window
-            if hasattr(self.parent, "delete_column"):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, "delete_column"):
                 self.parent.delete_column(col_name)
 
     def handle_header_double_click(self, idx):

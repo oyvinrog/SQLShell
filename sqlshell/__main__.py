@@ -5023,12 +5023,36 @@ LIMIT 10
         # Not in preview mode, use the query results
         return current_tab.current_df.copy(), False
 
+    def get_column_name_by_index(self, column_index):
+        """
+        Get the column name at the given index from the DataFrame that will be used by tools.
+        This ensures we get the correct column name after renames/deletes.
+        
+        Args:
+            column_index: The index of the column
+            
+        Returns:
+            The column name, or None if the index is invalid or no data is available
+        """
+        df, _ = self.get_data_for_tool()
+        if df is not None and 0 <= column_index < len(df.columns):
+            return df.columns[column_index]
+        return None
+
     def explain_column(self, column_name):
         """Analyze a column to explain its relationship with other columns"""
         try:
             # Get the appropriate data (full table if preview mode, else query results)
             df, is_full_table = self.get_data_for_tool()
             if df is None:
+                return
+            
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
+            if column_name not in df.columns:
+                show_warning_notification(
+                    f"Column '{column_name}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
                 
             # Show a loading indicator
@@ -5077,9 +5101,12 @@ LIMIT 10
             if current_tab:
                 current_tab.original_df_rowcount = len(df)
             
-            # Check if the column exists
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
             if column_name not in df.columns:
-                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
+                show_warning_notification(
+                    f"Column '{column_name}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
             
             # Import and use the visualize_ohe function from profile_ohe
@@ -5189,9 +5216,12 @@ LIMIT 10
             if current_tab:
                 current_tab.original_df_rowcount = len(df)
 
-            # Check if the column exists
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
             if column_name not in df.columns:
-                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
+                show_warning_notification(
+                    f"Column '{column_name}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
 
             # Import and use the visualize_categorize function
@@ -5254,9 +5284,12 @@ LIMIT 10
             # Show a loading indicator
             self.statusBar().showMessage(f'Discovering classification rules for "{target_column}"...')
             
-            # Check if the column exists
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
             if target_column not in df.columns:
-                show_warning_notification(f"Column '{target_column}' not found in the current dataset.")
+                show_warning_notification(
+                    f"Column '{target_column}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
             
             # Check if there are enough columns for rule learning

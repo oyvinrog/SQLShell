@@ -31,15 +31,13 @@ class CopyableTableWidget(QTableWidget):
                 # Determine which columns are selected via header selection model
                 selected_sections = header.selectionModel().selectedColumns()
                 if selected_sections:
-                    # Delete columns from right to left to keep indices stable,
-                    # but we always resolve by column name from the current DataFrame.
-                    current_df = getattr(parent_tab, "current_df", None)
-                    if current_df is not None:
-                        # Collect unique column indices
+                    # Delete columns from right to left to keep indices stable
+                    # Get column names from the DataFrame that will be used by the tool
+                    if hasattr(main_window, "get_column_name_by_index"):
                         col_indices = sorted({s.column() for s in selected_sections}, reverse=True)
                         for col_idx in col_indices:
-                            if 0 <= col_idx < len(current_df.columns):
-                                col_name = current_df.columns[col_idx]
+                            col_name = main_window.get_column_name_by_index(col_idx)
+                            if col_name:
                                 main_window.delete_column(col_name)
                     return
 
