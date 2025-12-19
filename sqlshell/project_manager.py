@@ -522,8 +522,9 @@ class ProjectManager:
                                             renamed_df = table_df.rename(columns=rename_dict)
                                             
                                             # Update the table in DuckDB
-                                            original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
-                                            self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source=original_source)
+                                            # Use 'transformed' source instead of preserving 'database:' source
+                                            # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                                            self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source='transformed')
                                             
                                             # Update table_columns tracking
                                             if table_name in self.db_manager.table_columns:

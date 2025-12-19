@@ -48,14 +48,25 @@ class DatabaseManager:
         if not self.is_connected():
             return "No database connected"
         
-        info_parts = ["In-memory DuckDB"]
-        
+        # If we have an attached database, show the primary database type
         if self.attached_databases:
+            # Get the primary attached database type
+            primary_db = self.attached_databases.get('db')
+            if primary_db:
+                db_type = primary_db['type'].upper()
+                info_parts = [f"Database: {db_type}"]
+            else:
+                info_parts = ["In-memory DuckDB"]
+            
+            # Show all attached databases
             db_info = []
             for alias, db_data in self.attached_databases.items():
                 db_type = db_data['type'].upper()
                 db_info.append(f"{alias} ({db_type})")
             info_parts.append(f"Attached: {', '.join(db_info)}")
+        else:
+            # No attached database, show in-memory DuckDB
+            info_parts = [f"In-memory DuckDB (connection_type: {self.connection_type})"]
         
         return " | ".join(info_parts)
     
@@ -118,6 +129,10 @@ class DatabaseManager:
             
             # Store the database path for display
             self.database_path = abs_path
+            
+            # Update connection_type to reflect the attached database type
+            # This ensures UI/project metadata correctly report the database type
+            self.connection_type = db_type
             
             # Track this attached database
             self.attached_databases['db'] = {

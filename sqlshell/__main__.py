@@ -2352,8 +2352,9 @@ LIMIT 10
                 renamed_df = table_df.rename(columns=rename_dict)
                 
                 # Update the table in DuckDB
-                original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
-                self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source=original_source)
+                # Use 'transformed' source instead of preserving 'database:' source
+                # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source='transformed')
                 
                 # Update table_columns tracking
                 if table_name in self.db_manager.table_columns:
@@ -3247,6 +3248,18 @@ LIMIT 10
                 updated_full_df = base_df.drop(columns=[column_name])
                 self._preview_transforms[table_name] = updated_full_df
 
+                # Update the table in DuckDB so SQL queries work immediately
+                # Use 'transformed' source instead of preserving 'database:' source
+                # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                try:
+                    self.db_manager.overwrite_table_with_dataframe(table_name, updated_full_df, source='transformed')
+                    # Update table_columns tracking
+                    if table_name in self.db_manager.table_columns:
+                        self.db_manager.table_columns[table_name] = [col for col in self.db_manager.table_columns[table_name] if col != column_name]
+                except Exception as e:
+                    # Log but don't fail - the delete still worked in the UI
+                    print(f"Warning: Could not update table in database: {e}")
+
                 # Keep showing a small preview in the UI, but based on the updated full data
                 preview_df = updated_full_df.head()
                 self.populate_table(preview_df)
@@ -3355,10 +3368,15 @@ LIMIT 10
                 self._column_renames[table_name][old_column_name] = new_column_name
 
                 # Update the table in DuckDB so SQL queries work immediately
-                # Preserve the original source if it exists
-                original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
+                # Use 'transformed' source instead of preserving 'database:' source
+                # This ensures _qualify_table_names won't rewrite queries to db.<table>
                 try:
-                    self.db_manager.overwrite_table_with_dataframe(table_name, updated_full_df, source=original_source)
+                    self.db_manager.overwrite_table_with_dataframe(table_name, updated_full_df, source='transformed')
+                    # Update table_columns tracking
+                    if table_name in self.db_manager.table_columns:
+                        columns = self.db_manager.table_columns[table_name]
+                        updated_columns = [new_column_name if col == old_column_name else col for col in columns]
+                        self.db_manager.table_columns[table_name] = updated_columns
                 except Exception as e:
                     # Log but don't fail - the rename still worked in the UI
                     print(f"Warning: Could not update table in database: {e}")
@@ -3394,10 +3412,14 @@ LIMIT 10
                         # Apply the same rename to the full table
                         if old_column_name in full_table_df.columns:
                             updated_full_table_df = full_table_df.rename(columns={old_column_name: new_column_name})
-                            # Preserve the original source when updating
-                            original_source = self.db_manager.loaded_tables.get(source_table_name, 'query_result')
-                            # Update the table in DuckDB
-                            self.db_manager.overwrite_table_with_dataframe(source_table_name, updated_full_table_df, source=original_source)
+                            # Use 'transformed' source instead of preserving 'database:' source
+                            # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                            self.db_manager.overwrite_table_with_dataframe(source_table_name, updated_full_table_df, source='transformed')
+                            # Update table_columns tracking
+                            if source_table_name in self.db_manager.table_columns:
+                                columns = self.db_manager.table_columns[source_table_name]
+                                updated_columns = [new_column_name if col == old_column_name else col for col in columns]
+                                self.db_manager.table_columns[source_table_name] = updated_columns
                     except Exception as e:
                         # Log but don't fail - the rename still worked in the UI
                         print(f"Warning: Could not update source table '{source_table_name}' in database: {e}")
@@ -4591,15 +4613,44 @@ LIMIT 10
         Get the column name at the given index from the DataFrame that will be used by tools.
         This ensures we get the correct column name after renames/deletes.
         
+        Optimized to avoid loading full tables when in preview mode by using cached metadata.
+        
         Args:
             column_index: The index of the column
             
         Returns:
             The column name, or None if the index is invalid or no data is available
         """
-        df, _ = self.get_data_for_tool()
-        if df is not None and 0 <= column_index < len(df.columns):
-            return df.columns[column_index]
+        current_tab = self.get_current_tab()
+        if not current_tab or current_tab.current_df is None:
+            return None
+        
+        # In preview mode, try to use cached metadata first to avoid loading full table
+        if current_tab.is_preview_mode and current_tab.preview_table_name:
+            table_name = current_tab.preview_table_name
+            
+            # First check if we have a cached transform with column info
+            transformed_full = self._preview_transforms.get(table_name)
+            if transformed_full is not None:
+                if 0 <= column_index < len(transformed_full.columns):
+                    return transformed_full.columns[column_index]
+                return None
+            
+            # Next check if we have cached column metadata
+            if table_name in self.db_manager.table_columns:
+                columns = self.db_manager.table_columns[table_name]
+                if 0 <= column_index < len(columns):
+                    return columns[column_index]
+            
+            # Fall back to preview df columns (should always be available)
+            if 0 <= column_index < len(current_tab.current_df.columns):
+                return current_tab.current_df.columns[column_index]
+            
+            return None
+        
+        # Not in preview mode, use current_df directly
+        if 0 <= column_index < len(current_tab.current_df.columns):
+            return current_tab.current_df.columns[column_index]
         return None
 
     def explain_column(self, column_name):
