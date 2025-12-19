@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter, QApplication, 
-                             QToolButton, QMenu)
+                             QToolButton, QMenu, QInputDialog, QLineEdit)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 import re
@@ -207,7 +207,7 @@ class QueryTab(QWidget):
             "• <b>Ctrl+\\</b> - Toggle sidebar<br>"
             "• <b>Ctrl+Shift+C</b> - Compact mode<br><br>"
             "<b>Table Interactions:</b><br>"
-            "• Double-click header → Add column to query<br>"
+            "• Double-click header → Rename column<br>"
             "• Right-click header → Analytical options"
         )
         self.help_info_btn.setStyleSheet("""
@@ -810,7 +810,7 @@ class QueryTab(QWidget):
                 self.parent.delete_column(col_name)
 
     def handle_header_double_click(self, idx):
-        """Handle double-click on a column header to add it to the query editor"""
+        """Handle double-click on a column header to rename the column"""
         # Get column name
         if not hasattr(self, 'current_df') or self.current_df is None:
             return
@@ -818,90 +818,53 @@ class QueryTab(QWidget):
         if idx >= len(self.current_df.columns):
             return
         
-        # Get column name
+        # Get current column name
         col_name = self.current_df.columns[idx]
         
-        # Check if column name needs quoting (contains spaces or special chars)
-        quoted_col_name = col_name
-        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
-            quoted_col_name = f'"{col_name}"'
+        # Show rename dialog
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Column",
+            "Enter new column name:",
+            QLineEdit.EchoMode.Normal,
+            col_name
+        )
         
-        # Get current query text
-        current_text = self.get_query_text().strip()
-        
-        # Get cursor position
-        cursor = self.query_edit.textCursor()
-        cursor_position = cursor.position()
-        
-        # Check if we already have an existing query
-        if current_text:
-            # If there's existing text, try to insert at cursor position
-            if cursor_position > 0:
-                # Check if we need to add a comma before the column name
-                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
-                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
-                
-                # Add comma if needed (we're in a list of columns)
-                needs_comma = (not text_before_cursor.strip().endswith(',') and 
-                              not text_before_cursor.strip().endswith('(') and
-                              not text_before_cursor.strip().endswith('SELECT') and
-                              not re.search(r'\bFROM\s*$', text_before_cursor) and
-                              not re.search(r'\bWHERE\s*$', text_before_cursor) and
-                              not re.search(r'\bGROUP\s+BY\s*$', text_before_cursor) and
-                              not re.search(r'\bORDER\s+BY\s*$', text_before_cursor) and
-                              not re.search(r'\bHAVING\s*$', text_before_cursor) and
-                              not text_after_cursor.strip().startswith(','))
-                
-                # Insert with comma if needed
-                if needs_comma:
-                    cursor.insertText(f", {quoted_col_name}")
-                else:
-                    cursor.insertText(quoted_col_name)
-                    
-                self.query_edit.setTextCursor(cursor)
-                self.query_edit.setFocus()
-                self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
-                return
-                
-            # If cursor is at start, check if we have a SELECT query to modify
-            if current_text.upper().startswith("SELECT"):
-                # Try to find the SELECT clause
-                select_match = re.match(r'(?i)SELECT\s+(.*?)(?:\sFROM\s|$)', current_text)
-                if select_match:
-                    select_clause = select_match.group(1).strip()
-                    
-                    # If it's "SELECT *", replace it with the column name
-                    if select_clause == "*":
-                        modified_text = current_text.replace("SELECT *", f"SELECT {quoted_col_name}")
-                        self.set_query_text(modified_text)
-                    # Otherwise append the column if it's not already there
-                    elif quoted_col_name not in select_clause:
-                        modified_text = current_text.replace(select_clause, f"{select_clause}, {quoted_col_name}")
-                        self.set_query_text(modified_text)
-                    
-                    self.query_edit.setFocus()
-                    self.parent.statusBar().showMessage(f"Added '{col_name}' to SELECT clause")
-                    return
-            
-            # If we can't modify an existing SELECT clause, append to the end
-            # Go to the end of the document
-            cursor.movePosition(cursor.MoveOperation.End)
-            # Insert a new line if needed
-            if not current_text.endswith('\n'):
-                cursor.insertText('\n')
-            # Insert a simple column reference
-            cursor.insertText(quoted_col_name)
-            self.query_edit.setTextCursor(cursor)
-            self.query_edit.setFocus()
-            self.parent.statusBar().showMessage(f"Appended '{col_name}' to query")
+        if not ok or not new_name:
             return
         
-        # If we don't have an existing query or couldn't modify it, create a new one
-        table_name = self._get_table_name(current_text)
-        new_query = f"SELECT {quoted_col_name}\nFROM {table_name}"
-        self.set_query_text(new_query)
-        self.query_edit.setFocus()
-        self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+        # Validate the new name
+        if new_name == col_name:
+            return  # No change
+        
+        # Use the main window's rename_column method to handle preview mode and persistence
+        if hasattr(self.parent, 'rename_column'):
+            self.parent.rename_column(col_name, new_name)
+        else:
+            # Fallback to direct rename if method doesn't exist
+            if new_name in self.current_df.columns:
+                self.parent.statusBar().showMessage(f"Error: Column '{new_name}' already exists")
+                return
+            
+            # Rename the column in the DataFrame
+            self.current_df.rename(columns={col_name: new_name}, inplace=True)
+            
+            # Update the main window's current_df if it exists
+            if hasattr(self.parent, 'current_df'):
+                self.parent.current_df = self.current_df.copy()
+            
+            # Update the table header
+            header_item = self.results_table.horizontalHeaderItem(idx)
+            if header_item:
+                header_item.setText(new_name)
+            else:
+                # If header item doesn't exist, set it
+                from PyQt6.QtWidgets import QTableWidgetItem
+                header_item = QTableWidgetItem(new_name)
+                self.results_table.setHorizontalHeaderItem(idx, header_item)
+            
+            # Update status bar
+            self.parent.statusBar().showMessage(f"Column renamed from '{col_name}' to '{new_name}'")
 
     def _get_table_name(self, current_text):
         """Extract table name from current query or DataFrame, with fallbacks"""

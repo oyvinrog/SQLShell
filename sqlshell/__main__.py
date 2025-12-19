@@ -3792,6 +3792,85 @@ LIMIT 10
             show_error_notification(f"Delete Column Error: Could not delete column '{column_name}' - {str(e)}")
             self.statusBar().showMessage(f"Error deleting column '{column_name}': {str(e)}")
 
+    def rename_column(self, old_column_name, new_column_name):
+        """Rename a column in the current results table and refresh the view."""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please run a query or open a table before renaming columns.")
+                return
+
+            # Validate the new name
+            if not new_column_name or new_column_name.strip() == "":
+                show_warning_notification("Column name cannot be empty.")
+                return
+
+            # Handle preview-mode tables separately from query results
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                table_name = current_tab.preview_table_name
+
+                # Work on the full underlying table, not just the 5-row preview.
+                # Prefer any existing in-memory transformed version for this table.
+                base_df = self._preview_transforms.get(table_name)
+                if base_df is None:
+                    try:
+                        base_df = self.db_manager.get_full_table(table_name)
+                    except Exception as e:
+                        show_error_notification(
+                            f"Rename Column Error: Could not load full table '{table_name}' - {str(e)}"
+                        )
+                        return
+
+                if old_column_name not in base_df.columns:
+                    show_warning_notification(f"Column '{old_column_name}' not found in the current table.")
+                    return
+
+                if new_column_name in base_df.columns:
+                    show_warning_notification(f"Column '{new_column_name}' already exists in the table.")
+                    return
+
+                # Apply the rename to the full dataset and remember it for future tools
+                updated_full_df = base_df.rename(columns={old_column_name: new_column_name})
+                self._preview_transforms[table_name] = updated_full_df
+
+                # Keep showing a small preview in the UI, but based on the updated full data
+                preview_df = updated_full_df.head()
+                self.populate_table(preview_df)
+            else:
+                # Non-preview mode: operate directly on the current query results
+                df = current_tab.current_df
+                if old_column_name not in df.columns:
+                    show_warning_notification(f"Column '{old_column_name}' not found in the current results.")
+                    return
+
+                if new_column_name in df.columns:
+                    show_warning_notification(f"Column '{new_column_name}' already exists in the current results.")
+                    return
+
+                updated_df = df.rename(columns={old_column_name: new_column_name})
+                current_tab.current_df = updated_df
+
+                # Refresh the table display with the full (query) results
+                self.populate_table(updated_df)
+
+            # Inform user about the rename
+            message = f"Renamed column '{old_column_name}' to '{new_column_name}'. "
+            message += "Remember to use 'Save as Table' if you want to persist this change."
+            self.statusBar().showMessage(message)
+            try:
+                # Also show a non-intrusive notification if available
+                show_info_notification(
+                    "Column Renamed",
+                    f"The column '{old_column_name}' was renamed to '{new_column_name}'. "
+                    "To avoid losing this change, use the 'Save as Table' option to save it back to the database."
+                )
+            except Exception:
+                # Notifications are optional; ignore failures here
+                pass
+        except Exception as e:
+            show_error_notification(f"Rename Column Error: Could not rename column '{old_column_name}' - {str(e)}")
+            self.statusBar().showMessage(f"Error renaming column '{old_column_name}': {str(e)}")
+
     def _make_query_friendly_name(self, name: str) -> str:
         """Convert a single column name to a query-friendly form."""
         if name is None:

@@ -487,6 +487,191 @@ def test_query_friendly_names_trims_whitespace(qapp):
 
 
 @requires_gui
+def test_rename_column_updates_results(qapp, sample_df):
+    """Renaming a column via the rename helper should update current_df and the table."""
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Populate the table with a known DataFrame
+    window.populate_table(sample_df)
+    current_tab = window.get_current_tab()
+
+    # Sanity checks before rename
+    assert current_tab is not None
+    assert current_tab.current_df is not None
+    assert "age" in current_tab.current_df.columns
+    assert "age_renamed" not in current_tab.current_df.columns
+
+    original_col_count = len(current_tab.current_df.columns)
+
+    # Perform the rename
+    window.rename_column("age", "age_renamed")
+
+    # current_df should be updated
+    assert current_tab.current_df is not None
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+    assert len(current_tab.current_df.columns) == original_col_count  # Same number of columns
+
+    # The visible table should also reflect the change
+    assert window.current_df is not None
+    assert "age" not in window.current_df.columns
+    assert "age_renamed" in window.current_df.columns
+    assert window.get_current_tab().results_table.columnCount() == original_col_count
+
+    # Verify visible table headers also match
+    headers = [
+        current_tab.results_table.horizontalHeaderItem(i).text()
+        for i in range(current_tab.results_table.columnCount())
+    ]
+    assert "age" not in headers
+    assert "age_renamed" in headers
+
+
+@requires_gui
+def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp, sample_df):
+    """
+    In preview mode, renaming a column should:
+    - operate on the full table (not just the 5-row preview),
+    - cache a transformed full DataFrame for that table,
+    - and be reflected again when previewing the same table later in the session.
+    """
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Fake a loaded table in the DatabaseManager
+    table_name = "users"
+
+    class DummyDBManager:
+        def __init__(self, df):
+            self._df = df
+
+        def get_table_preview(self, name):
+            assert name == table_name
+            # Return a small preview
+            return self._df.head()
+
+        def get_full_table(self, name):
+            assert name == table_name
+            # Return the full DataFrame
+            return self._df
+
+    # Swap in our dummy DB manager
+    window.db_manager = DummyDBManager(sample_df.copy())
+
+    # Simulate previewing the table from the sidebar
+    current_tab = window.get_current_tab()
+    current_tab.is_preview_mode = True
+    current_tab.preview_table_name = table_name
+
+    # Manually mimic what show_table_preview does for this test
+    preview_df = window.db_manager.get_table_preview(table_name)
+    window.populate_table(preview_df)
+
+    # Sanity check: preview is a subset but still has the column
+    assert "age" in preview_df.columns
+    assert window.current_df is not None
+    assert len(window.current_df) == len(preview_df)
+
+    # Rename the column in preview mode
+    window.rename_column("age", "age_renamed")
+
+    # The cached transformed full table should have the renamed column
+    assert table_name in window._preview_transforms
+    full_transformed = window._preview_transforms[table_name]
+    assert "age" not in full_transformed.columns
+    assert "age_renamed" in full_transformed.columns
+
+    # The current preview shown in the UI should also have the renamed column
+    current_tab = window.get_current_tab()
+    assert current_tab.current_df is not None
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+
+    # Simulate reopening the table - should use the cached transformed version
+    # This mimics what happens when you click the table again in the sidebar
+    preview_df_after_reopen = window._preview_transforms[table_name].head()
+    window.populate_table(preview_df_after_reopen)
+
+    # Verify the rename persists after reopening
+    current_tab = window.get_current_tab()
+    assert current_tab.current_df is not None
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+
+    # Verify the full table also has the rename
+    full_table_after_reopen = window._preview_transforms[table_name]
+    assert "age" not in full_table_after_reopen.columns
+    assert "age_renamed" in full_table_after_reopen.columns
+    assert len(full_table_after_reopen) == len(sample_df)  # Full table should have all rows
+
+
+@requires_gui
+def test_rename_column_prevents_duplicate_names(qapp, sample_df):
+    """Renaming a column to an existing name should fail."""
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Populate the table with a known DataFrame
+    window.populate_table(sample_df)
+    current_tab = window.get_current_tab()
+
+    # Sanity checks
+    assert current_tab is not None
+    assert current_tab.current_df is not None
+    assert "age" in current_tab.current_df.columns
+    assert "name" in current_tab.current_df.columns
+
+    # Try to rename "age" to "name" (which already exists) - should fail
+    window.rename_column("age", "name")
+
+    # The column should still be named "age" (rename should have failed)
+    assert "age" in current_tab.current_df.columns
+    assert current_tab.current_df.columns.tolist().count("name") == 1  # Only one "name" column
+
+
+@requires_gui
+def test_rename_column_via_double_click(qapp, sample_df, monkeypatch):
+    """Double-clicking a column header should allow renaming."""
+    from PyQt6.QtWidgets import QInputDialog
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Populate the table with a known DataFrame
+    window.populate_table(sample_df)
+    current_tab = window.get_current_tab()
+
+    # Sanity checks
+    assert current_tab is not None
+    assert current_tab.current_df is not None
+    assert "age" in current_tab.current_df.columns
+
+    # Find the index of the "age" column
+    age_idx = list(current_tab.current_df.columns).index("age")
+
+    # Mock QInputDialog to return a new name
+    def mock_get_text(*args, **kwargs):
+        return "age_renamed", True
+
+    monkeypatch.setattr(QInputDialog, "getText", mock_get_text)
+
+    # Simulate double-click on the header
+    current_tab.handle_header_double_click(age_idx)
+
+    # Verify the rename occurred
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+
+    # Verify the table header was updated
+    header_text = current_tab.results_table.horizontalHeaderItem(age_idx).text()
+    assert header_text == "age_renamed"
+
+
+@requires_gui
 def test_query_friendly_names_for_table_trims_whitespace(qapp):
     """
     The table-level query-friendly name conversion should also properly trim whitespace.
@@ -632,4 +817,189 @@ def test_query_friendly_names_handles_special_characters(qapp):
         for i in range(current_tab.results_table.columnCount())
     ]
     assert headers == expected_columns
+
+
+@requires_gui
+def test_rename_column_updates_results(qapp, sample_df):
+    """Renaming a column via the rename helper should update current_df and the table."""
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Populate the table with a known DataFrame
+    window.populate_table(sample_df)
+    current_tab = window.get_current_tab()
+
+    # Sanity checks before rename
+    assert current_tab is not None
+    assert current_tab.current_df is not None
+    assert "age" in current_tab.current_df.columns
+    assert "age_renamed" not in current_tab.current_df.columns
+
+    original_col_count = len(current_tab.current_df.columns)
+
+    # Perform the rename
+    window.rename_column("age", "age_renamed")
+
+    # current_df should be updated
+    assert current_tab.current_df is not None
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+    assert len(current_tab.current_df.columns) == original_col_count  # Same number of columns
+
+    # The visible table should also reflect the change
+    assert window.current_df is not None
+    assert "age" not in window.current_df.columns
+    assert "age_renamed" in window.current_df.columns
+    assert window.get_current_tab().results_table.columnCount() == original_col_count
+
+    # Verify visible table headers also match
+    headers = [
+        current_tab.results_table.horizontalHeaderItem(i).text()
+        for i in range(current_tab.results_table.columnCount())
+    ]
+    assert "age" not in headers
+    assert "age_renamed" in headers
+
+
+@requires_gui
+def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp, sample_df):
+    """
+    In preview mode, renaming a column should:
+    - operate on the full table (not just the 5-row preview),
+    - cache a transformed full DataFrame for that table,
+    - and be reflected again when previewing the same table later in the session.
+    """
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Fake a loaded table in the DatabaseManager
+    table_name = "users"
+
+    class DummyDBManager:
+        def __init__(self, df):
+            self._df = df
+
+        def get_table_preview(self, name):
+            assert name == table_name
+            # Return a small preview
+            return self._df.head()
+
+        def get_full_table(self, name):
+            assert name == table_name
+            # Return the full DataFrame
+            return self._df
+
+    # Swap in our dummy DB manager
+    window.db_manager = DummyDBManager(sample_df.copy())
+
+    # Simulate previewing the table from the sidebar
+    current_tab = window.get_current_tab()
+    current_tab.is_preview_mode = True
+    current_tab.preview_table_name = table_name
+
+    # Manually mimic what show_table_preview does for this test
+    preview_df = window.db_manager.get_table_preview(table_name)
+    window.populate_table(preview_df)
+
+    # Sanity check: preview is a subset but still has the column
+    assert "age" in preview_df.columns
+    assert window.current_df is not None
+    assert len(window.current_df) == len(preview_df)
+
+    # Rename the column in preview mode
+    window.rename_column("age", "age_renamed")
+
+    # The cached transformed full table should have the renamed column
+    assert table_name in window._preview_transforms
+    full_transformed = window._preview_transforms[table_name]
+    assert "age" not in full_transformed.columns
+    assert "age_renamed" in full_transformed.columns
+
+    # The current preview shown in the UI should also have the renamed column
+    current_tab = window.get_current_tab()
+    assert current_tab.current_df is not None
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+
+    # Simulate reopening the table - should use the cached transformed version
+    # This mimics what happens when you click the table again in the sidebar
+    preview_df_after_reopen = window._preview_transforms[table_name].head()
+    window.populate_table(preview_df_after_reopen)
+
+    # Verify the rename persists after reopening
+    current_tab = window.get_current_tab()
+    assert current_tab.current_df is not None
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+
+    # Verify the full table also has the rename
+    full_table_after_reopen = window._preview_transforms[table_name]
+    assert "age" not in full_table_after_reopen.columns
+    assert "age_renamed" in full_table_after_reopen.columns
+    assert len(full_table_after_reopen) == len(sample_df)  # Full table should have all rows
+
+
+@requires_gui
+def test_rename_column_prevents_duplicate_names(qapp, sample_df):
+    """Renaming a column to an existing name should fail."""
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Populate the table with a known DataFrame
+    window.populate_table(sample_df)
+    current_tab = window.get_current_tab()
+
+    # Sanity checks
+    assert current_tab is not None
+    assert current_tab.current_df is not None
+    assert "age" in current_tab.current_df.columns
+    assert "name" in current_tab.current_df.columns
+
+    # Try to rename "age" to "name" (which already exists) - should fail
+    window.rename_column("age", "name")
+
+    # The column should still be named "age" (rename should have failed)
+    assert "age" in current_tab.current_df.columns
+    assert current_tab.current_df.columns.tolist().count("name") == 1  # Only one "name" column
+
+
+@requires_gui
+def test_rename_column_via_double_click(qapp, sample_df, monkeypatch):
+    """Double-clicking a column header should allow renaming."""
+    from PyQt6.QtWidgets import QInputDialog
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Populate the table with a known DataFrame
+    window.populate_table(sample_df)
+    current_tab = window.get_current_tab()
+
+    # Sanity checks
+    assert current_tab is not None
+    assert current_tab.current_df is not None
+    assert "age" in current_tab.current_df.columns
+
+    # Find the index of the "age" column
+    age_idx = list(current_tab.current_df.columns).index("age")
+
+    # Mock QInputDialog to return a new name
+    def mock_get_text(*args, **kwargs):
+        return "age_renamed", True
+
+    monkeypatch.setattr(QInputDialog, "getText", mock_get_text)
+
+    # Simulate double-click on the header
+    current_tab.handle_header_double_click(age_idx)
+
+    # Verify the rename occurred
+    assert "age" not in current_tab.current_df.columns
+    assert "age_renamed" in current_tab.current_df.columns
+
+    # Verify the table header was updated
+    header_text = current_tab.results_table.horizontalHeaderItem(age_idx).text()
+    assert header_text == "age_renamed"
 
