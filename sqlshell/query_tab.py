@@ -451,7 +451,7 @@ class QueryTab(QWidget):
 
         # Transform submenu for column-level operations
         transform_menu = menu.addMenu("Transform")
-        delete_column_action = transform_menu.addAction("Delete")
+        delete_column_action = transform_menu.addAction("Delete (Del)")
 
         explain_action = menu.addAction("Find Related Columns")
         related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
@@ -739,7 +739,7 @@ class QueryTab(QWidget):
 
         # Transform submenu for column-level operations
         transform_menu = menu.addMenu("Transform")
-        delete_column_action = transform_menu.addAction("Delete")
+        delete_column_action = transform_menu.addAction("Delete (Del)")
 
         explain_action = menu.addAction("Find Related Columns")
         related_ohe_action = menu.addAction("Find Related One-Hot Encodings")

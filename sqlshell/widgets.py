@@ -15,11 +15,34 @@ class CopyableTableWidget(QTableWidget):
         self.customContextMenuRequested.connect(self.show_context_menu)
         
     def keyPressEvent(self, event: QKeyEvent):
-        """Handle key press events, specifically Ctrl+C for copying"""
+        """Handle key press events, specifically Ctrl+C for copying and Del for column delete."""
+        # Copy selection with Ctrl+C
         if event.key() == Qt.Key.Key_C and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.copy_selection_to_clipboard()
             return
-        
+
+        # Delete selected columns with Del key (no modifiers)
+        if event.key() == Qt.Key.Key_Delete and not event.modifiers():
+            parent_tab = getattr(self, "_parent_tab", None)
+            main_window = self._get_main_window()
+            header = self.horizontalHeader()
+
+            if parent_tab and main_window and hasattr(main_window, "delete_column") and header is not None:
+                # Determine which columns are selected via header selection model
+                selected_sections = header.selectionModel().selectedColumns()
+                if selected_sections:
+                    # Delete columns from right to left to keep indices stable,
+                    # but we always resolve by column name from the current DataFrame.
+                    current_df = getattr(parent_tab, "current_df", None)
+                    if current_df is not None:
+                        # Collect unique column indices
+                        col_indices = sorted({s.column() for s in selected_sections}, reverse=True)
+                        for col_idx in col_indices:
+                            if 0 <= col_idx < len(current_df.columns):
+                                col_name = current_df.columns[col_idx]
+                                main_window.delete_column(col_name)
+                    return
+
         # For other keys, use the default behavior
         super().keyPressEvent(event)
     

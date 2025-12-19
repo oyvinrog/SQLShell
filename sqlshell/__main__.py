@@ -59,6 +59,10 @@ class SQLShell(QMainWindow):
         self.recent_files = []  # Store list of recently opened files
         self.frequent_files = {}  # Store file paths with usage counts
         self.max_recent_files = 15  # Maximum number of recent files to track
+        # Track in-memory transforms for previewed tables (e.g., deleted columns)
+        # Keyed by table name so we can restore the same transformed view when
+        # the user navigates away and back without persisting to the database.
+        self._preview_transforms = {}
         
         # Load recent projects from settings
         self.load_recent_projects()
@@ -1077,11 +1081,19 @@ class SQLShell(QMainWindow):
             self.reload_selected_table(table_name)
                 
         try:
-            # Use the database manager to get a preview of the table
-            preview_df = self.db_manager.get_table_preview(table_name)
-                
-            self.populate_table(preview_df)
-            self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
+            # If we have an in-memory transformed version of this table, preview that
+            transformed_full = self._preview_transforms.get(table_name)
+            if transformed_full is not None:
+                preview_df = transformed_full.head()
+                self.populate_table(preview_df)
+                self.statusBar().showMessage(
+                    f'Showing preview of transformed table "{table_name}" (not yet saved to database)'
+                )
+            else:
+                # Use the database manager to get a preview of the table
+                preview_df = self.db_manager.get_table_preview(table_name)
+                self.populate_table(preview_df)
+                self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
             
             # Update the results title to show which table is being previewed
             current_tab.results_title.setText(f"PREVIEW: {table_name}")
@@ -3696,28 +3708,72 @@ LIMIT 10
         try:
             current_tab = self.get_current_tab()
             if not current_tab or current_tab.current_df is None:
-                show_warning_notification("No data available. Please run a query before deleting columns.")
+                show_warning_notification("No data available. Please run a query or open a table before deleting columns.")
                 return
 
-            df = current_tab.current_df
-            if column_name not in df.columns:
-                show_warning_notification(f"Column '{column_name}' not found in the current results.")
-                return
+            # Handle preview-mode tables separately from query results
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                table_name = current_tab.preview_table_name
 
-            # Drop the column and update the current tab
-            updated_df = df.drop(columns=[column_name])
-            current_tab.current_df = updated_df
+                # Work on the full underlying table, not just the 5-row preview.
+                # Prefer any existing in-memory transformed version for this table.
+                base_df = self._preview_transforms.get(table_name)
+                if base_df is None:
+                    try:
+                        base_df = self.db_manager.get_full_table(table_name)
+                    except Exception as e:
+                        show_error_notification(
+                            f"Delete Column Error: Could not load full table '{table_name}' - {str(e)}"
+                        )
+                        return
 
-            # Reset preview mode because we've modified the data
-            current_tab.is_preview_mode = False
-            current_tab.preview_table_name = None
+                if column_name not in base_df.columns:
+                    show_warning_notification(f"Column '{column_name}' not found in the current table.")
+                    return
 
-            # Refresh the table display
-            self.populate_table(updated_df)
+                # Apply the delete to the full dataset and remember it for future tools
+                updated_full_df = base_df.drop(columns=[column_name])
+                self._preview_transforms[table_name] = updated_full_df
 
-            self.statusBar().showMessage(
-                f"Deleted column '{column_name}'. Table now has {len(updated_df.columns)} columns."
+                # Keep showing a small preview in the UI, but based on the updated full data
+                preview_df = updated_full_df.head()
+                self.populate_table(preview_df)
+            else:
+                # Non-preview mode: operate directly on the current query results
+                df = current_tab.current_df
+                if column_name not in df.columns:
+                    show_warning_notification(f"Column '{column_name}' not found in the current results.")
+                    return
+
+                updated_df = df.drop(columns=[column_name])
+                current_tab.current_df = updated_df
+
+                # Refresh the table display with the full (query) results
+                self.populate_table(updated_df)
+
+            # Determine current column count for messaging
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                table_name = current_tab.preview_table_name
+                transformed = self._preview_transforms.get(table_name)
+                col_count = len(transformed.columns) if transformed is not None else 0
+            else:
+                col_count = len(current_tab.current_df.columns) if current_tab.current_df is not None else 0
+            # Inform user about the deletion and remind them to persist changes
+            message = (
+                f"Deleted column '{column_name}'. Table now has {col_count} columns. "
+                "Remember to use 'Save as Table' if you want to persist this change."
             )
+            self.statusBar().showMessage(message)
+            try:
+                # Also show a non-intrusive notification if available
+                show_info_notification(
+                    "Column Deleted",
+                    "The column was removed from the current results. "
+                    "To avoid losing this change, use the 'Save as Table' option to save it back to the database."
+                )
+            except Exception:
+                # Notifications are optional; ignore failures here
+                pass
         except Exception as e:
             show_error_notification(f"Delete Column Error: Could not delete column '{column_name}' - {str(e)}")
             self.statusBar().showMessage(f"Error deleting column '{column_name}': {str(e)}")
@@ -4687,6 +4743,8 @@ LIMIT 10
         
         If we're in preview mode (user clicked on a table in the left panel),
         this returns the FULL table data, not just the preview rows.
+        If previous transforms (like column delete) have been applied, it uses
+        the transformed full dataset stored on the tab.
         
         If the user ran their own query, this returns the query results (current_df).
         
@@ -4701,12 +4759,17 @@ LIMIT 10
         
         # Check if we're in preview mode and should use full table
         if current_tab.is_preview_mode and current_tab.preview_table_name:
+            # If we've already materialized a transformed full table for this table, use it
+            table_name = current_tab.preview_table_name
+            transformed_full = self._preview_transforms.get(table_name)
+            if transformed_full is not None:
+                return transformed_full.copy(), True
             try:
-                # Get the full table data
-                full_df = self.db_manager.get_full_table(current_tab.preview_table_name)
+                # Get the full table data from the database
+                full_df = self.db_manager.get_full_table(table_name)
                 return full_df, True
             except Exception as e:
-                # Fall back to current_df if we can't get full table
+                # Fall back to current_df (preview) if we can't get full table
                 print(f"Warning: Could not get full table, using preview: {e}")
                 return current_tab.current_df.copy(), False
         

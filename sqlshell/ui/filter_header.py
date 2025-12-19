@@ -102,7 +102,7 @@ class FilterHeader(QHeaderView):
         discover_rules_action = analysis_menu.addAction("Find IF-THEN Rules")
 
         transform_menu = context_menu.addMenu("Transform")
-        delete_column_action = transform_menu.addAction("Delete")
+        delete_column_action = transform_menu.addAction("Delete (Del)")
         
         context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
