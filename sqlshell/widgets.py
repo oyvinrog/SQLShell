@@ -15,11 +15,32 @@ class CopyableTableWidget(QTableWidget):
         self.customContextMenuRequested.connect(self.show_context_menu)
         
     def keyPressEvent(self, event: QKeyEvent):
-        """Handle key press events, specifically Ctrl+C for copying"""
+        """Handle key press events, specifically Ctrl+C for copying and Del for column delete."""
+        # Copy selection with Ctrl+C
         if event.key() == Qt.Key.Key_C and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.copy_selection_to_clipboard()
             return
-        
+
+        # Delete selected columns with Del key (no modifiers)
+        if event.key() == Qt.Key.Key_Delete and not event.modifiers():
+            parent_tab = getattr(self, "_parent_tab", None)
+            main_window = self._get_main_window()
+            header = self.horizontalHeader()
+
+            if parent_tab and main_window and hasattr(main_window, "delete_column") and header is not None:
+                # Determine which columns are selected via header selection model
+                selected_sections = header.selectionModel().selectedColumns()
+                if selected_sections:
+                    # Delete columns from right to left to keep indices stable
+                    # Get column names from the DataFrame that will be used by the tool
+                    if hasattr(main_window, "get_column_name_by_index"):
+                        col_indices = sorted({s.column() for s in selected_sections}, reverse=True)
+                        for col_idx in col_indices:
+                            col_name = main_window.get_column_name_by_index(col_idx)
+                            if col_name:
+                                main_window.delete_column(col_name)
+                    return
+
         # For other keys, use the default behavior
         super().keyPressEvent(event)
     
@@ -102,6 +123,12 @@ class CopyableTableWidget(QTableWidget):
             save_as_table_action.setIcon(QIcon.fromTheme("document-save"))
             save_as_table_action.triggered.connect(self._save_results_as_table)
             menu.addAction(save_as_table_action)
+            
+            # Add transform submenu for result-set level operations
+            transform_menu = menu.addMenu("Transform")
+            convert_query_names_action = transform_menu.addAction(
+                "Convert Column Names to Query-Friendly (lowercase_with_underscores, trimmed)"
+            )
         
         # Add table analysis options if we have data
         table_name = self._get_current_table_name()
@@ -180,7 +207,14 @@ class CopyableTableWidget(QTableWidget):
         
         # Only show menu if we have actions
         if menu.actions():
-            menu.exec(self.mapToGlobal(position))
+            action = menu.exec(self.mapToGlobal(position))
+            
+            # Handle transform actions that need to call back into the main window
+            if parent_tab and hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+                if 'convert_query_names_action' in locals() and action == convert_query_names_action:
+                    main_window = self._get_main_window()
+                    if main_window and hasattr(main_window, 'convert_current_results_to_query_friendly_names'):
+                        main_window.convert_current_results_to_query_friendly_names()
     
     def _call_main_window_method(self, method_name, table_name=None):
         """Call a method on the main window with optional table name"""

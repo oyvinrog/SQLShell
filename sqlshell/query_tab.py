@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QHeaderView, QTableWidget, QSplitter, QApplication, 
-                             QToolButton, QMenu)
+                             QToolButton, QMenu, QInputDialog, QLineEdit)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 import re
@@ -207,7 +207,7 @@ class QueryTab(QWidget):
             "• <b>Ctrl+\\</b> - Toggle sidebar<br>"
             "• <b>Ctrl+Shift+C</b> - Compact mode<br><br>"
             "<b>Table Interactions:</b><br>"
-            "• Double-click header → Add column to query<br>"
+            "• Double-click header → Rename column<br>"
             "• Right-click header → Analytical options"
         )
         self.help_info_btn.setStyleSheet("""
@@ -333,6 +333,27 @@ class QueryTab(QWidget):
     def set_query_text(self, text):
         """Set the query text"""
         self.query_edit.setPlainText(text)
+    
+    def get_column_name_by_index(self, column_index):
+        """
+        Get the column name at the given index from the DataFrame that will be used by tools.
+        This ensures we get the correct column name after renames/deletes.
+        
+        Args:
+            column_index: The index of the column
+            
+        Returns:
+            The column name, or None if the index is invalid or no data is available
+        """
+        if hasattr(self.parent, 'get_data_for_tool'):
+            df, _ = self.parent.get_data_for_tool()
+            if df is not None and 0 <= column_index < len(df.columns):
+                return df.columns[column_index]
+        # Fallback to current_df if get_data_for_tool is not available
+        if hasattr(self, 'current_df') and self.current_df is not None:
+            if 0 <= column_index < len(self.current_df.columns):
+                return self.current_df.columns[column_index]
+        return None
         
     def execute_query(self):
         """Execute the current query"""
@@ -448,6 +469,11 @@ class QueryTab(QWidget):
         sql_menu = menu.addMenu("Generate SQL")
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
+
+        # Transform submenu for column-level operations
+        transform_menu = menu.addMenu("Transform")
+        delete_column_action = transform_menu.addAction("Delete (Del)")
+
         explain_action = menu.addAction("Find Related Columns")
         related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
         encode_action = menu.addAction("One-Hot Encode")
@@ -561,10 +587,17 @@ class QueryTab(QWidget):
                 self.set_query_text(new_query)
             self.parent.statusBar().showMessage(f"Added filter condition for '{col_name}'")
 
+        elif action == delete_column_action:
+            # Request column deletion from the main window
+            if hasattr(self.parent, "delete_column"):
+                self.parent.delete_column(col_name)
+
     def handle_cell_double_click(self, row, column):
         """Handle double-click on a cell to add column to query editor"""
-        # Get column name
-        col_name = self.results_table.horizontalHeaderItem(column).text()
+        # Get column name from the correct DataFrame (handles renames/deletes)
+        col_name = self.get_column_name_by_index(column)
+        if col_name is None:
+            return
         
         # Check if the column name needs quoting (contains spaces or special characters)
         quoted_col_name = col_name
@@ -669,15 +702,10 @@ class QueryTab(QWidget):
         if not header:
             return
         
-        # Get the column name
-        if not hasattr(self, 'current_df') or self.current_df is None:
+        # Get the column name from the correct DataFrame (handles renames/deletes)
+        col_name = self.get_column_name_by_index(idx)
+        if col_name is None:
             return
-        
-        if idx >= len(self.current_df.columns):
-            return
-        
-        # Get column name
-        col_name = self.current_df.columns[idx]
         
         # Check if column name needs quoting (contains spaces or special chars)
         quoted_col_name = col_name
@@ -726,6 +754,11 @@ class QueryTab(QWidget):
         sql_menu = menu.addMenu("Generate SQL")
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
+
+        # Transform submenu for column-level operations
+        transform_menu = menu.addMenu("Transform")
+        delete_column_action = transform_menu.addAction("Delete (Del)")
+
         explain_action = menu.addAction("Find Related Columns")
         related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
         encode_action = menu.addAction("One-Hot Encode")
@@ -741,22 +774,26 @@ class QueryTab(QWidget):
         
         elif action == explain_action:
             # Call the explain column method on the parent
-            if hasattr(self.parent, 'explain_column'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'explain_column'):
                 self.parent.explain_column(col_name)
                 
         elif action == related_ohe_action:
             # Find related one-hot encodings that predict this column
-            if hasattr(self.parent, 'find_related_one_hot_encodings'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'find_related_one_hot_encodings'):
                 self.parent.find_related_one_hot_encodings(col_name)
                 
         elif action == encode_action:
             # Call the encode text method on the parent
-            if hasattr(self.parent, 'encode_text'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'encode_text'):
                 self.parent.encode_text(col_name)
         
         elif action == discover_rules_action:
             # Call the discover classification rules method on the parent
-            if hasattr(self.parent, 'discover_classification_rules'):
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, 'discover_classification_rules'):
                 self.parent.discover_classification_rules(col_name)
         
         elif action == sort_asc_action:
@@ -789,8 +826,14 @@ class QueryTab(QWidget):
                 cursor.insertText(f"WHERE {quoted_col_name} = ")
                 self.query_edit.setFocus()
 
+        elif action == delete_column_action:
+            # Request column deletion from the main window
+            col_name = self.get_column_name_by_index(idx)
+            if col_name and hasattr(self.parent, "delete_column"):
+                self.parent.delete_column(col_name)
+
     def handle_header_double_click(self, idx):
-        """Handle double-click on a column header to add it to the query editor"""
+        """Handle double-click on a column header to rename the column"""
         # Get column name
         if not hasattr(self, 'current_df') or self.current_df is None:
             return
@@ -798,90 +841,53 @@ class QueryTab(QWidget):
         if idx >= len(self.current_df.columns):
             return
         
-        # Get column name
+        # Get current column name
         col_name = self.current_df.columns[idx]
         
-        # Check if column name needs quoting (contains spaces or special chars)
-        quoted_col_name = col_name
-        if re.search(r'[\s\W]', col_name) and not col_name.startswith('"') and not col_name.endswith('"'):
-            quoted_col_name = f'"{col_name}"'
+        # Show rename dialog
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Column",
+            "Enter new column name:",
+            QLineEdit.EchoMode.Normal,
+            col_name
+        )
         
-        # Get current query text
-        current_text = self.get_query_text().strip()
-        
-        # Get cursor position
-        cursor = self.query_edit.textCursor()
-        cursor_position = cursor.position()
-        
-        # Check if we already have an existing query
-        if current_text:
-            # If there's existing text, try to insert at cursor position
-            if cursor_position > 0:
-                # Check if we need to add a comma before the column name
-                text_before_cursor = self.query_edit.toPlainText()[:cursor_position]
-                text_after_cursor = self.query_edit.toPlainText()[cursor_position:]
-                
-                # Add comma if needed (we're in a list of columns)
-                needs_comma = (not text_before_cursor.strip().endswith(',') and 
-                              not text_before_cursor.strip().endswith('(') and
-                              not text_before_cursor.strip().endswith('SELECT') and
-                              not re.search(r'\bFROM\s*$', text_before_cursor) and
-                              not re.search(r'\bWHERE\s*$', text_before_cursor) and
-                              not re.search(r'\bGROUP\s+BY\s*$', text_before_cursor) and
-                              not re.search(r'\bORDER\s+BY\s*$', text_before_cursor) and
-                              not re.search(r'\bHAVING\s*$', text_before_cursor) and
-                              not text_after_cursor.strip().startswith(','))
-                
-                # Insert with comma if needed
-                if needs_comma:
-                    cursor.insertText(f", {quoted_col_name}")
-                else:
-                    cursor.insertText(quoted_col_name)
-                    
-                self.query_edit.setTextCursor(cursor)
-                self.query_edit.setFocus()
-                self.parent.statusBar().showMessage(f"Inserted '{col_name}' at cursor position")
-                return
-                
-            # If cursor is at start, check if we have a SELECT query to modify
-            if current_text.upper().startswith("SELECT"):
-                # Try to find the SELECT clause
-                select_match = re.match(r'(?i)SELECT\s+(.*?)(?:\sFROM\s|$)', current_text)
-                if select_match:
-                    select_clause = select_match.group(1).strip()
-                    
-                    # If it's "SELECT *", replace it with the column name
-                    if select_clause == "*":
-                        modified_text = current_text.replace("SELECT *", f"SELECT {quoted_col_name}")
-                        self.set_query_text(modified_text)
-                    # Otherwise append the column if it's not already there
-                    elif quoted_col_name not in select_clause:
-                        modified_text = current_text.replace(select_clause, f"{select_clause}, {quoted_col_name}")
-                        self.set_query_text(modified_text)
-                    
-                    self.query_edit.setFocus()
-                    self.parent.statusBar().showMessage(f"Added '{col_name}' to SELECT clause")
-                    return
-            
-            # If we can't modify an existing SELECT clause, append to the end
-            # Go to the end of the document
-            cursor.movePosition(cursor.MoveOperation.End)
-            # Insert a new line if needed
-            if not current_text.endswith('\n'):
-                cursor.insertText('\n')
-            # Insert a simple column reference
-            cursor.insertText(quoted_col_name)
-            self.query_edit.setTextCursor(cursor)
-            self.query_edit.setFocus()
-            self.parent.statusBar().showMessage(f"Appended '{col_name}' to query")
+        if not ok or not new_name:
             return
         
-        # If we don't have an existing query or couldn't modify it, create a new one
-        table_name = self._get_table_name(current_text)
-        new_query = f"SELECT {quoted_col_name}\nFROM {table_name}"
-        self.set_query_text(new_query)
-        self.query_edit.setFocus()
-        self.parent.statusBar().showMessage(f"Created new SELECT query for '{col_name}'")
+        # Validate the new name
+        if new_name == col_name:
+            return  # No change
+        
+        # Use the main window's rename_column method to handle preview mode and persistence
+        if hasattr(self.parent, 'rename_column'):
+            self.parent.rename_column(col_name, new_name)
+        else:
+            # Fallback to direct rename if method doesn't exist
+            if new_name in self.current_df.columns:
+                self.parent.statusBar().showMessage(f"Error: Column '{new_name}' already exists")
+                return
+            
+            # Rename the column in the DataFrame
+            self.current_df.rename(columns={col_name: new_name}, inplace=True)
+            
+            # Update the main window's current_df if it exists
+            if hasattr(self.parent, 'current_df'):
+                self.parent.current_df = self.current_df.copy()
+            
+            # Update the table header
+            header_item = self.results_table.horizontalHeaderItem(idx)
+            if header_item:
+                header_item.setText(new_name)
+            else:
+                # If header item doesn't exist, set it
+                from PyQt6.QtWidgets import QTableWidgetItem
+                header_item = QTableWidgetItem(new_name)
+                self.results_table.setHorizontalHeaderItem(idx, header_item)
+            
+            # Update status bar
+            self.parent.statusBar().showMessage(f"Column renamed from '{col_name}' to '{new_name}'")
 
     def _get_table_name(self, current_text):
         """Extract table name from current query or DataFrame, with fallbacks"""

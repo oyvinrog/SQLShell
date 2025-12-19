@@ -93,20 +93,16 @@ class FilterHeader(QHeaderView):
         # Add count rows action
         count_rows_action = context_menu.addAction("Count Rows")
         
-        # Add explain column action - finds correlations with other columns
-        explain_action = context_menu.addAction("Find Related Columns")
-        
-        # Add related OHE finder - finds encoded signals that predict the column
-        related_ohe_action = context_menu.addAction("Find Related One-Hot Encodings")
-        
-        # Add encode text action - creates binary 0/1 columns from categories
-        encode_action = context_menu.addAction("One-Hot Encode")
+        # Create analysis and transform submenus
+        analysis_menu = context_menu.addMenu("Analysis")
+        explain_action = analysis_menu.addAction("Find Related Columns")
+        related_ohe_action = analysis_menu.addAction("Find Related One-Hot Encodings")
+        encode_action = analysis_menu.addAction("One-Hot Encode")
+        categorize_action = analysis_menu.addAction("Bin/Group Values")
+        discover_rules_action = analysis_menu.addAction("Find IF-THEN Rules")
 
-        # Add categorize action - bins numbers or groups rare categories
-        categorize_action = context_menu.addAction("Bin/Group Values")
-        
-        # Add CN2 rule discovery action - finds IF-THEN prediction rules
-        discover_rules_action = context_menu.addAction("Find IF-THEN Rules")
+        transform_menu = context_menu.addMenu("Transform")
+        delete_column_action = transform_menu.addAction("Delete (Del)")
         
         context_menu.addSeparator()
         filter_action = context_menu.addAction("Filter...")
@@ -150,53 +146,46 @@ class FilterHeader(QHeaderView):
         elif action == explain_action:
             # Call the explain_column method on the main window
             if self.main_window and hasattr(self.main_window, "explain_column"):
-                # Get the column name from the table (if it has a current dataframe)
-                current_tab = self.main_window.get_current_tab()
-                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
-                    if logical_index < len(current_tab.current_df.columns):
-                        column_name = current_tab.current_df.columns[logical_index]
-                        self.main_window.explain_column(column_name)
+                column_name = self.main_window.get_column_name_by_index(logical_index)
+                if column_name:
+                    self.main_window.explain_column(column_name)
         elif action == related_ohe_action:
             # Find related one-hot encodings that can predict this column
             if self.main_window and hasattr(self.main_window, "find_related_one_hot_encodings"):
-                current_tab = self.main_window.get_current_tab()
-                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
-                    if logical_index < len(current_tab.current_df.columns):
-                        column_name = current_tab.current_df.columns[logical_index]
-                        self.main_window.find_related_one_hot_encodings(column_name)
+                column_name = self.main_window.get_column_name_by_index(logical_index)
+                if column_name:
+                    self.main_window.find_related_one_hot_encodings(column_name)
         elif action == encode_action:
             # Call the encode_text method on the main window
             if self.main_window and hasattr(self.main_window, "encode_text"):
-                # Get the column name from the table (if it has a current dataframe)
-                current_tab = self.main_window.get_current_tab()
-                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
-                    if logical_index < len(current_tab.current_df.columns):
-                        column_name = current_tab.current_df.columns[logical_index]
-                        self.main_window.encode_text(column_name)
+                column_name = self.main_window.get_column_name_by_index(logical_index)
+                if column_name:
+                    self.main_window.encode_text(column_name)
         elif action == categorize_action:
             # Call the categorize_column method on the main window
             if self.main_window and hasattr(self.main_window, "categorize_column"):
-                # Get the column name from the table (if it has a current dataframe)
-                current_tab = self.main_window.get_current_tab()
-                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
-                    if logical_index < len(current_tab.current_df.columns):
-                        column_name = current_tab.current_df.columns[logical_index]
-                        self.main_window.categorize_column(column_name)
+                column_name = self.main_window.get_column_name_by_index(logical_index)
+                if column_name:
+                    self.main_window.categorize_column(column_name)
         elif action == discover_rules_action:
             # Call the discover_classification_rules method on the main window
             if self.main_window and hasattr(self.main_window, "discover_classification_rules"):
-                # Get the column name from the table (if it has a current dataframe)
-                current_tab = self.main_window.get_current_tab()
-                if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
-                    if logical_index < len(current_tab.current_df.columns):
-                        column_name = current_tab.current_df.columns[logical_index]
-                        self.main_window.discover_classification_rules(column_name)
+                column_name = self.main_window.get_column_name_by_index(logical_index)
+                if column_name:
+                    self.main_window.discover_classification_rules(column_name)
         elif action == count_rows_action:
             # Get the current tab and show row count
             current_tab = self.main_window.get_current_tab()
             if current_tab and hasattr(current_tab, "current_df") and current_tab.current_df is not None:
                 row_count = len(current_tab.current_df)
                 QMessageBox.information(self, "Row Count", f"Total rows: {row_count:,}")
+
+        elif action == delete_column_action:
+            # Delete the selected column from the current tab via the main window
+            if self.main_window and hasattr(self.main_window, "delete_column"):
+                column_name = self.main_window.get_column_name_by_index(logical_index)
+                if column_name:
+                    self.main_window.delete_column(column_name)
 
     def set_main_window(self, window):
         """Set the reference to the main window"""

@@ -700,3 +700,72 @@ class TestDatabaseManagerEdgeCases:
         
         assert len(result) == 3
 
+    def test_overwrite_table_with_dataframe(self, db_manager):
+        """Test overwriting an existing table with a new DataFrame."""
+        # Create initial table
+        initial_df = pd.DataFrame({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie']
+        })
+        table_name = db_manager.register_dataframe(initial_df, "test_overwrite")
+        
+        # Verify initial table exists
+        result = db_manager.execute_query(f"SELECT * FROM {table_name}")
+        assert len(result) == 3
+        assert list(result.columns) == ['id', 'name']
+        
+        # Overwrite with new DataFrame
+        new_df = pd.DataFrame({
+            'id': [10, 20],
+            'name': ['David', 'Eve'],
+            'age': [25, 30]  # New column
+        })
+        db_manager.overwrite_table_with_dataframe(table_name, new_df, source='query_result')
+        
+        # Verify table was overwritten
+        result = db_manager.execute_query(f"SELECT * FROM {table_name}")
+        assert len(result) == 2
+        assert list(result.columns) == ['id', 'name', 'age']
+        assert result['id'].tolist() == [10, 20]
+        
+        # Verify tracking was updated
+        assert db_manager.loaded_tables[table_name] == 'query_result'
+        assert db_manager.table_columns[table_name] == ['id', 'name', 'age']
+
+    def test_overwrite_table_with_dataframe_new_table(self, db_manager):
+        """Test overwriting a non-existent table (should create it)."""
+        # Overwrite a table that doesn't exist yet
+        new_df = pd.DataFrame({
+            'x': [1, 2, 3],
+            'y': [4, 5, 6]
+        })
+        table_name = "new_table"
+        db_manager.overwrite_table_with_dataframe(table_name, new_df, source='query_result')
+        
+        # Verify table was created
+        result = db_manager.execute_query(f"SELECT * FROM {table_name}")
+        assert len(result) == 3
+        assert list(result.columns) == ['x', 'y']
+        
+        # Verify tracking
+        assert db_manager.loaded_tables[table_name] == 'query_result'
+        assert db_manager.table_columns[table_name] == ['x', 'y']
+
+    def test_overwrite_table_with_dataframe_replaces_view(self, db_manager):
+        """Test that overwrite_table_with_dataframe replaces existing views."""
+        # Create a view
+        initial_df = pd.DataFrame({'a': [1, 2]})
+        table_name = db_manager.register_dataframe(initial_df, "view_test")
+        
+        # Create a view with the same name
+        db_manager.conn.execute(f"CREATE VIEW {table_name}_view AS SELECT * FROM {table_name}")
+        
+        # Overwrite - should drop the view and create table
+        new_df = pd.DataFrame({'b': [3, 4, 5]})
+        db_manager.overwrite_table_with_dataframe(f"{table_name}_view", new_df)
+        
+        # Verify the view was replaced with table
+        result = db_manager.execute_query(f"SELECT * FROM {table_name}_view")
+        assert len(result) == 3
+        assert list(result.columns) == ['b']
+

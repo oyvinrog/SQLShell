@@ -154,16 +154,16 @@ class AnimatedSplashScreen(QWidget):
         self.movie = None  # Initialize to None for safety
         self.load_animation()
         
-        # Set up fade animation
+        # Set up fade animation (very short for fast overall splash time)
         self.fade_anim = QPropertyAnimation(self, b"opacity")
-        self.fade_anim.setDuration(1000)
+        self.fade_anim.setDuration(250)
         self.fade_anim.setStartValue(0.0)
         self.fade_anim.setEndValue(1.0)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
         
-        # Set up progress animation
+        # Set up progress animation (shorter for faster overall splash time)
         self.progress_anim = QPropertyAnimation(self, b"progress")
-        self.progress_anim.setDuration(2000)
+        self.progress_anim.setDuration(500)
         self.progress_anim.setStartValue(0.0)
         self.progress_anim.setEndValue(1.0)
         self.progress_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)

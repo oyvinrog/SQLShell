@@ -18,8 +18,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 
-class TestWindow(QMainWindow):
-    """Test window for the execution handler functionality."""
+class ExecutionDemoWindow(QMainWindow):
+    """Demo window for the execution handler functionality."""
     
     def __init__(self):
         super().__init__()
@@ -242,8 +242,8 @@ def main():
     # Run basic tests first
     run_basic_tests()
     
-    # Show the test window
-    window = TestWindow()
+    # Show the demo window
+    window = ExecutionDemoWindow()
     window.show()
     
     sys.exit(app.exec())

@@ -48,14 +48,25 @@ class DatabaseManager:
         if not self.is_connected():
             return "No database connected"
         
-        info_parts = ["In-memory DuckDB"]
-        
+        # If we have an attached database, show the primary database type
         if self.attached_databases:
+            # Get the primary attached database type
+            primary_db = self.attached_databases.get('db')
+            if primary_db:
+                db_type = primary_db['type'].upper()
+                info_parts = [f"Database: {db_type}"]
+            else:
+                info_parts = ["In-memory DuckDB"]
+            
+            # Show all attached databases
             db_info = []
             for alias, db_data in self.attached_databases.items():
                 db_type = db_data['type'].upper()
                 db_info.append(f"{alias} ({db_type})")
             info_parts.append(f"Attached: {', '.join(db_info)}")
+        else:
+            # No attached database, show in-memory DuckDB
+            info_parts = [f"In-memory DuckDB (connection_type: {self.connection_type})"]
         
         return " | ".join(info_parts)
     
@@ -118,6 +129,10 @@ class DatabaseManager:
             
             # Store the database path for display
             self.database_path = abs_path
+            
+            # Update connection_type to reflect the attached database type
+            # This ensures UI/project metadata correctly report the database type
+            self.connection_type = db_type
             
             # Track this attached database
             self.attached_databases['db'] = {
@@ -1048,6 +1063,38 @@ class DatabaseManager:
         self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
         
         return table_name
+
+    def overwrite_table_with_dataframe(self, table_name, df, source='query_result'):
+        """
+        Overwrite an existing table/view in DuckDB with the provided DataFrame.
+        
+        This is used by transforms (like query-friendly column renaming) so that
+        subsequent SQL queries against the table name see the updated schema.
+        
+        For tables that originally came from an attached database, this creates
+        an in-memory replacement under the same name and updates tracking so the
+        qualifier logic no longer rewrites it to 'db.table'.
+        """
+        # Ensure we have a connection
+        if not self.is_connected():
+            self._init_connection()
+
+        # Drop any existing view or table with this name in the main schema
+        try:
+            self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+        except Exception:
+            pass
+        try:
+            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+        except Exception:
+            pass
+
+        # Register the new DataFrame
+        self.conn.register(table_name, df)
+
+        # Update tracking; this is now an in-memory/query-result table
+        self.loaded_tables[table_name] = source
+        self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
     
     def get_all_table_columns(self):
         """

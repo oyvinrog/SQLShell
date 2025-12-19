@@ -39,6 +39,7 @@ from sqlshell.menus import setup_menubar
 from sqlshell.table_list import DraggableTablesList
 from sqlshell.notification_manager import init_notification_manager, show_error_notification, show_warning_notification, show_info_notification, show_success_notification
 from sqlshell.christmas_theme import ChristmasThemeManager
+from sqlshell.project_manager import ProjectManager
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -59,6 +60,13 @@ class SQLShell(QMainWindow):
         self.recent_files = []  # Store list of recently opened files
         self.frequent_files = {}  # Store file paths with usage counts
         self.max_recent_files = 15  # Maximum number of recent files to track
+        # Track in-memory transforms for previewed tables (e.g., deleted columns)
+        # Keyed by table name so we can restore the same transformed view when
+        # the user navigates away and back without persisting to the database.
+        self._preview_transforms = {}
+        # Track column renames per table: {table_name: {old_column_name: new_column_name}}
+        # This allows us to persist renames across project save/load
+        self._column_renames = {}
         
         # Load recent projects from settings
         self.load_recent_projects()
@@ -90,6 +98,9 @@ class SQLShell(QMainWindow):
         
         # Initialize Christmas theme manager
         self.christmas_theme_manager = ChristmasThemeManager(self)
+        
+        # Initialize project manager
+        self.project_manager = ProjectManager(self)
         
         # Create initial tab
         self.add_tab()
@@ -1077,11 +1088,23 @@ class SQLShell(QMainWindow):
             self.reload_selected_table(table_name)
                 
         try:
-            # Use the database manager to get a preview of the table
-            preview_df = self.db_manager.get_table_preview(table_name)
-                
-            self.populate_table(preview_df)
-            self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
+            # Apply any saved column renames to this table if it's loaded
+            if table_name not in self.tables_list.tables_needing_reload:
+                self._apply_column_renames_to_table(table_name)
+            
+            # If we have an in-memory transformed version of this table, preview that
+            transformed_full = self._preview_transforms.get(table_name)
+            if transformed_full is not None:
+                preview_df = transformed_full.head()
+                self.populate_table(preview_df)
+                self.statusBar().showMessage(
+                    f'Showing preview of transformed table "{table_name}" (not yet saved to database)'
+                )
+            else:
+                # Use the database manager to get a preview of the table
+                preview_df = self.db_manager.get_table_preview(table_name)
+                self.populate_table(preview_df)
+                self.statusBar().showMessage(f'Showing preview of table "{table_name}"')
             
             # Update the results title to show which table is being previewed
             current_tab.results_title.setText(f"PREVIEW: {table_name}")
@@ -1845,6 +1868,12 @@ LIMIT 10
         # Add similarity profiler action
         profile_similarity_action = context_menu.addAction("Analyze Row Similarity")
         profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
+
+        # Transform submenu for table-level operations
+        transform_menu = context_menu.addMenu("Transform")
+        convert_query_names_action = transform_menu.addAction(
+            "Convert Column Names to Query-Friendly (lowercase_with_underscores, trimmed)"
+        )
         
         # Check if table needs reloading and add appropriate action
         if table_name in self.tables_list.tables_needing_reload:
@@ -1955,6 +1984,9 @@ LIMIT 10
         elif action == profile_similarity_action:
             # Call the similarity profile method
             self.profile_similarity(table_name)
+        elif action == convert_query_names_action:
+            # Apply query-friendly column name transform to this table
+            self.convert_to_query_friendly_names(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -2296,6 +2328,55 @@ LIMIT 10
             show_error_notification(f"Error: {str(e)}")
             self.statusBar().showMessage(f'Error comparing datasets: {str(e)}')
 
+    def _apply_column_renames_to_table(self, table_name):
+        """Apply saved column renames to a table if they exist"""
+        if not hasattr(self, '_column_renames') or table_name not in self._column_renames:
+            return False
+        
+        rename_map = self._column_renames[table_name]
+        if not rename_map:
+            return False
+        
+        try:
+            # Get the current table data
+            table_df = self.db_manager.get_full_table(table_name)
+            
+            # Build rename dictionary - only include renames that are still valid
+            rename_dict = {}
+            for old_name, new_name in rename_map.items():
+                if old_name in table_df.columns and new_name not in table_df.columns:
+                    rename_dict[old_name] = new_name
+            
+            if rename_dict:
+                # Apply the renames
+                renamed_df = table_df.rename(columns=rename_dict)
+                
+                # Update the table in DuckDB
+                # Use 'transformed' source instead of preserving 'database:' source
+                # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source='transformed')
+                
+                # Update table_columns tracking
+                if table_name in self.db_manager.table_columns:
+                    columns = self.db_manager.table_columns[table_name]
+                    updated_columns = []
+                    for col in columns:
+                        if col in rename_dict:
+                            updated_columns.append(rename_dict[col])
+                        else:
+                            updated_columns.append(col)
+                    self.db_manager.table_columns[table_name] = updated_columns
+                
+                # Update preview transforms if it exists
+                if table_name in self._preview_transforms:
+                    self._preview_transforms[table_name] = renamed_df
+                
+                return True
+        except Exception as e:
+            print(f"Warning: Could not apply column renames to table '{table_name}': {e}")
+        
+        return False
+
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
         try:
@@ -2313,6 +2394,9 @@ LIMIT 10
             success, message = self.db_manager.reload_table(table_name)
             
             if success:
+                # Apply any saved column renames to this table
+                self._apply_column_renames_to_table(table_name)
+                
                 # Show success message
                 self.statusBar().showMessage(message)
                 
@@ -2411,582 +2495,23 @@ LIMIT 10
 
     def new_project(self, skip_confirmation=False):
         """Create a new project by clearing current state"""
-        if self.db_manager.is_connected() and not skip_confirmation:
-            reply = QMessageBox.question(self, 'New Project',
-                                      'Are you sure you want to start a new project? All unsaved changes will be lost.',
-                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                # Close existing connection
-                self.db_manager.close_connection()
-                
-                # Clear all database tracking
-                self.db_manager.loaded_tables = {}
-                self.db_manager.table_columns = {}
-                
-                # Reset state
-                self.tables_list.clear()
-                
-                # Clear all tabs except one
-                while self.tab_widget.count() > 1:
-                    self.close_tab(1)  # Always close tab at index 1 to keep at least one tab
-                
-                # Clear the remaining tab
-                first_tab = self.get_tab_at_index(0)
-                if first_tab:
-                    first_tab.set_query_text("")
-                    first_tab.results_table.setRowCount(0)
-                    first_tab.results_table.setColumnCount(0)
-                    first_tab.row_count_label.setText("")
-                    first_tab.results_title.setText("RESULTS")
-                
-                self.current_project_file = None
-                self.setWindowTitle('SQL Shell')
-                self.db_info_label.setText("No database connected")
-                self.statusBar().showMessage('New project created')
-        elif skip_confirmation:
-            # Skip confirmation and just clear everything
-            if self.db_manager.is_connected():
-                self.db_manager.close_connection()
-            
-            # Clear all database tracking
-            self.db_manager.loaded_tables = {}
-            self.db_manager.table_columns = {}
-            
-            # Reset state
-            self.tables_list.clear()
-            
-            # Clear all tabs except one
-            while self.tab_widget.count() > 1:
-                self.close_tab(1)  # Always close tab at index 1 to keep at least one tab
-            
-            # Clear the remaining tab
-            first_tab = self.get_tab_at_index(0)
-            if first_tab:
-                first_tab.set_query_text("")
-                first_tab.results_table.setRowCount(0)
-                first_tab.results_table.setColumnCount(0)
-                first_tab.row_count_label.setText("")
-                first_tab.results_title.setText("RESULTS")
-            
-            self.current_project_file = None
-            self.setWindowTitle('SQL Shell')
-            self.db_info_label.setText("No database connected")
+        self.project_manager.new_project(skip_confirmation=skip_confirmation)
 
     def save_project(self):
         """Save the current project"""
-        if not self.current_project_file:
-            self.save_project_as()
-            return
-            
-        self.save_project_to_file(self.current_project_file)
+        self.project_manager.save_project()
 
     def save_project_as(self):
         """Save the current project to a new file"""
-        file_name, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Project",
-            "",
-            "SQL Shell Project (*.sqls);;All Files (*)"
-        )
-        
-        if file_name:
-            if not file_name.endswith('.sqls'):
-                file_name += '.sqls'
-            self.save_project_to_file(file_name)
-            self.current_project_file = file_name
-            self.setWindowTitle(f'SQL Shell - {os.path.basename(file_name)}')
+        self.project_manager.save_project_as()
 
     def save_project_to_file(self, file_name):
         """Save project data to a file"""
-        try:
-            # Save tab information
-            tabs_data = []
-            for i in range(self.tab_widget.count()):
-                tab = self.tab_widget.widget(i)
-                tab_data = {
-                    'title': self.tab_widget.tabText(i),
-                    'query': tab.get_query_text()
-                }
-                tabs_data.append(tab_data)
-            
-            project_data = {
-                'tables': {},
-                'folders': {},
-                'tabs': tabs_data,
-                'connection_type': self.db_manager.connection_type,
-                'database_path': None  # Initialize to None
-            }
-            
-            # If we have a database connection, save the path
-            if self.db_manager.is_connected() and hasattr(self.db_manager, 'database_path'):
-                project_data['database_path'] = self.db_manager.database_path
-            
-            # Helper function to recursively save folder structure
-            def save_folder_structure(parent_item, parent_path=""):
-                if parent_item is None:
-                    # Handle top-level items
-                    for i in range(self.tables_list.topLevelItemCount()):
-                        item = self.tables_list.topLevelItem(i)
-                        if self.tables_list.is_folder_item(item):
-                            # It's a folder - add to folders and process its children
-                            folder_name = item.text(0)
-                            folder_id = f"folder_{i}"
-                            project_data['folders'][folder_id] = {
-                                'name': folder_name,
-                                'parent': None,
-                                'expanded': item.isExpanded()
-                            }
-                            save_folder_structure(item, folder_id)
-                        else:
-                            # It's a table - add to tables at root level
-                            save_table_item(item)
-                else:
-                    # Process children of this folder
-                    for i in range(parent_item.childCount()):
-                        child = parent_item.child(i)
-                        if self.tables_list.is_folder_item(child):
-                            # It's a subfolder
-                            folder_name = child.text(0)
-                            folder_id = f"{parent_path}_sub_{i}"
-                            project_data['folders'][folder_id] = {
-                                'name': folder_name,
-                                'parent': parent_path,
-                                'expanded': child.isExpanded()
-                            }
-                            save_folder_structure(child, folder_id)
-                        else:
-                            # It's a table in this folder
-                            save_table_item(child, parent_path)
-            
-            # Helper function to save table item
-            def save_table_item(item, folder_id=None):
-                table_name = self.tables_list.get_table_name_from_item(item)
-                if not table_name or table_name not in self.db_manager.loaded_tables:
-                    return
-                    
-                file_path = self.db_manager.loaded_tables[table_name]
-                
-                # For database tables (including new format 'database:alias'), query results, store the identifier
-                if file_path == 'query_result' or file_path.startswith('database'):
-                    # Save as 'database' for backward compatibility with project files
-                    source_path = 'database' if file_path.startswith('database') else file_path
-                else:
-                    # For file-based tables, store the absolute path
-                    source_path = os.path.abspath(file_path)
-                
-                project_data['tables'][table_name] = {
-                    'file_path': source_path,
-                    'columns': self.db_manager.table_columns.get(table_name, []),
-                    'folder': folder_id
-                }
-            
-            # Save the folder structure
-            save_folder_structure(None)
-            
-            with open(file_name, 'w') as f:
-                json.dump(project_data, f, indent=4)
-                
-            # Add to recent projects
-            self.add_recent_project(os.path.abspath(file_name))
-                
-            self.statusBar().showMessage(f'Project saved to {file_name}')
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error",
-                f"Failed to save project:\n\n{str(e)}")
+        self.project_manager.save_project_to_file(file_name)
 
     def open_project(self, file_name=None):
         """Open a project file"""
-        if not file_name:
-            # Check for unsaved changes before showing file dialog
-            if self.has_unsaved_changes():
-                reply = QMessageBox.question(self, 'Save Changes',
-                    'Do you want to save your changes before opening another project?',
-                    QMessageBox.StandardButton.Save | 
-                    QMessageBox.StandardButton.Discard | 
-                    QMessageBox.StandardButton.Cancel)
-                
-                if reply == QMessageBox.StandardButton.Save:
-                    self.save_project()
-                elif reply == QMessageBox.StandardButton.Cancel:
-                    return
-            
-            # Show file dialog after handling save prompt
-            file_name, _ = QFileDialog.getOpenFileName(
-                self,
-                "Open Project",
-                "",
-                "SQL Shell Project (*.sqls);;All Files (*)"
-            )
-        
-        if file_name:
-            try:
-                # Create a progress dialog to keep UI responsive
-                progress = QProgressDialog("Loading project...", "Cancel", 0, 100, self)
-                progress.setWindowTitle("Opening Project")
-                progress.setWindowModality(Qt.WindowModality.WindowModal)
-                progress.setMinimumDuration(500)  # Show after 500ms delay
-                progress.setValue(0)
-                
-                # Load project data
-                with open(file_name, 'r') as f:
-                    project_data = json.load(f)
-                
-                # Update progress
-                progress.setValue(10)
-                QApplication.processEvents()
-                
-                # Start fresh
-                self.new_project(skip_confirmation=True)
-                progress.setValue(15)
-                QApplication.processEvents()
-                
-                # Make sure all database tables are cleared from tracking
-                self.db_manager.loaded_tables = {}
-                self.db_manager.table_columns = {}
-                
-                # Check if there's a database path in the project
-                has_database_path = 'database_path' in project_data and project_data['database_path']
-                has_database_tables = any(
-                    table_info.get('file_path') == 'database' or 
-                    (table_info.get('file_path') or '').startswith('database:')
-                    for table_info in project_data.get('tables', {}).values()
-                )
-                
-                # Connect to database if needed
-                progress.setLabelText("Connecting to database...")
-                database_tables_loaded = False
-                database_connection_message = None
-                
-                if has_database_path and has_database_tables:
-                    database_path = project_data['database_path']
-                    try:
-                        if os.path.exists(database_path):
-                            # Connect to the database
-                            self.db_manager.open_database(database_path, load_all_tables=False)
-                            self.db_info_label.setText(self.db_manager.get_connection_info())
-                            self.statusBar().showMessage(f"Connected to database: {database_path}")
-                            
-                            # Mark database tables as loaded
-                            database_tables_loaded = True
-                        else:
-                            database_tables_loaded = False
-                            # Store the message instead of showing immediately
-                            database_connection_message = (
-                                "Database Not Found", 
-                                f"The project's database file was not found at:\n{database_path}\n\n"
-                                "Database tables will be shown but not accessible until you reconnect to the database.\n\n"
-                                "Use the 'Open Database' button to connect to your database file."
-                            )
-                    except Exception as e:
-                        database_tables_loaded = False
-                        # Store the message instead of showing immediately
-                        database_connection_message = (
-                            "Database Connection Error",
-                            f"Failed to connect to the project's database:\n{str(e)}\n\n"
-                            "Database tables will be shown but not accessible until you reconnect to the database.\n\n"
-                            "Use the 'Open Database' button to connect to your database file."
-                        )
-                else:
-                    # Create connection if needed (we don't have a specific database to connect to)
-                    database_tables_loaded = False
-                    if not self.db_manager.is_connected():
-                        connection_info = self.db_manager.create_memory_connection()
-                        self.db_info_label.setText(connection_info)
-                    elif 'connection_type' in project_data and project_data['connection_type'] != self.db_manager.connection_type:
-                        # If connected but with a different database type than what was saved in the project
-                        # Store the message instead of showing immediately
-                        database_connection_message = (
-                            "Database Type Mismatch",
-                            f"The project was saved with a {project_data['connection_type']} database, but you're currently using {self.db_manager.connection_type}.\n\n"
-                            "Some database-specific features may not work correctly. Consider reconnecting to the correct database type."
-                        )
-                
-                progress.setValue(20)
-                QApplication.processEvents()
-                
-                # First, recreate the folder structure
-                folder_items = {}  # Store folder items by ID
-                
-                # Create folders first
-                if 'folders' in project_data:
-                    progress.setLabelText("Creating folders...")
-                    # First pass: create top-level folders
-                    for folder_id, folder_info in project_data['folders'].items():
-                        if folder_info.get('parent') is None:
-                            # Create top-level folder
-                            folder = self.tables_list.create_folder(folder_info['name'])
-                            folder_items[folder_id] = folder
-                            # Set expanded state
-                            folder.setExpanded(folder_info.get('expanded', True))
-                    
-                    # Second pass: create subfolders
-                    for folder_id, folder_info in project_data['folders'].items():
-                        parent_id = folder_info.get('parent')
-                        if parent_id is not None and parent_id in folder_items:
-                            # Create subfolder under parent
-                            parent_folder = folder_items[parent_id]
-                            subfolder = QTreeWidgetItem(parent_folder)
-                            subfolder.setText(0, folder_info['name'])
-                            subfolder.setIcon(0, QIcon.fromTheme("folder"))
-                            subfolder.setData(0, Qt.ItemDataRole.UserRole, "folder")
-                            # Make folder text bold
-                            font = subfolder.font(0)
-                            font.setBold(True)
-                            subfolder.setFont(0, font)
-                            # Set folder flags
-                            subfolder.setFlags(subfolder.flags() | Qt.ItemFlag.ItemIsDropEnabled)
-                            # Set expanded state
-                            subfolder.setExpanded(folder_info.get('expanded', True))
-                            folder_items[folder_id] = subfolder
-                            
-                progress.setValue(25)
-                QApplication.processEvents()
-                
-                # Calculate progress steps for loading tables
-                table_count = len(project_data.get('tables', {}))
-                table_progress_start = 30
-                table_progress_end = 70
-                table_progress_step = (table_progress_end - table_progress_start) / max(1, table_count)
-                current_progress = table_progress_start
-                
-                # Load tables
-                for table_name, table_info in project_data.get('tables', {}).items():
-                    if progress.wasCanceled():
-                        break
-                        
-                    progress.setLabelText(f"Processing table: {table_name}")
-                    file_path = table_info['file_path']
-                    self.statusBar().showMessage(f"Processing table: {table_name} from {file_path}")
-                    
-                    try:
-                        # Determine folder placement
-                        folder_id = table_info.get('folder')
-                        parent_folder = folder_items.get(folder_id) if folder_id else None
-                        
-                        if file_path == 'database' or file_path.startswith('database:'):
-                            # Different handling based on whether database connection is active
-                            if database_tables_loaded:
-                                # Store table info without loading data
-                                # Use the new format 'database:db' for attached databases
-                                self.db_manager.loaded_tables[table_name] = 'database:db'
-                                if 'columns' in table_info:
-                                    self.db_manager.table_columns[table_name] = table_info['columns']
-                                    
-                                # Create item without reload icon
-                                if parent_folder:
-                                    # Add to folder
-                                    item = QTreeWidgetItem(parent_folder)
-                                    item.setText(0, f"{table_name} (database)")
-                                    item.setIcon(0, QIcon.fromTheme("x-office-spreadsheet"))
-                                    item.setData(0, Qt.ItemDataRole.UserRole, "table")
-                                else:
-                                    # Add to root
-                                    self.tables_list.add_table_item(table_name, "database", needs_reload=False)
-                            else:
-                                # No active database connection, just register the table name
-                                self.db_manager.loaded_tables[table_name] = 'database:db'
-                                if 'columns' in table_info:
-                                    self.db_manager.table_columns[table_name] = table_info['columns']
-                                
-                                # Create item with reload icon
-                                if parent_folder:
-                                    # Add to folder
-                                    item = QTreeWidgetItem(parent_folder)
-                                    item.setText(0, f"{table_name} (database)")
-                                    item.setIcon(0, QIcon.fromTheme("view-refresh"))
-                                    item.setData(0, Qt.ItemDataRole.UserRole, "table")
-                                    item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
-                                    self.tables_list.tables_needing_reload.add(table_name)
-                                else:
-                                    # Add to root
-                                    self.tables_list.add_table_item(table_name, "database", needs_reload=True)
-                        elif file_path == 'query_result':
-                            # For tables from query results, just note it as a query result table
-                            self.db_manager.loaded_tables[table_name] = 'query_result'
-                            
-                            # Create item with reload icon
-                            if parent_folder:
-                                # Add to folder
-                                item = QTreeWidgetItem(parent_folder)
-                                item.setText(0, f"{table_name} (query result)")
-                                item.setIcon(0, QIcon.fromTheme("view-refresh"))
-                                item.setData(0, Qt.ItemDataRole.UserRole, "table")
-                                item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
-                                self.tables_list.tables_needing_reload.add(table_name)
-                            else:
-                                # Add to root
-                                self.tables_list.add_table_item(table_name, "query result", needs_reload=True)
-                        elif os.path.exists(file_path):
-                            # Register the file as a table source but don't load data yet
-                            self.db_manager.loaded_tables[table_name] = file_path
-                            if 'columns' in table_info:
-                                self.db_manager.table_columns[table_name] = table_info['columns']
-                                
-                            # Create item with reload icon
-                            if parent_folder:
-                                # Add to folder
-                                item = QTreeWidgetItem(parent_folder)
-                                item.setText(0, f"{table_name} ({os.path.basename(file_path)})")
-                                item.setIcon(0, QIcon.fromTheme("view-refresh"))
-                                item.setData(0, Qt.ItemDataRole.UserRole, "table")
-                                item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
-                                self.tables_list.tables_needing_reload.add(table_name)
-                            else:
-                                # Add to root
-                                self.tables_list.add_table_item(table_name, os.path.basename(file_path), needs_reload=True)
-                        else:
-                            # File doesn't exist, but add to list with warning
-                            self.db_manager.loaded_tables[table_name] = file_path
-                            if 'columns' in table_info:
-                                self.db_manager.table_columns[table_name] = table_info['columns']
-                                
-                            # Create item with reload icon and missing warning
-                            if parent_folder:
-                                # Add to folder
-                                item = QTreeWidgetItem(parent_folder)
-                                item.setText(0, f"{table_name} ({os.path.basename(file_path)} (missing))")
-                                item.setIcon(0, QIcon.fromTheme("view-refresh"))
-                                item.setData(0, Qt.ItemDataRole.UserRole, "table")
-                                item.setToolTip(0, f"Table '{table_name}' needs to be loaded (double-click or use context menu)")
-                                self.tables_list.tables_needing_reload.add(table_name)
-                            else:
-                                # Add to root
-                                self.tables_list.add_table_item(table_name, f"{os.path.basename(file_path)} (missing)", needs_reload=True)
-                            
-                    except Exception as e:
-                        QMessageBox.warning(self, "Warning",
-                            f"Failed to process table {table_name}:\n{str(e)}")
-                
-                    # Update progress for this table
-                    current_progress += table_progress_step
-                    progress.setValue(int(current_progress))
-                    QApplication.processEvents()  # Keep UI responsive
-                
-                # Check if the operation was canceled
-                if progress.wasCanceled():
-                    self.statusBar().showMessage("Project loading was canceled")
-                    progress.close()
-                    return
-                
-                progress.setValue(75)
-                progress.setLabelText("Setting up tabs...")
-                QApplication.processEvents()
-                
-                # Load tabs in a more efficient way
-                if 'tabs' in project_data and project_data['tabs']:
-                    try:
-                        # Temporarily disable signals
-                        self.tab_widget.blockSignals(True)
-                        
-                        # First, pre-remove any existing tabs
-                        while self.tab_widget.count() > 0:
-                            widget = self.tab_widget.widget(0)
-                            self.tab_widget.removeTab(0)
-                            if widget in self.tabs:
-                                self.tabs.remove(widget)
-                            widget.deleteLater()
-                        
-                        # Then create all tab widgets at once (empty)
-                        tab_count = len(project_data['tabs'])
-                        tab_progress_step = 15 / max(1, tab_count)
-                        progress.setValue(80)
-                        QApplication.processEvents()
-                        
-                        # Create all tab widgets first without setting content
-                        for i, tab_data in enumerate(project_data['tabs']):
-                            # Create a new tab
-                            tab = QueryTab(self)
-                            self.tabs.append(tab)
-                            
-                            # Add to tab widget
-                            title = tab_data.get('title', f'Query {i+1}')
-                            self.tab_widget.addTab(tab, title)
-                            
-                            progress.setValue(int(80 + i * tab_progress_step/2))
-                            QApplication.processEvents()
-                        
-                        # Now set the content for each tab
-                        for i, tab_data in enumerate(project_data['tabs']):
-                            # Get the tab and set its query text
-                            tab = self.tab_widget.widget(i)
-                            if tab and 'query' in tab_data:
-                                tab.set_query_text(tab_data['query'])
-                            
-                            progress.setValue(int(87 + i * tab_progress_step/2))
-                            QApplication.processEvents()
-                        
-                        # Re-enable signals
-                        self.tab_widget.blockSignals(False)
-                        
-                        # Set current tab
-                        if self.tab_widget.count() > 0:
-                            self.tab_widget.setCurrentIndex(0)
-                            
-                    except Exception as e:
-                        # If there's an error, ensure we restore signals
-                        self.tab_widget.blockSignals(False)
-                        self.statusBar().showMessage(f"Error loading tabs: {str(e)}")
-                        # Create a single default tab if all fails
-                        if self.tab_widget.count() == 0:
-                            self.add_tab()
-                else:
-                    # Create default tab if no tabs in project
-                    self.add_tab()
-                
-                progress.setValue(90)
-                progress.setLabelText("Finishing up...")
-                QApplication.processEvents()
-                
-                # Update UI
-                self.current_project_file = file_name
-                self.setWindowTitle(f'SQL Shell - {os.path.basename(file_name)}')
-                
-                # Add to recent projects
-                self.add_recent_project(os.path.abspath(file_name))
-                
-                # Defer the auto-completer update to after loading is complete
-                # This helps prevent UI freezing during project loading
-                progress.setValue(95)
-                QApplication.processEvents()
-                
-                # Use a timer to update the completer after the UI is responsive
-                complete_timer = QTimer()
-                complete_timer.setSingleShot(True)
-                complete_timer.timeout.connect(self.update_completer)
-                complete_timer.start(100)  # Short delay before updating completer
-                
-                # Queue another update for reliability - sometimes the first update might not fully complete
-                failsafe_timer = QTimer()
-                failsafe_timer.setSingleShot(True)
-                failsafe_timer.timeout.connect(self.update_completer)
-                failsafe_timer.start(2000)  # Try again after 2 seconds to ensure completion is loaded
-                
-                progress.setValue(100)
-                QApplication.processEvents()
-                
-                # Show message about tables needing reload
-                reload_count = len(self.tables_list.tables_needing_reload)
-                if reload_count > 0:
-                    self.statusBar().showMessage(
-                        f'Project loaded from {file_name} with {table_count} tables. {reload_count} tables need to be reloaded (click reload icon).'
-                    )
-                else:
-                    self.statusBar().showMessage(
-                        f'Project loaded from {file_name} with {table_count} tables.'
-                    )
-                
-                # Close progress dialog before showing message boxes
-                progress.close()
-                
-                # Now show any database connection message we stored earlier
-                if database_connection_message and not database_tables_loaded and has_database_tables:
-                    title, message = database_connection_message
-                    QMessageBox.warning(self, title, message)
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error",
-                    f"Failed to open project:\n\n{str(e)}")
+        self.project_manager.open_project(file_name)
 
     def rename_table(self, old_name, new_name):
         """Rename a table in the database and update tracking"""
@@ -3690,6 +3215,400 @@ LIMIT 10
         except Exception as e:
             # Don't let errors affect application
             print(f"Error updating tab indices in suggestion manager: {e}")
+
+    def delete_column(self, column_name):
+        """Delete a column from the current results table and refresh the view."""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please run a query or open a table before deleting columns.")
+                return
+
+            # Handle preview-mode tables separately from query results
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                table_name = current_tab.preview_table_name
+
+                # Work on the full underlying table, not just the 5-row preview.
+                # Prefer any existing in-memory transformed version for this table.
+                base_df = self._preview_transforms.get(table_name)
+                if base_df is None:
+                    try:
+                        base_df = self.db_manager.get_full_table(table_name)
+                    except Exception as e:
+                        show_error_notification(
+                            f"Delete Column Error: Could not load full table '{table_name}' - {str(e)}"
+                        )
+                        return
+
+                if column_name not in base_df.columns:
+                    show_warning_notification(f"Column '{column_name}' not found in the current table.")
+                    return
+
+                # Apply the delete to the full dataset and remember it for future tools
+                updated_full_df = base_df.drop(columns=[column_name])
+                self._preview_transforms[table_name] = updated_full_df
+
+                # Update the table in DuckDB so SQL queries work immediately
+                # Use 'transformed' source instead of preserving 'database:' source
+                # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                try:
+                    self.db_manager.overwrite_table_with_dataframe(table_name, updated_full_df, source='transformed')
+                    # Update table_columns tracking
+                    if table_name in self.db_manager.table_columns:
+                        self.db_manager.table_columns[table_name] = [col for col in self.db_manager.table_columns[table_name] if col != column_name]
+                except Exception as e:
+                    # Log but don't fail - the delete still worked in the UI
+                    print(f"Warning: Could not update table in database: {e}")
+
+                # Keep showing a small preview in the UI, but based on the updated full data
+                preview_df = updated_full_df.head()
+                self.populate_table(preview_df)
+            else:
+                # Non-preview mode: operate directly on the current query results
+                df = current_tab.current_df
+                if column_name not in df.columns:
+                    show_warning_notification(f"Column '{column_name}' not found in the current results.")
+                    return
+
+                updated_df = df.drop(columns=[column_name])
+                current_tab.current_df = updated_df
+
+                # Refresh the table display with the full (query) results
+                self.populate_table(updated_df)
+
+            # Determine current column count for messaging
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                table_name = current_tab.preview_table_name
+                transformed = self._preview_transforms.get(table_name)
+                col_count = len(transformed.columns) if transformed is not None else 0
+            else:
+                col_count = len(current_tab.current_df.columns) if current_tab.current_df is not None else 0
+
+            # Inform user about the deletion and remind them to persist changes
+            message = (
+                f"Deleted column '{column_name}'. Table now has {col_count} columns. "
+                "Remember to use 'Save as Table' if you want to persist this change."
+            )
+            self.statusBar().showMessage(message)
+            try:
+                # Also show a non-intrusive notification if available
+                show_info_notification(
+                    "Column Deleted",
+                    "The column was removed from the current results. "
+                    "To avoid losing this change, use the 'Save as Table' option to save it back to the database."
+                )
+            except Exception:
+                # Notifications are optional; ignore failures here
+                pass
+        except Exception as e:
+            show_error_notification(f"Delete Column Error: Could not delete column '{column_name}' - {str(e)}")
+            self.statusBar().showMessage(f"Error deleting column '{column_name}': {str(e)}")
+
+    def rename_column(self, old_column_name, new_column_name):
+        """Rename a column in the current results table and refresh the view."""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please run a query or open a table before renaming columns.")
+                return
+
+            # Validate the new name
+            if not new_column_name or new_column_name.strip() == "":
+                show_warning_notification("Column name cannot be empty.")
+                return
+
+            # Determine the source table name for updating the database schema
+            source_table_name = None
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                source_table_name = current_tab.preview_table_name
+            elif hasattr(current_tab.current_df, '_query_source'):
+                source_table_name = getattr(current_tab.current_df, '_query_source')
+            else:
+                # Try to extract table name from current query
+                query_text = current_tab.get_query_text() if hasattr(current_tab, 'get_query_text') else ""
+                if query_text:
+                    source_tables = self.extract_table_names_from_query(query_text)
+                    if source_tables:
+                        # Use the first table found
+                        potential_table = list(source_tables)[0]
+                        if potential_table in self.db_manager.loaded_tables:
+                            source_table_name = potential_table
+
+            # Handle preview-mode tables separately from query results
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                table_name = current_tab.preview_table_name
+
+                # Work on the full underlying table, not just the 5-row preview.
+                # Prefer any existing in-memory transformed version for this table.
+                base_df = self._preview_transforms.get(table_name)
+                if base_df is None:
+                    try:
+                        base_df = self.db_manager.get_full_table(table_name)
+                    except Exception as e:
+                        show_error_notification(
+                            f"Rename Column Error: Could not load full table '{table_name}' - {str(e)}"
+                        )
+                        return
+
+                if old_column_name not in base_df.columns:
+                    show_warning_notification(f"Column '{old_column_name}' not found in the current table.")
+                    return
+
+                if new_column_name in base_df.columns:
+                    show_warning_notification(f"Column '{new_column_name}' already exists in the table.")
+                    return
+
+                # Apply the rename to the full dataset and remember it for future tools
+                updated_full_df = base_df.rename(columns={old_column_name: new_column_name})
+                self._preview_transforms[table_name] = updated_full_df
+
+                # Track the column rename for project persistence
+                if table_name not in self._column_renames:
+                    self._column_renames[table_name] = {}
+                self._column_renames[table_name][old_column_name] = new_column_name
+
+                # Update the table in DuckDB so SQL queries work immediately
+                # Use 'transformed' source instead of preserving 'database:' source
+                # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                try:
+                    self.db_manager.overwrite_table_with_dataframe(table_name, updated_full_df, source='transformed')
+                    # Update table_columns tracking
+                    if table_name in self.db_manager.table_columns:
+                        columns = self.db_manager.table_columns[table_name]
+                        updated_columns = [new_column_name if col == old_column_name else col for col in columns]
+                        self.db_manager.table_columns[table_name] = updated_columns
+                except Exception as e:
+                    # Log but don't fail - the rename still worked in the UI
+                    print(f"Warning: Could not update table in database: {e}")
+
+                # Keep showing a small preview in the UI, but based on the updated full data
+                preview_df = updated_full_df.head()
+                self.populate_table(preview_df)
+            else:
+                # Non-preview mode: operate directly on the current query results
+                df = current_tab.current_df
+                if old_column_name not in df.columns:
+                    show_warning_notification(f"Column '{old_column_name}' not found in the current results.")
+                    return
+
+                if new_column_name in df.columns:
+                    show_warning_notification(f"Column '{new_column_name}' already exists in the current results.")
+                    return
+
+                updated_df = df.rename(columns={old_column_name: new_column_name})
+                current_tab.current_df = updated_df
+
+                # Track the column rename for project persistence if we have a source table
+                if source_table_name:
+                    if source_table_name not in self._column_renames:
+                        self._column_renames[source_table_name] = {}
+                    self._column_renames[source_table_name][old_column_name] = new_column_name
+
+                # Update the source table in DuckDB if we found one, so SQL queries work immediately
+                if source_table_name and source_table_name in self.db_manager.loaded_tables:
+                    try:
+                        # Get the full table data to update
+                        full_table_df = self.db_manager.get_full_table(source_table_name)
+                        # Apply the same rename to the full table
+                        if old_column_name in full_table_df.columns:
+                            updated_full_table_df = full_table_df.rename(columns={old_column_name: new_column_name})
+                            # Use 'transformed' source instead of preserving 'database:' source
+                            # This ensures _qualify_table_names won't rewrite queries to db.<table>
+                            self.db_manager.overwrite_table_with_dataframe(source_table_name, updated_full_table_df, source='transformed')
+                            # Update table_columns tracking
+                            if source_table_name in self.db_manager.table_columns:
+                                columns = self.db_manager.table_columns[source_table_name]
+                                updated_columns = [new_column_name if col == old_column_name else col for col in columns]
+                                self.db_manager.table_columns[source_table_name] = updated_columns
+                    except Exception as e:
+                        # Log but don't fail - the rename still worked in the UI
+                        print(f"Warning: Could not update source table '{source_table_name}' in database: {e}")
+
+                # Refresh the table display with the full (query) results
+                self.populate_table(updated_df)
+
+            # Update autocomplete to include the new column name
+            try:
+                # Update the completer with new schema information
+                self.update_completer()
+            except Exception as e:
+                # Log but don't fail - autocomplete update is not critical
+                print(f"Warning: Could not update autocomplete: {e}")
+
+            # Inform user about the rename
+            message = f"Renamed column '{old_column_name}' to '{new_column_name}'. "
+            if source_table_name:
+                message += f"The table '{source_table_name}' has been updated - you can use '{new_column_name}' in SQL queries immediately."
+            else:
+                message += "Remember to use 'Save as Table' if you want to persist this change."
+            self.statusBar().showMessage(message)
+            try:
+                # Also show a non-intrusive notification if available
+                show_info_notification(
+                    "Column Renamed",
+                    f"The column '{old_column_name}' was renamed to '{new_column_name}'. "
+                    "To avoid losing this change, use the 'Save as Table' option to save it back to the database."
+                )
+            except Exception:
+                # Notifications are optional; ignore failures here
+                pass
+        except Exception as e:
+            show_error_notification(f"Rename Column Error: Could not rename column '{old_column_name}' - {str(e)}")
+            self.statusBar().showMessage(f"Error renaming column '{old_column_name}': {str(e)}")
+
+    def _make_query_friendly_name(self, name: str) -> str:
+        """Convert a single column name to a query-friendly form."""
+        if name is None:
+            return name
+        import re
+        # Convert to lowercase and replace all non-alphanumeric characters (except underscores) with underscores
+        cleaned = re.sub(r'[^a-z0-9_]', '_', str(name).strip().lower())
+        # Collapse multiple consecutive underscores into a single underscore
+        cleaned = re.sub(r'_+', '_', cleaned)
+        # Remove leading and trailing underscores
+        cleaned = cleaned.strip('_')
+        # If the result is empty (e.g., all special characters), use a default name
+        if not cleaned:
+            cleaned = 'column'
+        return cleaned
+
+    def _create_transformed_table(self, df, base_table_name=None, source_description="current results"):
+        """
+        Shared helper to create a new table with query-friendly column names.
+        
+        Args:
+            df: DataFrame to transform
+            base_table_name: Original table name to use as prefix (if available)
+            source_description: Description for status message (e.g., "full table", "current results")
+            
+        Returns:
+            Tuple of (registered_table_name, transformed_df)
+        """
+        import hashlib
+        
+        # Apply name transform
+        new_columns = [self._make_query_friendly_name(col) for col in df.columns]
+        df_renamed = df.copy()
+        df_renamed.columns = new_columns
+
+        # Generate a unique table name
+        # If we have a base table name, use it as prefix; otherwise use "query_result"
+        if base_table_name:
+            # Use base table name + hash to ensure uniqueness
+            original_cols_str = '_'.join(sorted(str(col) for col in df.columns))
+            data_hash = hashlib.md5(
+                f"{len(df)}_{len(df.columns)}_{original_cols_str}".encode()
+            ).hexdigest()[:8]
+            new_table_name = f"{base_table_name}_transformed_{data_hash}"
+        else:
+            # Fallback for query results without a clear source table
+            original_cols_str = '_'.join(sorted(str(col) for col in df.columns))
+            data_hash = hashlib.md5(
+                f"{len(df)}_{len(df.columns)}_{original_cols_str}".encode()
+            ).hexdigest()[:8]
+            new_table_name = f"query_result_{data_hash}"
+
+        # Register as a new query result table
+        registered_name = self.db_manager.register_dataframe(df_renamed, new_table_name, source="query_result")
+        
+        # Add to tables list
+        self.tables_list.add_table_item(registered_name, "query result")
+        
+        return registered_name, df_renamed
+
+    def convert_to_query_friendly_names(self, table_name: str):
+        """
+        Convert column names for a table to query-friendly format:
+        - trimmed
+        - lowercase
+        - spaces replaced with underscores
+        Creates a new query result table with the transformed data, leaving the original untouched.
+        """
+        try:
+            # Get full table data
+            df = self.db_manager.get_full_table(table_name)
+
+            # Use shared helper to create transformed table
+            registered_name, df_renamed = self._create_transformed_table(df, base_table_name=table_name, source_description="full table")
+            
+            # Update autocomplete to include the new table
+            self.update_completer()
+            
+            # Show the transformed data in the current tab
+            current_tab = self.get_current_tab()
+            if current_tab:
+                # Reset preview mode - we're now showing a transformed query result
+                current_tab.is_preview_mode = False
+                current_tab.preview_table_name = None
+                current_tab.current_df = df_renamed
+                # Show the full transformed data (not just a preview)
+                self.populate_table(df_renamed)
+
+            self.statusBar().showMessage(
+                f"Created new table '{registered_name}' with query-friendly column names "
+                f"({len(df_renamed.columns)} columns, {len(df_renamed)} rows). Original table '{table_name}' unchanged."
+            )
+        except Exception as e:
+            show_error_notification(
+                f"Transform Error: Could not convert column names for '{table_name}' - {str(e)}"
+            )
+            self.statusBar().showMessage(f"Error converting column names for '{table_name}': {str(e)}")
+
+    def convert_current_results_to_query_friendly_names(self):
+        """
+        Convert column names for the current result set to query-friendly format.
+        Creates a new query result table.
+        
+        - If in preview mode: uses the FULL underlying table data (not just the preview)
+        - If query results: uses only the current results (filtered/selected data)
+        Uses the original table name as prefix when available.
+        """
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please run a query or open a table first.")
+                return
+
+            # If we're in preview mode, get the FULL table data, not just the preview
+            was_preview_mode = current_tab.is_preview_mode and current_tab.preview_table_name
+            preview_table_name = current_tab.preview_table_name if was_preview_mode else None
+            
+            # Determine base table name for prefixing
+            base_table_name = None
+            if was_preview_mode:
+                # Use the preview table name as prefix
+                base_table_name = preview_table_name
+                df = self.db_manager.get_full_table(preview_table_name)
+                row_msg = f"{len(df)} rows (full table)"
+            else:
+                # Try to get table name from query source or current_df metadata
+                if hasattr(current_tab.current_df, '_query_source'):
+                    base_table_name = getattr(current_tab.current_df, '_query_source')
+                # For query results, use the current_df (which may be filtered)
+                df = current_tab.current_df
+                row_msg = f"{len(df)} rows from current results"
+            
+            # Use shared helper to create transformed table
+            registered_name, df_renamed = self._create_transformed_table(df, base_table_name=base_table_name, source_description=row_msg)
+            
+            # Update autocomplete to include the new table
+            self.update_completer()
+            
+            # Show the transformed data in the current tab
+            current_tab.is_preview_mode = False
+            current_tab.preview_table_name = None
+            current_tab.current_df = df_renamed
+            self.populate_table(df_renamed)
+            
+            self.statusBar().showMessage(
+                f"Created new table '{registered_name}' with query-friendly column names "
+                f"({len(df_renamed.columns)} columns, {row_msg})."
+            )
+        except Exception as e:
+            show_error_notification(
+                f"Transform Error: Could not convert column names in current results - {str(e)}"
+            )
+            self.statusBar().showMessage(f"Error converting column names in current results: {str(e)}")
     
     def close_current_tab(self):
         """Close the current tab"""
@@ -4656,6 +4575,8 @@ LIMIT 10
         
         If we're in preview mode (user clicked on a table in the left panel),
         this returns the FULL table data, not just the preview rows.
+        If previous transforms (like column delete) have been applied, it uses
+        the transformed full dataset stored on the tab.
         
         If the user ran their own query, this returns the query results (current_df).
         
@@ -4670,17 +4591,67 @@ LIMIT 10
         
         # Check if we're in preview mode and should use full table
         if current_tab.is_preview_mode and current_tab.preview_table_name:
+            # If we've already materialized a transformed full table for this table, use it
+            table_name = current_tab.preview_table_name
+            transformed_full = self._preview_transforms.get(table_name)
+            if transformed_full is not None:
+                return transformed_full.copy(), True
             try:
-                # Get the full table data
-                full_df = self.db_manager.get_full_table(current_tab.preview_table_name)
+                # Get the full table data from the database
+                full_df = self.db_manager.get_full_table(table_name)
                 return full_df, True
             except Exception as e:
-                # Fall back to current_df if we can't get full table
+                # Fall back to current_df (preview) if we can't get full table
                 print(f"Warning: Could not get full table, using preview: {e}")
                 return current_tab.current_df.copy(), False
         
         # Not in preview mode, use the query results
         return current_tab.current_df.copy(), False
+
+    def get_column_name_by_index(self, column_index):
+        """
+        Get the column name at the given index from the DataFrame that will be used by tools.
+        This ensures we get the correct column name after renames/deletes.
+        
+        Optimized to avoid loading full tables when in preview mode by using cached metadata.
+        
+        Args:
+            column_index: The index of the column
+            
+        Returns:
+            The column name, or None if the index is invalid or no data is available
+        """
+        current_tab = self.get_current_tab()
+        if not current_tab or current_tab.current_df is None:
+            return None
+        
+        # In preview mode, try to use cached metadata first to avoid loading full table
+        if current_tab.is_preview_mode and current_tab.preview_table_name:
+            table_name = current_tab.preview_table_name
+            
+            # First check if we have a cached transform with column info
+            transformed_full = self._preview_transforms.get(table_name)
+            if transformed_full is not None:
+                if 0 <= column_index < len(transformed_full.columns):
+                    return transformed_full.columns[column_index]
+                return None
+            
+            # Next check if we have cached column metadata
+            if hasattr(self.db_manager, 'table_columns') and table_name in self.db_manager.table_columns:
+                columns = self.db_manager.table_columns[table_name]
+                if 0 <= column_index < len(columns):
+                    return columns[column_index]
+            
+            # Fall back to preview df columns (should always be available)
+            if 0 <= column_index < len(current_tab.current_df.columns):
+                return current_tab.current_df.columns[column_index]
+            
+            return None
+        
+        # Not in preview mode, use current_df directly
+        if 0 <= column_index < len(current_tab.current_df.columns):
+            return current_tab.current_df.columns[column_index]
+        return None
 
     def explain_column(self, column_name):
         """Analyze a column to explain its relationship with other columns"""
@@ -4688,6 +4659,14 @@ LIMIT 10
             # Get the appropriate data (full table if preview mode, else query results)
             df, is_full_table = self.get_data_for_tool()
             if df is None:
+                return
+            
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
+            if column_name not in df.columns:
+                show_warning_notification(
+                    f"Column '{column_name}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
                 
             # Show a loading indicator
@@ -4736,9 +4715,12 @@ LIMIT 10
             if current_tab:
                 current_tab.original_df_rowcount = len(df)
             
-            # Check if the column exists
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
             if column_name not in df.columns:
-                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
+                show_warning_notification(
+                    f"Column '{column_name}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
             
             # Import and use the visualize_ohe function from profile_ohe
@@ -4848,9 +4830,12 @@ LIMIT 10
             if current_tab:
                 current_tab.original_df_rowcount = len(df)
 
-            # Check if the column exists
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
             if column_name not in df.columns:
-                show_warning_notification(f"Column '{column_name}' not found in the current dataset.")
+                show_warning_notification(
+                    f"Column '{column_name}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
 
             # Import and use the visualize_categorize function
@@ -4913,9 +4898,12 @@ LIMIT 10
             # Show a loading indicator
             self.statusBar().showMessage(f'Discovering classification rules for "{target_column}"...')
             
-            # Check if the column exists
+            # Validate that the column exists in the DataFrame (handles renamed/deleted columns)
             if target_column not in df.columns:
-                show_warning_notification(f"Column '{target_column}' not found in the current dataset.")
+                show_warning_notification(
+                    f"Column '{target_column}' not found in the current dataset. "
+                    "This may happen if the column was renamed or deleted."
+                )
                 return
             
             # Check if there are enough columns for rule learning
@@ -5380,11 +5368,11 @@ def main():
                             pass
                 window.show()
         
-        # Create and show main window after delay
+        # Create and show main window after delay (very short to speed up startup)
         timer = QTimer()
         timer.setSingleShot(True)  # Ensure it only fires once
         timer.timeout.connect(show_main_window)
-        timer.start(2000)  # 2 second delay
+        timer.start(500)  # 0.5 second delay for a very fast splash
         
         # Failsafe timer - show the main window after 5 seconds even if splash screen fails
         failsafe_timer = QTimer()
