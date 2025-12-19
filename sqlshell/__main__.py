@@ -5474,11 +5474,11 @@ def main():
                             pass
                 window.show()
         
-        # Create and show main window after delay
+        # Create and show main window after delay (very short to speed up startup)
         timer = QTimer()
         timer.setSingleShot(True)  # Ensure it only fires once
         timer.timeout.connect(show_main_window)
-        timer.start(2000)  # 2 second delay
+        timer.start(500)  # 0.5 second delay for a very fast splash
         
         # Failsafe timer - show the main window after 5 seconds even if splash screen fails
         failsafe_timer = QTimer()
