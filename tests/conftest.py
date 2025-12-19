@@ -202,6 +202,14 @@ def qapp():
     """Create a QApplication instance for GUI tests."""
     pytest.importorskip("PyQt6")
     from PyQt6.QtWidgets import QApplication
+    import os
+    
+    # Try to use offscreen platform to prevent windows from showing
+    if 'QT_QPA_PLATFORM' not in os.environ:
+        try:
+            os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+        except:
+            pass  # If offscreen is not available, continue anyway
     
     app = QApplication.instance()
     if app is None:

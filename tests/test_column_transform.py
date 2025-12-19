@@ -92,7 +92,7 @@ def test_rename_column_cell_double_click_uses_new_name(qapp, sample_df, monkeypa
 @requires_gui
 def test_rename_column_header_context_menu_uses_new_name(qapp, sample_df, monkeypatch):
     """Right-clicking header after rename should show new column name in menu."""
-    from PyQt6.QtWidgets import QInputDialog
+    from PyQt6.QtWidgets import QInputDialog, QMenu
     from sqlshell.__main__ import SQLShell
 
     window = SQLShell()
@@ -107,7 +107,16 @@ def test_rename_column_header_context_menu_uses_new_name(qapp, sample_df, monkey
     def mock_get_text(*args, **kwargs):
         return "age_renamed", True
     
+    # Mock QMenu.exec() to return immediately without blocking
+    original_exec = QMenu.exec
+    
+    def mock_menu_exec(self, *args, **kwargs):
+        """Mock QMenu.exec to return immediately without blocking"""
+        return None  # Return None to indicate no action was selected
+    
     monkeypatch.setattr(QInputDialog, "getText", mock_get_text)
+    monkeypatch.setattr(QMenu, "exec", mock_menu_exec)
+    
     current_tab.handle_header_double_click(age_idx)
 
     # Verify rename occurred
