@@ -1048,6 +1048,38 @@ class DatabaseManager:
         self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
         
         return table_name
+
+    def overwrite_table_with_dataframe(self, table_name, df, source='query_result'):
+        """
+        Overwrite an existing table/view in DuckDB with the provided DataFrame.
+        
+        This is used by transforms (like query-friendly column renaming) so that
+        subsequent SQL queries against the table name see the updated schema.
+        
+        For tables that originally came from an attached database, this creates
+        an in-memory replacement under the same name and updates tracking so the
+        qualifier logic no longer rewrites it to 'db.table'.
+        """
+        # Ensure we have a connection
+        if not self.is_connected():
+            self._init_connection()
+
+        # Drop any existing view or table with this name in the main schema
+        try:
+            self.conn.execute(f"DROP VIEW IF EXISTS {table_name}")
+        except Exception:
+            pass
+        try:
+            self.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+        except Exception:
+            pass
+
+        # Register the new DataFrame
+        self.conn.register(table_name, df)
+
+        # Update tracking; this is now an in-memory/query-result table
+        self.loaded_tables[table_name] = source
+        self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
     
     def get_all_table_columns(self):
         """

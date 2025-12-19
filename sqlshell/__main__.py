@@ -1857,6 +1857,12 @@ LIMIT 10
         # Add similarity profiler action
         profile_similarity_action = context_menu.addAction("Analyze Row Similarity")
         profile_similarity_action.setIcon(QIcon.fromTheme("applications-utilities"))
+
+        # Transform submenu for table-level operations
+        transform_menu = context_menu.addMenu("Transform")
+        convert_query_names_action = transform_menu.addAction(
+            "Convert Column Names to Query-Friendly (lowercase_with_underscores, trimmed)"
+        )
         
         # Check if table needs reloading and add appropriate action
         if table_name in self.tables_list.tables_needing_reload:
@@ -1967,6 +1973,9 @@ LIMIT 10
         elif action == profile_similarity_action:
             # Call the similarity profile method
             self.profile_similarity(table_name)
+        elif action == convert_query_names_action:
+            # Apply query-friendly column name transform to this table
+            self.convert_to_query_friendly_names(table_name)
         elif action == rename_action:
             # Show rename dialog
             new_name, ok = QInputDialog.getText(
@@ -3758,6 +3767,7 @@ LIMIT 10
                 col_count = len(transformed.columns) if transformed is not None else 0
             else:
                 col_count = len(current_tab.current_df.columns) if current_tab.current_df is not None else 0
+
             # Inform user about the deletion and remind them to persist changes
             message = (
                 f"Deleted column '{column_name}'. Table now has {col_count} columns. "
@@ -3777,6 +3787,146 @@ LIMIT 10
         except Exception as e:
             show_error_notification(f"Delete Column Error: Could not delete column '{column_name}' - {str(e)}")
             self.statusBar().showMessage(f"Error deleting column '{column_name}': {str(e)}")
+
+    def _make_query_friendly_name(self, name: str) -> str:
+        """Convert a single column name to a query-friendly form."""
+        if name is None:
+            return name
+        # Trim whitespace, convert to lowercase, and replace spaces with underscores
+        cleaned = str(name).strip().lower().replace(" ", "_")
+        return cleaned
+
+    def _create_transformed_table(self, df, base_table_name=None, source_description="current results"):
+        """
+        Shared helper to create a new table with query-friendly column names.
+        
+        Args:
+            df: DataFrame to transform
+            base_table_name: Original table name to use as prefix (if available)
+            source_description: Description for status message (e.g., "full table", "current results")
+            
+        Returns:
+            Tuple of (registered_table_name, transformed_df)
+        """
+        import hashlib
+        
+        # Apply name transform
+        new_columns = [self._make_query_friendly_name(col) for col in df.columns]
+        df_renamed = df.copy()
+        df_renamed.columns = new_columns
+
+        # Generate a unique table name
+        # If we have a base table name, use it as prefix; otherwise use "query_result"
+        if base_table_name:
+            # Use base table name + hash to ensure uniqueness
+            original_cols_str = '_'.join(sorted(str(col) for col in df.columns))
+            data_hash = hashlib.md5(
+                f"{len(df)}_{len(df.columns)}_{original_cols_str}".encode()
+            ).hexdigest()[:8]
+            new_table_name = f"{base_table_name}_transformed_{data_hash}"
+        else:
+            # Fallback for query results without a clear source table
+            original_cols_str = '_'.join(sorted(str(col) for col in df.columns))
+            data_hash = hashlib.md5(
+                f"{len(df)}_{len(df.columns)}_{original_cols_str}".encode()
+            ).hexdigest()[:8]
+            new_table_name = f"query_result_{data_hash}"
+
+        # Register as a new query result table
+        registered_name = self.db_manager.register_dataframe(df_renamed, new_table_name, source="query_result")
+        
+        # Add to tables list
+        self.tables_list.add_table_item(registered_name, "query result")
+        
+        return registered_name, df_renamed
+
+    def convert_to_query_friendly_names(self, table_name: str):
+        """
+        Convert column names for a table to query-friendly format:
+        - trimmed
+        - lowercase
+        - spaces replaced with underscores
+        Creates a new query result table with the transformed data, leaving the original untouched.
+        """
+        try:
+            # Get full table data
+            df = self.db_manager.get_full_table(table_name)
+
+            # Use shared helper to create transformed table
+            registered_name, df_renamed = self._create_transformed_table(df, base_table_name=table_name, source_description="full table")
+            
+            # Show the transformed data in the current tab
+            current_tab = self.get_current_tab()
+            if current_tab:
+                # Reset preview mode - we're now showing a transformed query result
+                current_tab.is_preview_mode = False
+                current_tab.preview_table_name = None
+                current_tab.current_df = df_renamed
+                # Show the full transformed data (not just a preview)
+                self.populate_table(df_renamed)
+
+            self.statusBar().showMessage(
+                f"Created new table '{registered_name}' with query-friendly column names "
+                f"({len(df_renamed.columns)} columns, {len(df_renamed)} rows). Original table '{table_name}' unchanged."
+            )
+        except Exception as e:
+            show_error_notification(
+                f"Transform Error: Could not convert column names for '{table_name}' - {str(e)}"
+            )
+            self.statusBar().showMessage(f"Error converting column names for '{table_name}': {str(e)}")
+
+    def convert_current_results_to_query_friendly_names(self):
+        """
+        Convert column names for the current result set to query-friendly format.
+        Creates a new query result table.
+        
+        - If in preview mode: uses the FULL underlying table data (not just the preview)
+        - If query results: uses only the current results (filtered/selected data)
+        Uses the original table name as prefix when available.
+        """
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please run a query or open a table first.")
+                return
+
+            # If we're in preview mode, get the FULL table data, not just the preview
+            was_preview_mode = current_tab.is_preview_mode and current_tab.preview_table_name
+            preview_table_name = current_tab.preview_table_name if was_preview_mode else None
+            
+            # Determine base table name for prefixing
+            base_table_name = None
+            if was_preview_mode:
+                # Use the preview table name as prefix
+                base_table_name = preview_table_name
+                df = self.db_manager.get_full_table(preview_table_name)
+                row_msg = f"{len(df)} rows (full table)"
+            else:
+                # Try to get table name from query source or current_df metadata
+                if hasattr(current_tab.current_df, '_query_source'):
+                    base_table_name = getattr(current_tab.current_df, '_query_source')
+                # For query results, use the current_df (which may be filtered)
+                df = current_tab.current_df
+                row_msg = f"{len(df)} rows from current results"
+            
+            # Use shared helper to create transformed table
+            registered_name, df_renamed = self._create_transformed_table(df, base_table_name=base_table_name, source_description=row_msg)
+            
+            # Show the transformed data in the current tab
+            current_tab.is_preview_mode = False
+            current_tab.preview_table_name = None
+            current_tab.current_df = df_renamed
+            self.populate_table(df_renamed)
+            
+            self.statusBar().showMessage(
+                f"Created new table '{registered_name}' with query-friendly column names "
+                f"({len(df_renamed.columns)} columns, {row_msg})."
+            )
+        except Exception as e:
+            show_error_notification(
+                f"Transform Error: Could not convert column names in current results - {str(e)}"
+            )
+            self.statusBar().showMessage(f"Error converting column names in current results: {str(e)}")
     
     def close_current_tab(self):
         """Close the current tab"""

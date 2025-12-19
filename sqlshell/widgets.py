@@ -125,6 +125,12 @@ class CopyableTableWidget(QTableWidget):
             save_as_table_action.setIcon(QIcon.fromTheme("document-save"))
             save_as_table_action.triggered.connect(self._save_results_as_table)
             menu.addAction(save_as_table_action)
+            
+            # Add transform submenu for result-set level operations
+            transform_menu = menu.addMenu("Transform")
+            convert_query_names_action = transform_menu.addAction(
+                "Convert Column Names to Query-Friendly (lowercase_with_underscores, trimmed)"
+            )
         
         # Add table analysis options if we have data
         table_name = self._get_current_table_name()
@@ -203,7 +209,14 @@ class CopyableTableWidget(QTableWidget):
         
         # Only show menu if we have actions
         if menu.actions():
-            menu.exec(self.mapToGlobal(position))
+            action = menu.exec(self.mapToGlobal(position))
+            
+            # Handle transform actions that need to call back into the main window
+            if parent_tab and hasattr(parent_tab, 'current_df') and parent_tab.current_df is not None:
+                if 'convert_query_names_action' in locals() and action == convert_query_names_action:
+                    main_window = self._get_main_window()
+                    if main_window and hasattr(main_window, 'convert_current_results_to_query_friendly_names'):
+                        main_window.convert_current_results_to_query_friendly_names()
     
     def _call_main_window_method(self, method_name, table_name=None):
         """Call a method on the main window with optional table name"""
