@@ -64,6 +64,9 @@ class SQLShell(QMainWindow):
         # Keyed by table name so we can restore the same transformed view when
         # the user navigates away and back without persisting to the database.
         self._preview_transforms = {}
+        # Track column renames per table: {table_name: {old_column_name: new_column_name}}
+        # This allows us to persist renames across project save/load
+        self._column_renames = {}
         
         # Load recent projects from settings
         self.load_recent_projects()
@@ -1085,6 +1088,10 @@ class SQLShell(QMainWindow):
             self.reload_selected_table(table_name)
                 
         try:
+            # Apply any saved column renames to this table if it's loaded
+            if table_name not in self.tables_list.tables_needing_reload:
+                self._apply_column_renames_to_table(table_name)
+            
             # If we have an in-memory transformed version of this table, preview that
             transformed_full = self._preview_transforms.get(table_name)
             if transformed_full is not None:
@@ -2321,6 +2328,54 @@ LIMIT 10
             show_error_notification(f"Error: {str(e)}")
             self.statusBar().showMessage(f'Error comparing datasets: {str(e)}')
 
+    def _apply_column_renames_to_table(self, table_name):
+        """Apply saved column renames to a table if they exist"""
+        if not hasattr(self, '_column_renames') or table_name not in self._column_renames:
+            return False
+        
+        rename_map = self._column_renames[table_name]
+        if not rename_map:
+            return False
+        
+        try:
+            # Get the current table data
+            table_df = self.db_manager.get_full_table(table_name)
+            
+            # Build rename dictionary - only include renames that are still valid
+            rename_dict = {}
+            for old_name, new_name in rename_map.items():
+                if old_name in table_df.columns and new_name not in table_df.columns:
+                    rename_dict[old_name] = new_name
+            
+            if rename_dict:
+                # Apply the renames
+                renamed_df = table_df.rename(columns=rename_dict)
+                
+                # Update the table in DuckDB
+                original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
+                self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source=original_source)
+                
+                # Update table_columns tracking
+                if table_name in self.db_manager.table_columns:
+                    columns = self.db_manager.table_columns[table_name]
+                    updated_columns = []
+                    for col in columns:
+                        if col in rename_dict:
+                            updated_columns.append(rename_dict[col])
+                        else:
+                            updated_columns.append(col)
+                    self.db_manager.table_columns[table_name] = updated_columns
+                
+                # Update preview transforms if it exists
+                if table_name in self._preview_transforms:
+                    self._preview_transforms[table_name] = renamed_df
+                
+                return True
+        except Exception as e:
+            print(f"Warning: Could not apply column renames to table '{table_name}': {e}")
+        
+        return False
+
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
         try:
@@ -2338,6 +2393,9 @@ LIMIT 10
             success, message = self.db_manager.reload_table(table_name)
             
             if success:
+                # Apply any saved column renames to this table
+                self._apply_column_renames_to_table(table_name)
+                
                 # Show success message
                 self.statusBar().showMessage(message)
                 
@@ -3291,6 +3349,11 @@ LIMIT 10
                 updated_full_df = base_df.rename(columns={old_column_name: new_column_name})
                 self._preview_transforms[table_name] = updated_full_df
 
+                # Track the column rename for project persistence
+                if table_name not in self._column_renames:
+                    self._column_renames[table_name] = {}
+                self._column_renames[table_name][old_column_name] = new_column_name
+
                 # Update the table in DuckDB so SQL queries work immediately
                 # Preserve the original source if it exists
                 original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
@@ -3316,6 +3379,12 @@ LIMIT 10
 
                 updated_df = df.rename(columns={old_column_name: new_column_name})
                 current_tab.current_df = updated_df
+
+                # Track the column rename for project persistence if we have a source table
+                if source_table_name:
+                    if source_table_name not in self._column_renames:
+                        self._column_renames[source_table_name] = {}
+                    self._column_renames[source_table_name][old_column_name] = new_column_name
 
                 # Update the source table in DuckDB if we found one, so SQL queries work immediately
                 if source_table_name and source_table_name in self.db_manager.loaded_tables:

@@ -2,14 +2,26 @@ import pytest
 
 from tests.conftest import requires_gui
 
+# Globally disable heavy startup actions to keep GUI tests fast and non-blocking
+from sqlshell.__main__ import SQLShell as _SQLShellClass
+_SQLShellClass.load_recent_projects = lambda self: None
+_SQLShellClass.load_most_recent_project = lambda self: None
+_SQLShellClass.update_completer = lambda self: None
+
+
+def create_sqlshell_for_tests(monkeypatch=None):
+    """Create SQLShell instance with heavy startup steps disabled."""
+    from sqlshell.__main__ import SQLShell
+    window = SQLShell()
+    window.auto_load_recent_project = False
+    return window
+
 
 @requires_gui
 def test_rename_column_analysis_uses_new_name(qapp, sample_df, monkeypatch):
     """After renaming a column, analysis functions should use the new column name."""
     from PyQt6.QtWidgets import QInputDialog
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table
     window.populate_table(sample_df)
@@ -57,9 +69,7 @@ def test_rename_column_analysis_uses_new_name(qapp, sample_df, monkeypatch):
 def test_rename_column_cell_double_click_uses_new_name(qapp, sample_df, monkeypatch):
     """Double-clicking a cell after renaming should use the new column name."""
     from PyQt6.QtWidgets import QInputDialog
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table
     window.populate_table(sample_df)
@@ -93,9 +103,7 @@ def test_rename_column_cell_double_click_uses_new_name(qapp, sample_df, monkeypa
 def test_rename_column_header_context_menu_uses_new_name(qapp, sample_df, monkeypatch):
     """Right-clicking header after rename should show new column name in menu."""
     from PyQt6.QtWidgets import QInputDialog, QMenu
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table
     window.populate_table(sample_df)
@@ -132,11 +140,9 @@ def test_rename_column_header_context_menu_uses_new_name(qapp, sample_df, monkey
 
 
 @requires_gui
-def test_rename_column_preview_mode_analysis_uses_new_name(qapp, sample_df):
+def test_rename_column_preview_mode_analysis_uses_new_name(qapp, sample_df, monkeypatch):
     """In preview mode, after renaming, analysis should use the new column name."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     table_name = "users"
 
@@ -180,17 +186,11 @@ def test_rename_column_preview_mode_analysis_uses_new_name(qapp, sample_df):
     assert "age_renamed" in df.columns
     assert "age" not in df.columns
 
-import pytest
-
-from tests.conftest import requires_gui
-
 
 @requires_gui
-def test_transform_delete_column_updates_results(qapp, sample_df):
+def test_transform_delete_column_updates_results(qapp, sample_df, monkeypatch):
     """Deleting a column via the transform helper should update current_df and the table."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -225,9 +225,7 @@ def test_preview_mode_delete_uses_full_table_and_persists_across_navigation(qapp
     - cache a transformed full DataFrame for that table,
     - and be reflected again when previewing the same table later in the session.
     """
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Fake a loaded table in the DatabaseManager
     table_name = "users"
@@ -278,7 +276,7 @@ def test_preview_mode_delete_uses_full_table_and_persists_across_navigation(qapp
 
 
 @requires_gui
-def test_convert_to_query_friendly_names_for_table_creates_new_table(qapp, sample_df):
+def test_convert_to_query_friendly_names_for_table_creates_new_table(qapp, sample_df, monkeypatch):
     """
     Converting a table's column names via the left-hand table menu should:
     - operate on the full table (not just the preview),
@@ -286,9 +284,7 @@ def test_convert_to_query_friendly_names_for_table_creates_new_table(qapp, sampl
     - show the transformed data in the current tab,
     - leave the original table untouched.
     """
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     table_name = "users"
 
@@ -352,16 +348,14 @@ def test_convert_to_query_friendly_names_for_table_creates_new_table(qapp, sampl
 
 
 @requires_gui
-def test_convert_to_query_friendly_names_creates_new_table_for_queries(qapp):
+def test_convert_to_query_friendly_names_creates_new_table_for_queries(qapp, monkeypatch):
     """
     After converting a table's column names to query-friendly form, a NEW table is created.
     SQL queries against the NEW table name should see the new column names.
     The original table remains unchanged.
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Create a DataFrame with a problematic column name that includes spaces
     df = pd.DataFrame(
@@ -400,16 +394,14 @@ def test_convert_to_query_friendly_names_creates_new_table_for_queries(qapp):
 
 
 @requires_gui
-def test_convert_current_results_to_query_friendly_names_creates_new_table(qapp, sample_df):
+def test_convert_current_results_to_query_friendly_names_creates_new_table(qapp, sample_df, monkeypatch):
     """
     Converting current results via the results table transform menu should:
     - create a NEW query result table with transformed column names,
     - contain only the current results (not the full original table),
     - use a hash-based name to avoid collisions.
     """
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table with a known DataFrame (non-preview mode)
     window.populate_table(sample_df)
@@ -453,15 +445,13 @@ def test_convert_current_results_to_query_friendly_names_creates_new_table(qapp,
 
 
 @requires_gui
-def test_convert_preview_mode_uses_full_table_not_preview(qapp):
+def test_convert_preview_mode_uses_full_table_not_preview(qapp, monkeypatch):
     """
     When in preview mode (clicking a table in the sidebar), the transform should use
     the FULL underlying table data, not just the 5-row preview.
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Create a larger DataFrame (more than 5 rows) to test preview vs full table
     full_table = pd.DataFrame({
@@ -527,15 +517,13 @@ def test_convert_preview_mode_uses_full_table_not_preview(qapp):
 
 
 @requires_gui
-def test_convert_filtered_results_creates_table_with_only_filtered_data(qapp):
+def test_convert_filtered_results_creates_table_with_only_filtered_data(qapp, monkeypatch):
     """
     When converting filtered/selected results (e.g., WHERE song LIKE '%love%'),
     the new table should contain ONLY those filtered rows, not the full original table.
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Create a DataFrame with songs data
     songs_df = pd.DataFrame({
@@ -581,15 +569,13 @@ def test_convert_filtered_results_creates_table_with_only_filtered_data(qapp):
 
 
 @requires_gui
-def test_multiple_transforms_create_different_tables(qapp):
+def test_multiple_transforms_create_different_tables(qapp, monkeypatch):
     """
     Multiple transforms of different result sets should create different tables
     (hash-based naming prevents collisions).
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Create first result set
     df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
@@ -613,15 +599,13 @@ def test_multiple_transforms_create_different_tables(qapp):
         "Different result sets should create tables with different schemas"
 
 @requires_gui
-def test_query_friendly_names_trims_whitespace(qapp):
+def test_query_friendly_names_trims_whitespace(qapp, monkeypatch):
     """
     The query-friendly name conversion should properly trim leading and trailing whitespace.
     Tests cases like "artist ", " artist", " artist ", etc.
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Create a DataFrame with column names that have whitespace issues
     df_with_whitespace = pd.DataFrame({
@@ -669,11 +653,8 @@ def test_query_friendly_names_trims_whitespace(qapp):
 
 
 @requires_gui
-def test_rename_column_updates_results(qapp, sample_df):
+def test_rename_column_updates_results(qapp, sample_df, monkeypatch):
     """Renaming a column via the rename helper should update current_df and the table."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -712,16 +693,14 @@ def test_rename_column_updates_results(qapp, sample_df):
 
 
 @requires_gui
-def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp, sample_df):
+def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp, sample_df, monkeypatch):
     """
     In preview mode, renaming a column should:
     - operate on the full table (not just the 5-row preview),
     - cache a transformed full DataFrame for that table,
     - and be reflected again when previewing the same table later in the session.
     """
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Fake a loaded table in the DatabaseManager
     table_name = "users"
@@ -791,11 +770,8 @@ def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp
 
 
 @requires_gui
-def test_rename_column_prevents_duplicate_names(qapp, sample_df):
+def test_rename_column_prevents_duplicate_names(qapp, sample_df, monkeypatch):
     """Renaming a column to an existing name should fail."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -819,9 +795,7 @@ def test_rename_column_prevents_duplicate_names(qapp, sample_df):
 def test_rename_column_via_double_click(qapp, sample_df, monkeypatch):
     """Double-clicking a column header should allow renaming."""
     from PyQt6.QtWidgets import QInputDialog
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -854,14 +828,12 @@ def test_rename_column_via_double_click(qapp, sample_df, monkeypatch):
 
 
 @requires_gui
-def test_query_friendly_names_for_table_trims_whitespace(qapp):
+def test_query_friendly_names_for_table_trims_whitespace(qapp, monkeypatch):
     """
     The table-level query-friendly name conversion should also properly trim whitespace.
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Create a DataFrame with column names that have whitespace issues
     df_with_whitespace = pd.DataFrame({
@@ -930,15 +902,13 @@ def test_query_friendly_names_for_table_trims_whitespace(qapp):
 
 
 @requires_gui
-def test_query_friendly_names_handles_special_characters(qapp):
+def test_query_friendly_names_handles_special_characters(qapp, monkeypatch):
     """
     The query-friendly name conversion should handle special characters like @, [, {, etc.
     Only a-z, 0-9, and underscores should be allowed, and consecutive underscores should be collapsed.
     """
     import pandas as pd
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Test the helper method directly with various special characters
     assert window._make_query_friendly_name("column@name") == "column_name"
@@ -1002,11 +972,9 @@ def test_query_friendly_names_handles_special_characters(qapp):
 
 
 @requires_gui
-def test_rename_column_updates_results(qapp, sample_df):
+def test_rename_column_updates_results(qapp, sample_df, monkeypatch):
     """Renaming a column via the rename helper should update current_df and the table."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -1045,16 +1013,14 @@ def test_rename_column_updates_results(qapp, sample_df):
 
 
 @requires_gui
-def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp, sample_df):
+def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp, sample_df, monkeypatch):
     """
     In preview mode, renaming a column should:
     - operate on the full table (not just the 5-row preview),
     - cache a transformed full DataFrame for that table,
     - and be reflected again when previewing the same table later in the session.
     """
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Fake a loaded table in the DatabaseManager
     table_name = "users"
@@ -1062,6 +1028,8 @@ def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp
     class DummyDBManager:
         def __init__(self, df):
             self._df = df
+            self.loaded_tables = {table_name: "file.csv"}
+            self.table_columns = {table_name: list(df.columns)}
 
         def get_table_preview(self, name):
             assert name == table_name
@@ -1072,6 +1040,9 @@ def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp
             assert name == table_name
             # Return the full DataFrame
             return self._df
+        
+        def overwrite_table_with_dataframe(self, name, df, source="query_result"):
+            self._df = df
 
     # Swap in our dummy DB manager
     window.db_manager = DummyDBManager(sample_df.copy())
@@ -1124,11 +1095,9 @@ def test_preview_mode_rename_uses_full_table_and_persists_across_navigation(qapp
 
 
 @requires_gui
-def test_rename_column_prevents_duplicate_names(qapp, sample_df):
+def test_rename_column_prevents_duplicate_names(qapp, sample_df, monkeypatch):
     """Renaming a column to an existing name should fail."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -1152,9 +1121,7 @@ def test_rename_column_prevents_duplicate_names(qapp, sample_df):
 def test_rename_column_via_double_click(qapp, sample_df, monkeypatch):
     """Double-clicking a column header should allow renaming."""
     from PyQt6.QtWidgets import QInputDialog
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table with a known DataFrame
     window.populate_table(sample_df)
@@ -1191,9 +1158,7 @@ def test_rename_column_via_double_click(qapp, sample_df, monkeypatch):
 def test_rename_column_analysis_uses_new_name(qapp, sample_df, monkeypatch):
     """After renaming a column, analysis functions should use the new column name."""
     from PyQt6.QtWidgets import QInputDialog
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table
     window.populate_table(sample_df)
@@ -1221,9 +1186,7 @@ def test_rename_column_analysis_uses_new_name(qapp, sample_df, monkeypatch):
 def test_rename_column_cell_double_click_uses_new_name(qapp, sample_df, monkeypatch):
     """Double-clicking a cell after renaming should use the new column name."""
     from PyQt6.QtWidgets import QInputDialog
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     # Populate the table
     window.populate_table(sample_df)
@@ -1252,23 +1215,26 @@ def test_rename_column_cell_double_click_uses_new_name(qapp, sample_df, monkeypa
 
 
 @requires_gui
-def test_rename_column_preview_mode_analysis_uses_new_name(qapp, sample_df):
+def test_rename_column_preview_mode_analysis_uses_new_name(qapp, sample_df, monkeypatch):
     """In preview mode, after renaming, analysis should use the new column name."""
-    from sqlshell.__main__ import SQLShell
-
-    window = SQLShell()
+    window = create_sqlshell_for_tests(monkeypatch)
 
     table_name = "users"
 
     class DummyDBManager:
         def __init__(self, df):
             self._df = df
+            self.loaded_tables = {table_name: "file.csv"}
+            self.table_columns = {table_name: list(df.columns)}
 
         def get_table_preview(self, name):
             return self._df.head()
 
         def get_full_table(self, name):
             return self._df
+        
+        def overwrite_table_with_dataframe(self, name, df, source="query_result"):
+            self._df = df
 
     window.db_manager = DummyDBManager(sample_df.copy())
 

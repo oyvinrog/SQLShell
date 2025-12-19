@@ -61,6 +61,12 @@ class ProjectManager:
         self.db_manager.loaded_tables = {}
         self.db_manager.table_columns = {}
         
+        # Clear column renames and preview transforms
+        if hasattr(self.window, '_column_renames'):
+            self.window._column_renames = {}
+        if hasattr(self.window, '_preview_transforms'):
+            self.window._preview_transforms = {}
+        
         # Reset state
         self.tables_list.clear()
         
@@ -126,7 +132,8 @@ class ProjectManager:
                 'folders': {},
                 'tabs': tabs_data,
                 'connection_type': self.db_manager.connection_type,
-                'database_path': None  # Initialize to None
+                'database_path': None,  # Initialize to None
+                'column_renames': getattr(self.window, '_column_renames', {})  # Save column rename mappings
             }
             
             # If we have a database connection, save the path
@@ -480,6 +487,64 @@ class ProjectManager:
                     self.window.statusBar().showMessage("Project loading was canceled")
                     progress.close()
                     return
+                
+                # Apply column renames if they exist in the project
+                progress.setValue(72)
+                progress.setLabelText("Applying column renames...")
+                QApplication.processEvents()
+                
+                if 'column_renames' in project_data and project_data['column_renames']:
+                    # Initialize column_renames if it doesn't exist
+                    if not hasattr(self.window, '_column_renames'):
+                        self.window._column_renames = {}
+                    
+                    # Restore the column rename mappings
+                    self.window._column_renames = project_data['column_renames']
+                    
+                    # Apply renames to tables that are already loaded
+                    for table_name, rename_map in project_data['column_renames'].items():
+                        if table_name in self.db_manager.loaded_tables:
+                            try:
+                                # Get the current table data
+                                if table_name in self.db_manager.loaded_tables:
+                                    # Try to get the table - it might need to be loaded first
+                                    try:
+                                        table_df = self.db_manager.get_full_table(table_name)
+                                        
+                                        # Apply all renames for this table
+                                        rename_dict = {}
+                                        for old_name, new_name in rename_map.items():
+                                            if old_name in table_df.columns and new_name not in table_df.columns:
+                                                rename_dict[old_name] = new_name
+                                        
+                                        if rename_dict:
+                                            # Apply the renames
+                                            renamed_df = table_df.rename(columns=rename_dict)
+                                            
+                                            # Update the table in DuckDB
+                                            original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
+                                            self.db_manager.overwrite_table_with_dataframe(table_name, renamed_df, source=original_source)
+                                            
+                                            # Update table_columns tracking
+                                            if table_name in self.db_manager.table_columns:
+                                                columns = self.db_manager.table_columns[table_name]
+                                                updated_columns = []
+                                                for col in columns:
+                                                    if col in rename_dict:
+                                                        updated_columns.append(rename_dict[col])
+                                                    else:
+                                                        updated_columns.append(col)
+                                                self.db_manager.table_columns[table_name] = updated_columns
+                                            
+                                            # Update preview transforms if it exists
+                                            if hasattr(self.window, '_preview_transforms'):
+                                                if table_name in self.window._preview_transforms:
+                                                    self.window._preview_transforms[table_name] = renamed_df
+                                    except Exception as e:
+                                        # Table might not be loaded yet - that's okay, renames will be applied when it's loaded
+                                        print(f"Note: Could not apply renames to table '{table_name}' yet (may need to be loaded): {e}")
+                            except Exception as e:
+                                print(f"Warning: Could not apply column renames for table '{table_name}': {e}")
                 
                 progress.setValue(75)
                 progress.setLabelText("Setting up tabs...")
