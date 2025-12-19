@@ -2459,6 +2459,8 @@ LIMIT 10
                     first_tab.results_table.setColumnCount(0)
                     first_tab.row_count_label.setText("")
                     first_tab.results_title.setText("RESULTS")
+                    # Reset tab title to default
+                    self.tab_widget.setTabText(0, "Query 1")
                 
                 self.current_project_file = None
                 self.setWindowTitle('SQL Shell')
@@ -2488,6 +2490,8 @@ LIMIT 10
                 first_tab.results_table.setColumnCount(0)
                 first_tab.row_count_label.setText("")
                 first_tab.results_title.setText("RESULTS")
+                # Reset tab title to default
+                self.tab_widget.setTabText(0, "Query 1")
             
             self.current_project_file = None
             self.setWindowTitle('SQL Shell')
