@@ -3246,6 +3246,23 @@ LIMIT 10
                 show_warning_notification("Column name cannot be empty.")
                 return
 
+            # Determine the source table name for updating the database schema
+            source_table_name = None
+            if current_tab.is_preview_mode and current_tab.preview_table_name:
+                source_table_name = current_tab.preview_table_name
+            elif hasattr(current_tab.current_df, '_query_source'):
+                source_table_name = getattr(current_tab.current_df, '_query_source')
+            else:
+                # Try to extract table name from current query
+                query_text = current_tab.get_query_text() if hasattr(current_tab, 'get_query_text') else ""
+                if query_text:
+                    source_tables = self.extract_table_names_from_query(query_text)
+                    if source_tables:
+                        # Use the first table found
+                        potential_table = list(source_tables)[0]
+                        if potential_table in self.db_manager.loaded_tables:
+                            source_table_name = potential_table
+
             # Handle preview-mode tables separately from query results
             if current_tab.is_preview_mode and current_tab.preview_table_name:
                 table_name = current_tab.preview_table_name
@@ -3274,6 +3291,15 @@ LIMIT 10
                 updated_full_df = base_df.rename(columns={old_column_name: new_column_name})
                 self._preview_transforms[table_name] = updated_full_df
 
+                # Update the table in DuckDB so SQL queries work immediately
+                # Preserve the original source if it exists
+                original_source = self.db_manager.loaded_tables.get(table_name, 'query_result')
+                try:
+                    self.db_manager.overwrite_table_with_dataframe(table_name, updated_full_df, source=original_source)
+                except Exception as e:
+                    # Log but don't fail - the rename still worked in the UI
+                    print(f"Warning: Could not update table in database: {e}")
+
                 # Keep showing a small preview in the UI, but based on the updated full data
                 preview_df = updated_full_df.head()
                 self.populate_table(preview_df)
@@ -3291,12 +3317,39 @@ LIMIT 10
                 updated_df = df.rename(columns={old_column_name: new_column_name})
                 current_tab.current_df = updated_df
 
+                # Update the source table in DuckDB if we found one, so SQL queries work immediately
+                if source_table_name and source_table_name in self.db_manager.loaded_tables:
+                    try:
+                        # Get the full table data to update
+                        full_table_df = self.db_manager.get_full_table(source_table_name)
+                        # Apply the same rename to the full table
+                        if old_column_name in full_table_df.columns:
+                            updated_full_table_df = full_table_df.rename(columns={old_column_name: new_column_name})
+                            # Preserve the original source when updating
+                            original_source = self.db_manager.loaded_tables.get(source_table_name, 'query_result')
+                            # Update the table in DuckDB
+                            self.db_manager.overwrite_table_with_dataframe(source_table_name, updated_full_table_df, source=original_source)
+                    except Exception as e:
+                        # Log but don't fail - the rename still worked in the UI
+                        print(f"Warning: Could not update source table '{source_table_name}' in database: {e}")
+
                 # Refresh the table display with the full (query) results
                 self.populate_table(updated_df)
 
+            # Update autocomplete to include the new column name
+            try:
+                # Update the completer with new schema information
+                self.update_completer()
+            except Exception as e:
+                # Log but don't fail - autocomplete update is not critical
+                print(f"Warning: Could not update autocomplete: {e}")
+
             # Inform user about the rename
             message = f"Renamed column '{old_column_name}' to '{new_column_name}'. "
-            message += "Remember to use 'Save as Table' if you want to persist this change."
+            if source_table_name:
+                message += f"The table '{source_table_name}' has been updated - you can use '{new_column_name}' in SQL queries immediately."
+            else:
+                message += "Remember to use 'Save as Table' if you want to persist this change."
             self.statusBar().showMessage(message)
             try:
                 # Also show a non-intrusive notification if available
