@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QApplication, QListWidget, QListWidgetItem,
                             QWidget, QHBoxLayout, QFrame, QTreeWidget, QTreeWidgetItem,
                             QMenu, QInputDialog, QLineEdit)
 from PyQt6.QtCore import Qt, QPoint, QMimeData, QTimer, QSize
-from PyQt6.QtGui import QIcon, QDrag, QPainter, QColor, QBrush, QPixmap, QFont, QCursor, QAction
+from PyQt6.QtGui import QIcon, QDrag, QPainter, QColor, QBrush, QPixmap, QFont, QCursor, QAction, QKeyEvent
 from PyQt6.QtCore import pyqtSignal
 
 class DraggableTablesList(QTreeWidget):
@@ -106,6 +106,70 @@ class DraggableTablesList(QTreeWidget):
         # For non-folder items, handle showing the table preview
         if self.parent and hasattr(self.parent, 'show_table_preview'):
             self.parent.show_table_preview(item)
+    
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle keyboard events, particularly Delete key for table deletion"""
+        # Handle Delete key (without modifiers) for deleting selected tables
+        if event.key() == Qt.Key.Key_Delete and not event.modifiers():
+            # Get all selected items
+            selected_items = self.selectedItems()
+            
+            # Filter out folder items - only process table items
+            table_items = [item for item in selected_items if not self.is_folder_item(item)]
+            
+            if not table_items:
+                # No table items selected, use default behavior
+                super().keyPressEvent(event)
+                return
+            
+            # Get table names for confirmation dialog
+            table_names = [self.get_table_name_from_item(item) for item in table_items]
+            table_names = [name for name in table_names if name]  # Remove None values
+            
+            if not table_names:
+                super().keyPressEvent(event)
+                return
+            
+            # Check if parent has the delete methods
+            if not self.parent or not hasattr(self.parent, 'remove_selected_table'):
+                super().keyPressEvent(event)
+                return
+            
+            # Show confirmation dialog
+            if len(table_items) == 1:
+                # Single table deletion
+                table_name = table_names[0]
+                reply = QMessageBox.question(
+                    self.parent,
+                    "Delete Table",
+                    f"Are you sure you want to delete table '{table_name}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Set the current item to the selected item so remove_selected_table works correctly
+                    self.setCurrentItem(table_items[0])
+                    self.parent.remove_selected_table()
+            else:
+                # Multiple table deletion
+                reply = QMessageBox.question(
+                    self.parent,
+                    "Delete Multiple Tables",
+                    f"Are you sure you want to delete these {len(table_names)} tables?\n\n" +
+                    "\n".join(f"• {name}" for name in table_names[:10]) +
+                    (f"\n... and {len(table_names) - 10} more" if len(table_names) > 10 else ""),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    if hasattr(self.parent, 'remove_multiple_selected_tables'):
+                        self.parent.remove_multiple_selected_tables(table_items)
+            
+            # Don't propagate the event further
+            return
+        
+        # For other keys, use the default behavior
+        super().keyPressEvent(event)
     
     def is_folder_item(self, item):
         """Check if an item is a folder"""
