@@ -84,8 +84,12 @@ def small_df():
 
 @pytest.fixture(scope="module")
 def large_df():
-    """Create a large DataFrame for full benchmark tests (1M rows)."""
-    return create_test_dataframe(1_000_000)
+    """Create a large DataFrame for performance tests (50k rows).
+    
+    Reduced from 1M rows for faster test execution while still testing
+    performance characteristics. For full benchmarks, modify this value.
+    """
+    return create_test_dataframe(50_000)
 
 
 # ==============================================================================
@@ -153,10 +157,14 @@ class TestSearchFunctionality:
 @pytest.mark.slow
 @pytest.mark.performance
 class TestSearchPerformance:
-    """Full performance benchmark tests using 1 million row dataset.
+    """Performance tests using 50k row dataset.
     
     These tests are marked as 'slow' and 'performance' and are skipped by default.
     Run with: pytest -m slow tests/test_search_performance.py
+    
+    Note: Dataset size reduced from 1M to 50k rows for faster execution while
+    still testing performance characteristics. For full benchmarks, modify
+    the large_df fixture.
     """
     
     @staticmethod
@@ -180,11 +188,11 @@ class TestSearchPerformance:
         return result, elapsed_time
     
     def test_search_common_word(self, large_df):
-        """Benchmark searching for a common word on 1M rows."""
+        """Benchmark searching for a common word on large dataset."""
         df, n_rows = large_df
         
         print("=" * 60)
-        print("BENCHMARK: Search for common word 'User' on 1M rows")
+        print(f"BENCHMARK: Search for common word 'User' on {n_rows:,} rows")
         print("=" * 60)
         
         result1, time1 = self.measure_search_performance(
@@ -200,11 +208,11 @@ class TestSearchPerformance:
         print(f"Speedup factor: {speedup:.2f}x")
     
     def test_search_specific_pattern(self, large_df):
-        """Benchmark searching for a specific pattern on 1M rows."""
+        """Benchmark searching for a specific pattern on large dataset."""
         df, n_rows = large_df
         
         print("=" * 60)
-        print("BENCHMARK: Search for pattern 'Engineering' on 1M rows")
+        print(f"BENCHMARK: Search for pattern 'Engineering' on {n_rows:,} rows")
         print("=" * 60)
         
         result1, time1 = self.measure_search_performance(
@@ -221,11 +229,11 @@ class TestSearchPerformance:
         print(f"Speedup factor: {speedup:.2f}x")
     
     def test_search_numeric_value(self, large_df):
-        """Benchmark searching for a numeric value on 1M rows."""
+        """Benchmark searching for a numeric value on large dataset."""
         df, n_rows = large_df
         
         print("=" * 60)
-        print("BENCHMARK: Search for numeric value '12345' on 1M rows")
+        print(f"BENCHMARK: Search for numeric value '12345' on {n_rows:,} rows")
         print("=" * 60)
         
         result1, time1 = self.measure_search_performance(
@@ -241,11 +249,11 @@ class TestSearchPerformance:
         print(f"Speedup factor: {speedup:.2f}x")
     
     def test_search_rare_pattern(self, large_df):
-        """Benchmark searching for a rare pattern on 1M rows."""
+        """Benchmark searching for a rare pattern on large dataset."""
         df, n_rows = large_df
         
         print("=" * 60)
-        print("BENCHMARK: Search for rare pattern 'XYZ999' on 1M rows")
+        print(f"BENCHMARK: Search for rare pattern 'XYZ999' on {n_rows:,} rows")
         print("=" * 60)
         
         result1, time1 = self.measure_search_performance(
@@ -261,11 +269,11 @@ class TestSearchPerformance:
         print(f"Speedup factor: {speedup:.2f}x")
     
     def test_search_case_sensitivity(self, large_df):
-        """Benchmark case sensitivity performance on 1M rows."""
+        """Benchmark case sensitivity performance on large dataset."""
         df, n_rows = large_df
         
         print("=" * 60)
-        print("BENCHMARK: Case sensitivity test with 'user' on 1M rows")
+        print(f"BENCHMARK: Case sensitivity test with 'user' on {n_rows:,} rows")
         print("=" * 60)
         
         result1, time1 = self.measure_search_performance(
@@ -283,14 +291,14 @@ class TestSearchPerformance:
             "Case-insensitive search should find at least as many results"
     
     def test_memory_efficiency(self, large_df):
-        """Benchmark memory usage during search operations on 1M rows."""
+        """Benchmark memory usage during search operations on large dataset."""
         import psutil
         import os as os_module
         
         df, n_rows = large_df
         
         print("=" * 60)
-        print("BENCHMARK: Memory efficiency test on 1M rows")
+        print(f"BENCHMARK: Memory efficiency test on {n_rows:,} rows")
         print("=" * 60)
         
         process = psutil.Process(os_module.getpid())

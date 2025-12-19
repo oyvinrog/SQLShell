@@ -4637,7 +4637,7 @@ LIMIT 10
                 return None
             
             # Next check if we have cached column metadata
-            if table_name in self.db_manager.table_columns:
+            if hasattr(self.db_manager, 'table_columns') and table_name in self.db_manager.table_columns:
                 columns = self.db_manager.table_columns[table_name]
                 if 0 <= column_index < len(columns):
                     return columns[column_index]

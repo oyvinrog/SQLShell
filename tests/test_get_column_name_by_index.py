@@ -118,6 +118,7 @@ def test_get_column_name_by_index_in_preview_mode(qapp, sample_df):
     class DummyDBManager:
         def __init__(self, df):
             self._df = df
+            self.table_columns = {}  # Track column metadata
         
         def get_table_preview(self, name):
             return self._df.head()
