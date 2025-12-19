@@ -3855,6 +3855,9 @@ LIMIT 10
             # Use shared helper to create transformed table
             registered_name, df_renamed = self._create_transformed_table(df, base_table_name=table_name, source_description="full table")
             
+            # Update autocomplete to include the new table
+            self.update_completer()
+            
             # Show the transformed data in the current tab
             current_tab = self.get_current_tab()
             if current_tab:
@@ -3911,6 +3914,9 @@ LIMIT 10
             
             # Use shared helper to create transformed table
             registered_name, df_renamed = self._create_transformed_table(df, base_table_name=base_table_name, source_description=row_msg)
+            
+            # Update autocomplete to include the new table
+            self.update_completer()
             
             # Show the transformed data in the current tab
             current_tab.is_preview_mode = False
