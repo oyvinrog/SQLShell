@@ -3796,8 +3796,16 @@ LIMIT 10
         """Convert a single column name to a query-friendly form."""
         if name is None:
             return name
-        # Trim whitespace, convert to lowercase, and replace spaces with underscores
-        cleaned = str(name).strip().lower().replace(" ", "_")
+        import re
+        # Convert to lowercase and replace all non-alphanumeric characters (except underscores) with underscores
+        cleaned = re.sub(r'[^a-z0-9_]', '_', str(name).strip().lower())
+        # Collapse multiple consecutive underscores into a single underscore
+        cleaned = re.sub(r'_+', '_', cleaned)
+        # Remove leading and trailing underscores
+        cleaned = cleaned.strip('_')
+        # If the result is empty (e.g., all special characters), use a default name
+        if not cleaned:
+            cleaned = 'column'
         return cleaned
 
     def _create_transformed_table(self, df, base_table_name=None, source_description="current results"):

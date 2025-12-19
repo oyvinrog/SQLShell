@@ -456,7 +456,7 @@ def test_query_friendly_names_trims_whitespace(qapp):
     assert window._make_query_friendly_name("artist ") == "artist"
     assert window._make_query_friendly_name(" artist") == "artist"
     assert window._make_query_friendly_name("Artist Name") == "artist_name"
-    assert window._make_query_friendly_name("  Multiple   Spaces  ") == "multiple___spaces"
+    assert window._make_query_friendly_name("  Multiple   Spaces  ") == "multiple_spaces"
     assert window._make_query_friendly_name("normal_column") == "normal_column"
 
     # Test on actual DataFrame via current results transform
@@ -472,7 +472,7 @@ def test_query_friendly_names_trims_whitespace(qapp):
         "artist",           # "artist " -> trimmed, lowercased
         "artist",           # " artist" -> trimmed, lowercased
         "artist_name",      # "Artist Name" -> lowercased, spaces to underscores
-        "multiple___spaces", # "  Multiple   Spaces  " -> trimmed, lowercased, spaces to underscores
+        "multiple_spaces",  # "  Multiple   Spaces  " -> trimmed, lowercased, spaces to underscores, collapsed
         "normal_column",    # "normal_column" -> unchanged (already friendly)
     ]
 
@@ -560,4 +560,76 @@ def test_query_friendly_names_for_table_trims_whitespace(qapp):
         f"Preview mode: {current_tab.is_preview_mode}, "
         f"Preview table name: {current_tab.preview_table_name}"
     )
+
+
+@requires_gui
+def test_query_friendly_names_handles_special_characters(qapp):
+    """
+    The query-friendly name conversion should handle special characters like @, [, {, etc.
+    Only a-z, 0-9, and underscores should be allowed, and consecutive underscores should be collapsed.
+    """
+    import pandas as pd
+    from sqlshell.__main__ import SQLShell
+
+    window = SQLShell()
+
+    # Test the helper method directly with various special characters
+    assert window._make_query_friendly_name("column@name") == "column_name"
+    assert window._make_query_friendly_name("column[name]") == "column_name"
+    assert window._make_query_friendly_name("column{name}") == "column_name"
+    assert window._make_query_friendly_name("column#name") == "column_name"
+    assert window._make_query_friendly_name("column$name") == "column_name"
+    assert window._make_query_friendly_name("column%name") == "column_name"
+    assert window._make_query_friendly_name("column&name") == "column_name"
+    assert window._make_query_friendly_name("column*name") == "column_name"
+    assert window._make_query_friendly_name("column+name") == "column_name"
+    assert window._make_query_friendly_name("column-name") == "column_name"
+    assert window._make_query_friendly_name("column=name") == "column_name"
+    assert window._make_query_friendly_name("column!name") == "column_name"
+    assert window._make_query_friendly_name("column@[name]") == "column_name"
+    assert window._make_query_friendly_name("@column") == "column"
+    assert window._make_query_friendly_name("column@") == "column"
+    assert window._make_query_friendly_name("@@@") == "column"  # All special chars -> default
+    assert window._make_query_friendly_name("column__name") == "column_name"  # Collapse underscores
+    assert window._make_query_friendly_name("column___name") == "column_name"  # Collapse multiple underscores
+    assert window._make_query_friendly_name("_column_name_") == "column_name"  # Trim leading/trailing underscores
+    assert window._make_query_friendly_name("column123") == "column123"  # Numbers allowed
+    assert window._make_query_friendly_name("Column_Name") == "column_name"  # Uppercase converted
+
+    # Test on actual DataFrame with special characters
+    df_with_special = pd.DataFrame({
+        "column@name": [1, 2, 3],
+        "[bracketed]": [4, 5, 6],
+        "{braced}": [7, 8, 9],
+        "normal_column": [10, 11, 12],
+        "column__with__underscores": [13, 14, 15],
+        "@leading": [16, 17, 18],
+        "trailing@": [19, 20, 21],
+    })
+
+    window.populate_table(df_with_special)
+    current_tab = window.get_current_tab()
+
+    # Apply transform
+    window.convert_current_results_to_query_friendly_names()
+
+    # Verify all columns are properly transformed
+    expected_columns = [
+        "column_name",
+        "bracketed",
+        "braced",
+        "normal_column",
+        "column_with_underscores",
+        "leading",
+        "trailing",
+    ]
+
+    assert list(current_tab.current_df.columns) == expected_columns
+
+    # Verify visible table headers also match
+    headers = [
+        current_tab.results_table.horizontalHeaderItem(i).text()
+        for i in range(current_tab.results_table.columnCount())
+    ]
+    assert headers == expected_columns
 
