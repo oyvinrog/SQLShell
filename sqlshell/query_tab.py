@@ -448,6 +448,11 @@ class QueryTab(QWidget):
         sql_menu = menu.addMenu("Generate SQL")
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
+
+        # Transform submenu for column-level operations
+        transform_menu = menu.addMenu("Transform")
+        delete_column_action = transform_menu.addAction("Delete")
+
         explain_action = menu.addAction("Find Related Columns")
         related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
         encode_action = menu.addAction("One-Hot Encode")
@@ -560,6 +565,11 @@ class QueryTab(QWidget):
                 new_query += f"\nWHERE {quoted_col_name} = ?"
                 self.set_query_text(new_query)
             self.parent.statusBar().showMessage(f"Added filter condition for '{col_name}'")
+
+        elif action == delete_column_action:
+            # Request column deletion from the main window
+            if hasattr(self.parent, "delete_column"):
+                self.parent.delete_column(col_name)
 
     def handle_cell_double_click(self, row, column):
         """Handle double-click on a cell to add column to query editor"""
@@ -726,6 +736,11 @@ class QueryTab(QWidget):
         sql_menu = menu.addMenu("Generate SQL")
         select_col_action = sql_menu.addAction(f"SELECT {quoted_col_name}")
         filter_col_action = sql_menu.addAction(f"WHERE {quoted_col_name} = ?")
+
+        # Transform submenu for column-level operations
+        transform_menu = menu.addMenu("Transform")
+        delete_column_action = transform_menu.addAction("Delete")
+
         explain_action = menu.addAction("Find Related Columns")
         related_ohe_action = menu.addAction("Find Related One-Hot Encodings")
         encode_action = menu.addAction("One-Hot Encode")
@@ -788,6 +803,11 @@ class QueryTab(QWidget):
                 cursor = self.query_edit.textCursor()
                 cursor.insertText(f"WHERE {quoted_col_name} = ")
                 self.query_edit.setFocus()
+
+        elif action == delete_column_action:
+            # Request column deletion from the main window
+            if hasattr(self.parent, "delete_column"):
+                self.parent.delete_column(col_name)
 
     def handle_header_double_click(self, idx):
         """Handle double-click on a column header to add it to the query editor"""

@@ -3690,6 +3690,37 @@ LIMIT 10
         except Exception as e:
             # Don't let errors affect application
             print(f"Error updating tab indices in suggestion manager: {e}")
+
+    def delete_column(self, column_name):
+        """Delete a column from the current results table and refresh the view."""
+        try:
+            current_tab = self.get_current_tab()
+            if not current_tab or current_tab.current_df is None:
+                show_warning_notification("No data available. Please run a query before deleting columns.")
+                return
+
+            df = current_tab.current_df
+            if column_name not in df.columns:
+                show_warning_notification(f"Column '{column_name}' not found in the current results.")
+                return
+
+            # Drop the column and update the current tab
+            updated_df = df.drop(columns=[column_name])
+            current_tab.current_df = updated_df
+
+            # Reset preview mode because we've modified the data
+            current_tab.is_preview_mode = False
+            current_tab.preview_table_name = None
+
+            # Refresh the table display
+            self.populate_table(updated_df)
+
+            self.statusBar().showMessage(
+                f"Deleted column '{column_name}'. Table now has {len(updated_df.columns)} columns."
+            )
+        except Exception as e:
+            show_error_notification(f"Delete Column Error: Could not delete column '{column_name}' - {str(e)}")
+            self.statusBar().showMessage(f"Error deleting column '{column_name}': {str(e)}")
     
     def close_current_tab(self):
         """Close the current tab"""
