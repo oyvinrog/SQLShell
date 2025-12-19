@@ -426,6 +426,9 @@ def test_save_project_with_database_path(project_manager, mock_window):
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
     finally:
+        # Close database connection before deleting file (required on Windows)
+        if mock_window.db_manager.is_connected():
+            mock_window.db_manager.close_connection()
         if os.path.exists(db_path):
             os.unlink(db_path)
 
@@ -676,6 +679,9 @@ def test_full_save_load_cycle_integration(project_manager, mock_window, monkeypa
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
     finally:
+        # Close database connection before deleting file (required on Windows)
+        if mock_window.db_manager.is_connected():
+            mock_window.db_manager.close_connection()
         if os.path.exists(db_path):
             os.unlink(db_path)
 
