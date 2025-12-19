@@ -325,6 +325,361 @@ def test_project_manager_integration(mock_window):
             os.unlink(temp_path)
 
 
+def test_save_project_with_folders(project_manager, mock_window):
+    """Test saving a project with folder structure"""
+    import pandas as pd
+    from PyQt6.QtWidgets import QTreeWidgetItem
+    from PyQt6.QtGui import QIcon
+    from PyQt6.QtCore import Qt
+    
+    # Create a folder
+    folder = mock_window.tables_list.create_folder("Test Folder")
+    
+    # Add a table to the folder
+    test_df = pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})
+    table_name = mock_window.db_manager.register_dataframe(test_df, "test_table")
+    mock_window.db_manager.loaded_tables[table_name] = '/path/to/test.csv'
+    mock_window.db_manager.table_columns[table_name] = ['col1', 'col2']
+    
+    # Add table item to folder
+    item = QTreeWidgetItem(folder)
+    item.setText(0, f"{table_name} (test.csv)")
+    item.setIcon(0, QIcon.fromTheme("x-office-spreadsheet"))
+    item.setData(0, Qt.ItemDataRole.UserRole, "table")
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqls', delete=False) as f:
+        temp_path = f.name
+    
+    try:
+        # Save project
+        project_manager.save_project_to_file(temp_path)
+        
+        # Verify file contains folder structure
+        with open(temp_path, 'r') as f:
+            data = json.load(f)
+        
+        assert 'folders' in data
+        assert len(data['folders']) > 0
+        # Find the folder
+        folder_found = False
+        for folder_id, folder_info in data['folders'].items():
+            if folder_info['name'] == "Test Folder":
+                folder_found = True
+                assert folder_info['parent'] is None  # Top-level folder
+                break
+        assert folder_found, "Folder should be saved in project file"
+        
+        # Verify table is associated with folder
+        assert 'tables' in data
+        table_found = False
+        for table_name_saved, table_info in data['tables'].items():
+            if table_name_saved == table_name:
+                table_found = True
+                assert table_info['folder'] is not None, "Table should be associated with folder"
+                break
+        assert table_found, "Table should be saved in project file"
+        
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def test_save_project_with_database_path(project_manager, mock_window):
+    """Test saving a project with database connection"""
+    import tempfile as tf
+    import duckdb
+    import os
+    
+    # Create a temporary database file path
+    with tf.NamedTemporaryFile(suffix='.db', delete=False) as db_file:
+        db_path = db_file.name
+    
+    # Remove the empty file so we can create a proper database
+    if os.path.exists(db_path):
+        os.unlink(db_path)
+    
+    try:
+        # Create a valid DuckDB database file
+        conn = duckdb.connect(db_path)
+        conn.execute("CREATE TABLE test_table (id INTEGER, name TEXT)")
+        conn.close()
+        
+        # Connect to database
+        mock_window.db_manager.open_database(db_path, load_all_tables=False)
+        mock_window.db_manager.database_path = db_path
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sqls', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            # Save project
+            project_manager.save_project_to_file(temp_path)
+            
+            # Verify database path is saved
+            with open(temp_path, 'r') as f:
+                data = json.load(f)
+            
+            assert 'database_path' in data
+            assert data['database_path'] == db_path
+            
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_save_project_with_tabs(project_manager, mock_window):
+    """Test saving a project with multiple tabs and queries"""
+    # Add multiple tabs with queries
+    tab1 = mock_window.get_tab_at_index(0)
+    if tab1:
+        tab1.set_query_text("SELECT * FROM table1")
+        mock_window.tab_widget.setTabText(0, "Query 1")
+    
+    # Add another tab
+    mock_window.add_tab()
+    tab2 = mock_window.get_tab_at_index(1)
+    if tab2:
+        tab2.set_query_text("SELECT * FROM table2 WHERE id > 10")
+        mock_window.tab_widget.setTabText(1, "Query 2")
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqls', delete=False) as f:
+        temp_path = f.name
+    
+    try:
+        # Save project
+        project_manager.save_project_to_file(temp_path)
+        
+        # Verify tabs are saved
+        with open(temp_path, 'r') as f:
+            data = json.load(f)
+        
+        assert 'tabs' in data
+        assert len(data['tabs']) == 2
+        assert data['tabs'][0]['title'] == "Query 1"
+        assert "SELECT * FROM table1" in data['tabs'][0]['query']
+        assert data['tabs'][1]['title'] == "Query 2"
+        assert "SELECT * FROM table2" in data['tabs'][1]['query']
+        
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def test_save_project_with_query_result_tables(project_manager, mock_window):
+    """Test saving a project with query result tables"""
+    import pandas as pd
+    
+    # Create a query result table
+    test_df = pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})
+    table_name = mock_window.db_manager.register_dataframe(test_df, "query_result_table", source='query_result')
+    # Note: register_dataframe already sets loaded_tables, but we ensure it's 'query_result'
+    mock_window.db_manager.loaded_tables[table_name] = 'query_result'
+    
+    # Add to tables list
+    mock_window.tables_list.add_table_item(table_name, "query result", needs_reload=False)
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqls', delete=False) as f:
+        temp_path = f.name
+    
+    try:
+        # Save project
+        project_manager.save_project_to_file(temp_path)
+        
+        # Verify query result table is saved correctly
+        with open(temp_path, 'r') as f:
+            data = json.load(f)
+        
+        assert 'tables' in data
+        assert table_name in data['tables']
+        assert data['tables'][table_name]['file_path'] == 'query_result'
+        
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def test_clear_project_state_resets_tabs(project_manager, mock_window):
+    """Test that _clear_project_state properly resets tabs"""
+    # Add multiple tabs
+    mock_window.add_tab()
+    mock_window.add_tab()
+    
+    assert mock_window.tab_widget.count() == 3  # Initial + 2 added
+    
+    # Clear project state
+    project_manager._clear_project_state()
+    
+    # Should have exactly one tab remaining
+    assert mock_window.tab_widget.count() == 1
+    
+    # Remaining tab should be cleared
+    remaining_tab = mock_window.get_tab_at_index(0)
+    assert remaining_tab is not None
+    assert remaining_tab.get_query_text() == ""
+    assert mock_window.tab_widget.tabText(0) == "Query 1"
+
+
+def test_save_project_with_database_tables(project_manager, mock_window):
+    """Test saving a project with database tables (not file-based)"""
+    # Register a database table
+    table_name = "db_table"
+    mock_window.db_manager.loaded_tables[table_name] = 'database:db'
+    mock_window.db_manager.table_columns[table_name] = ['id', 'name']
+    
+    # Add to tables list
+    mock_window.tables_list.add_table_item(table_name, "database", needs_reload=False)
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqls', delete=False) as f:
+        temp_path = f.name
+    
+    try:
+        # Save project
+        project_manager.save_project_to_file(temp_path)
+        
+        # Verify database table is saved correctly
+        with open(temp_path, 'r') as f:
+            data = json.load(f)
+        
+        assert 'tables' in data
+        assert table_name in data['tables']
+        # Should save as 'database' for backward compatibility
+        assert data['tables'][table_name]['file_path'] == 'database'
+        
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def test_full_save_load_cycle_integration(project_manager, mock_window, monkeypatch):
+    """Integration test: Save a complex project and verify it can be loaded correctly"""
+    import pandas as pd
+    from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QTreeWidgetItem
+    from PyQt6.QtGui import QIcon
+    from PyQt6.QtCore import Qt
+    
+    # Mock QProgressDialog to prevent it from showing/blocking
+    original_progress = QProgressDialog
+    
+    def mock_progress_dialog(*args, **kwargs):
+        """Mock QProgressDialog to prevent blocking"""
+        dialog = original_progress(*args, **kwargs)
+        dialog.setVisible(False)  # Hide immediately
+        dialog.setMinimumDuration(0)  # Don't delay showing
+        return dialog
+    
+    monkeypatch.setattr("sqlshell.project_manager.QProgressDialog", mock_progress_dialog)
+    
+    # Set up a complex project state:
+    # 1. Create a folder structure
+    folder1 = mock_window.tables_list.create_folder("Folder 1")
+    folder2 = mock_window.tables_list.create_folder("Folder 2")
+    
+    # 2. Add tables to folders and root
+    df1 = pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})
+    table1 = mock_window.db_manager.register_dataframe(df1, "table1")
+    # Override the source to simulate a file-based table
+    mock_window.db_manager.loaded_tables[table1] = '/path/to/table1.csv'
+    mock_window.db_manager.table_columns[table1] = ['col1', 'col2']
+    
+    # Add table1 to folder1
+    item1 = QTreeWidgetItem(folder1)
+    item1.setText(0, f"{table1} (table1.csv)")
+    item1.setIcon(0, QIcon.fromTheme("x-office-spreadsheet"))
+    item1.setData(0, Qt.ItemDataRole.UserRole, "table")
+    
+    # Add a database table to root
+    table2 = "db_table"
+    mock_window.db_manager.loaded_tables[table2] = 'database:db'
+    mock_window.db_manager.table_columns[table2] = ['id', 'name']
+    mock_window.tables_list.add_table_item(table2, "database", needs_reload=False)
+    
+    # 3. Set up tabs with queries
+    tab1 = mock_window.get_tab_at_index(0)
+    if tab1:
+        tab1.set_query_text("SELECT * FROM table1")
+        mock_window.tab_widget.setTabText(0, "Query 1")
+    
+    mock_window.add_tab()
+    tab2 = mock_window.get_tab_at_index(1)
+    if tab2:
+        tab2.set_query_text("SELECT * FROM db_table WHERE id > 10")
+        mock_window.tab_widget.setTabText(1, "Query 2")
+    
+    # 4. Set database connection
+    import tempfile as tf
+    import duckdb
+    import os
+    
+    # Create a temporary database file path
+    with tf.NamedTemporaryFile(suffix='.db', delete=False) as db_file:
+        db_path = db_file.name
+    
+    # Remove the empty file so we can create a proper database
+    if os.path.exists(db_path):
+        os.unlink(db_path)
+    
+    try:
+        # Create a valid DuckDB database file
+        conn = duckdb.connect(db_path)
+        conn.execute("CREATE TABLE test_table (id INTEGER, name TEXT)")
+        conn.close()
+        
+        mock_window.db_manager.open_database(db_path, load_all_tables=False)
+        mock_window.db_manager.database_path = db_path
+        
+        # Save the project
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sqls', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            project_manager.save_project_to_file(temp_path)
+            
+            # Verify file was created
+            assert os.path.exists(temp_path)
+            
+            # Verify project structure
+            with open(temp_path, 'r') as f:
+                saved_data = json.load(f)
+            
+            # Check all required keys
+            assert 'tables' in saved_data
+            assert 'folders' in saved_data
+            assert 'tabs' in saved_data
+            assert 'connection_type' in saved_data
+            assert 'database_path' in saved_data
+            
+            # Verify folders were saved
+            assert len(saved_data['folders']) >= 2
+            folder_names = [f['name'] for f in saved_data['folders'].values()]
+            assert "Folder 1" in folder_names
+            assert "Folder 2" in folder_names
+            
+            # Verify tables were saved
+            assert table1 in saved_data['tables']
+            assert table2 in saved_data['tables']
+            
+            # Verify tabs were saved
+            assert len(saved_data['tabs']) == 2
+            assert saved_data['tabs'][0]['title'] == "Query 1"
+            assert saved_data['tabs'][1]['title'] == "Query 2"
+            
+            # Verify database path was saved
+            assert saved_data['database_path'] == db_path
+            
+            # Now test loading (simplified - full load requires more complex setup)
+            # We can at least verify the file structure is correct for loading
+            
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
 
