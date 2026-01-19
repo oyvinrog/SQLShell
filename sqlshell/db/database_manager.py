@@ -10,6 +10,13 @@ except Exception:
     def show_info_notification(message):
         return None
 
+
+def _safe_info_notification(message: str) -> None:
+    try:
+        show_info_notification(message)
+    except Exception:
+        return None
+
 class DatabaseManager:
     """
     Manages database connections and operations for SQLShell.
@@ -669,7 +676,7 @@ class DatabaseManager:
             # Store information about the table
             self.loaded_tables[table_name] = file_path
             self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
-            show_info_notification(f"Loaded {len(df)} rows into table '{table_name}'.")
+            _safe_info_notification(f"Loaded {len(df)} rows into table '{table_name}'.")
             
             return table_name, df
             
