@@ -4,6 +4,19 @@ import pandas as pd
 import duckdb
 from pathlib import Path
 
+try:
+    from sqlshell.notification_manager import show_info_notification
+except Exception:
+    def show_info_notification(message):
+        return None
+
+
+def _safe_info_notification(message: str) -> None:
+    try:
+        show_info_notification(message)
+    except Exception:
+        return None
+
 class DatabaseManager:
     """
     Manages database connections and operations for SQLShell.
@@ -530,7 +543,7 @@ class DatabaseManager:
                             # Use optimized dtypes for better memory usage
                             dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
                             
-                            # Read again with chunk processing, combining up to 100k rows
+                            # Read again with chunk processing (no hard cap)
                             chunks = []
                             for chunk in pd.read_csv(
                                 file_path, 
@@ -543,8 +556,6 @@ class DatabaseManager:
                                 doublequote=True
                             ):
                                 chunks.append(chunk)
-                                if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
-                                    break
                             
                             df = pd.concat(chunks, ignore_index=True)
                         except pd.errors.ParserError as e:
@@ -665,6 +676,7 @@ class DatabaseManager:
             # Store information about the table
             self.loaded_tables[table_name] = file_path
             self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
+            _safe_info_notification(f"Loaded {len(df)} rows into table '{table_name}'.")
             
             return table_name, df
             
