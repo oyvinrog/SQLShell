@@ -530,7 +530,7 @@ class DatabaseManager:
                             # Use optimized dtypes for better memory usage
                             dtypes = {col: df_preview[col].dtype for col in df_preview.columns}
                             
-                            # Read again with chunk processing, combining up to 100k rows
+                            # Read again with chunk processing (no hard cap)
                             chunks = []
                             for chunk in pd.read_csv(
                                 file_path, 
@@ -543,8 +543,6 @@ class DatabaseManager:
                                 doublequote=True
                             ):
                                 chunks.append(chunk)
-                                if len(chunks) * 10000 >= 100000:  # Cap at 100k rows
-                                    break
                             
                             df = pd.concat(chunks, ignore_index=True)
                         except pd.errors.ParserError as e:
