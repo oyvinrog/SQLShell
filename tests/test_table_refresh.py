@@ -184,8 +184,18 @@ def test_refresh_all_empty(window):
 
 
 @pytest.mark.parametrize('oversized_button_hints', [False, True])
-def test_header_layout_and_organization_actions(window, qapp, monkeypatch, oversized_button_hints):
-    from PyQt6.QtWidgets import QInputDialog, QToolButton
+@pytest.mark.parametrize('wide_label', [False, True])
+def test_header_layout_and_organization_actions(window, qapp, monkeypatch, oversized_button_hints, wide_label):
+    from PyQt6.QtWidgets import QInputDialog, QLabel, QToolButton
+
+    if wide_label:
+        class WideLabel(QLabel):
+            def minimumSizeHint(self):
+                size = super().minimumSizeHint()
+                size.setWidth(max(150, size.width()))
+                return size
+
+        monkeypatch.setattr(main, 'QLabel', WideLabel)
 
     if oversized_button_hints:
         class WideToolButton(QToolButton):
@@ -210,10 +220,14 @@ def test_header_layout_and_organization_actions(window, qapp, monkeypatch, overs
     header.show()
     qapp.processEvents()
     assert header.minimumSizeHint().width() <= 196
+    label = header.findChild(QLabel, 'header_label')
+    assert header.rect().contains(label.geometry())
+    assert label.width() >= label.minimumSizeHint().width()
     for button in (window.refresh_all_button, window.tables_menu_button):
         assert button.accessibleName() and button.toolTip()
         assert header.rect().contains(button.geometry())
         assert button.width() >= button.fontMetrics().horizontalAdvance(button.text()) + 8
+        assert not label.geometry().intersects(button.geometry())
     assert not window.refresh_all_button.geometry().intersects(window.tables_menu_button.geometry())
     actions = {action.text(): action for action in window.tables_menu_button.menu().actions()}
     actions['Collapse All'].trigger()

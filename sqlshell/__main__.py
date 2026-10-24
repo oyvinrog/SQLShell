@@ -321,14 +321,18 @@ class SQLShell(QMainWindow):
     def create_tables_header(self):
         """Build compact commands for the entire sidebar table tree."""
         header = QWidget()
-        layout = QHBoxLayout(header)
+        layout = QVBoxLayout(header)
         layout.setContentsMargins(0, 8, 0, 0)
         layout.setSpacing(4)
         label = QLabel("TABLES")
         label.setObjectName("header_label")
         label.setStyleSheet(get_tables_header_stylesheet() + "margin-top: 0px;")
         layout.addWidget(label)
-        layout.addStretch()
+        # Keep the title above the commands: their combined text widths can
+        # exceed the 196px available at the sidebar's minimum width on Windows.
+        controls = QHBoxLayout()
+        controls.setSpacing(4)
+        layout.addLayout(controls)
 
         self.refresh_all_button = QToolButton()
         self.refresh_all_button.setText("Refresh All")
@@ -336,7 +340,8 @@ class SQLShell(QMainWindow):
         self.refresh_all_button.setAccessibleName("Refresh All Tables")
         self.refresh_all_button.setToolTip("Reload all file-based tables, including tables in folders")
         self.refresh_all_button.clicked.connect(self.reload_all_tables)
-        layout.addWidget(self.refresh_all_button)
+        controls.addWidget(self.refresh_all_button)
+        controls.addStretch()
 
         self.tables_menu_button = QToolButton()
         self.tables_menu_button.setText("⋯")
@@ -349,7 +354,7 @@ class SQLShell(QMainWindow):
         menu.addAction("Expand All").triggered.connect(lambda: self.tables_list.expandAll())
         menu.addAction("Collapse All").triggered.connect(lambda: self.tables_list.collapseAll())
         self.tables_menu_button.setMenu(menu)
-        layout.addWidget(self.tables_menu_button)
+        controls.addWidget(self.tables_menu_button)
         for button in (self.refresh_all_button, self.tables_menu_button):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setMinimumHeight(30)
