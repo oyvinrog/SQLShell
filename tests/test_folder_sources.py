@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QMenu, QMessageBox
 
 from sqlshell.db.database_manager import DatabaseManager
-from sqlshell.folder_sources import discover_files
+from sqlshell.folder_sources import canonical_folder, discover_files
 from sqlshell.folder_source_ui import FolderSourceWindowMixin, source_item_info, source_icon
 from sqlshell.refresh_dialog import RefreshWorker
 from sqlshell.project_manager import ProjectManager
@@ -123,7 +123,7 @@ def test_ui_add_is_lazy_selection_refresh_and_new_files(window, tmp_path):
     assert tree.tables_needing_reload == {'a', 'b'}
     assert window.db_manager.conn.execute('SHOW TABLES').fetchall() == []
     root = tree.topLevelItem(0)
-    assert source_item_info(root) == (str(tmp_path), '')
+    assert source_item_info(root) == (canonical_folder(tmp_path), '')
     assert tree.find_table_item('b').parent().text(0) == 'nested'
     assert not source_icon().isNull()
     assert not root.flags() & Qt.ItemFlag.ItemIsDropEnabled
@@ -155,7 +155,7 @@ def test_empty_folder_can_refresh_and_missing_members_warn(window, tmp_path):
     assert window.db_manager.get_full_table('new')['value'].tolist() == [1]
     csv(path, 2)
     window.reload_all_tables()
-    assert item.toolTip(0) == str(path)
+    assert item.toolTip(0) == str(Path(canonical_folder(tmp_path)) / path.name)
     header.deleteLater()
 
 
@@ -178,7 +178,7 @@ def test_source_menu_remove_and_movement_guards(window, tmp_path, monkeypatch):
     window.folder_source_context_menu(root, tree.visualItemRect(root).center())
     assert labels == ['Refresh Folder', 'Restore Excluded Files…', 'Remove Folder Source']
     monkeypatch.setattr(QMessageBox, 'question', lambda *a: QMessageBox.StandardButton.Yes)
-    window.remove_folder_source(str(tmp_path))
+    window.remove_folder_source(canonical_folder(tmp_path))
     assert not window.db_manager.folder_sources
     assert 'a' not in window.db_manager.loaded_tables
     assert path.exists()
@@ -196,7 +196,7 @@ def test_project_roundtrip_is_lazy_with_exclusions_and_missing_files(qapp, tmp_p
     window.add_tab()
     try:
         window.add_folder_source(str(path.parent.parent))
-        key = str(path.parent.parent)
+        key = canonical_folder(path.parent.parent)
         window.db_manager.remove_table('excluded')
         excluded = window.tables_list.find_table_item('excluded')
         excluded.parent().removeChild(excluded)
@@ -257,8 +257,8 @@ def test_restore_exclusion_checklist_is_lazy(window, tmp_path, monkeypatch):
     original = QDialog.exec
     monkeypatch.setattr(QDialog, 'exec', lambda dialog:
         choose(dialog) if dialog.windowTitle() == 'Restore Excluded Files' else original(dialog))
-    window.restore_excluded_files(str(tmp_path))
-    assert window.db_manager.folder_sources[str(tmp_path)]['excluded'] == ['b.csv']
+    window.restore_excluded_files(canonical_folder(tmp_path))
+    assert window.db_manager.folder_sources[canonical_folder(tmp_path)]['excluded'] == ['b.csv']
     assert set(window.db_manager.loaded_tables) == {'a'}
     assert window.db_manager.conn.execute('SHOW TABLES').fetchall() == []
 
@@ -303,3 +303,15 @@ def test_real_query_and_preview_load_only_referenced_tables(qapp, tmp_path, monk
     finally:
         window.db_manager.close_connection()
         window.deleteLater()
+
+
+def test_windows_folder_identity_normalizes_case_and_separators(monkeypatch):
+    import ntpath
+    from types import SimpleNamespace
+    import sqlshell.folder_sources as sources
+
+    # Exercise Windows path semantics even when this test runs on Linux/macOS.
+    monkeypatch.setattr(sources, 'os', SimpleNamespace(path=ntpath))
+    expected = r'c:\users\runneradmin\reports'
+    assert sources.canonical_folder(r'C:\Users\RunnerAdmin\Reports') == expected
+    assert sources.canonical_folder('C:/Users/RunnerAdmin/Reports/.') == expected
