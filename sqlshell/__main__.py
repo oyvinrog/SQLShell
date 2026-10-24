@@ -218,8 +218,6 @@ class SQLShell(QMainWindow):
         # Tables list with custom styling
         self.tables_list = DraggableTablesList(self)
         self.tables_list.itemClicked.connect(self.show_table_preview)
-        self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tables_list.customContextMenuRequested.connect(self.show_tables_context_menu)
         left_layout.addWidget(self.tables_list)
         
         # Browse button for quick file selection
@@ -1742,6 +1740,10 @@ LIMIT 10
                 # Create context menu for multiple table selection
                 context_menu = QMenu(self)
                 context_menu.setStyleSheet(get_context_menu_stylesheet())
+
+                refresh_action = context_menu.addAction("Refresh Selected Tables")
+                refresh_action.setIcon(QIcon.fromTheme("view-refresh"))
+                context_menu.addSeparator()
                 
                 # Add foreign key analysis option
                 analyze_fk_action = context_menu.addAction(f"Analyze Foreign Keys Between {len(table_items)} Tables")
@@ -1780,7 +1782,9 @@ LIMIT 10
                 # Show menu and get selected action
                 action = context_menu.exec(self.tables_list.mapToGlobal(position))
                 
-                if action == analyze_fk_action:
+                if action == refresh_action:
+                    self.reload_selected_tables(table_items)
+                elif action == analyze_fk_action:
                     self.analyze_foreign_keys_between_tables(table_items)
                 elif action == union_all_action:
                     self.generate_set_operation_for_tables(table_items, 'UNION ALL')
@@ -2376,6 +2380,59 @@ LIMIT 10
             print(f"Warning: Could not apply column renames to table '{table_name}': {e}")
         
         return False
+
+    def reload_selected_tables(self, table_items=None):
+        """Refresh selected file-based tables, reporting batch results once."""
+        if table_items is None:
+            table_items = self.tables_list.selectedItems()
+        table_names = list(dict.fromkeys(
+            name for item in table_items
+            if not self.tables_list.is_folder_item(item)
+            for name in [self.tables_list.get_table_name_from_item(item)]
+            if name
+        ))
+        if not table_names:
+            return
+
+        current_item = self.tables_list.currentItem()
+        current_name = (
+            self.tables_list.get_table_name_from_item(current_item)
+            if current_item and not self.tables_list.is_folder_item(current_item)
+            else None
+        )
+        refreshed = set()
+        skipped = 0
+        failures = []
+        for table_name in table_names:
+            if self.db_manager.loaded_tables.get(table_name) in ('database', 'query_result'):
+                skipped += 1
+                continue
+            self.statusBar().showMessage(f'Reloading table "{table_name}"...')
+            try:
+                success, message = self.db_manager.reload_table(table_name)
+                if not success:
+                    failures.append(f"{table_name}: {message}")
+                    continue
+                self._apply_column_renames_to_table(table_name)
+                self.tables_list.mark_table_reloaded(table_name)
+                refreshed.add(table_name)
+            except Exception as exc:
+                failures.append(f"{table_name}: {exc}")
+
+        if refreshed:
+            self.update_completer()
+            if current_name in refreshed:
+                item = self.tables_list.find_table_item(current_name)
+                if item:
+                    self.show_table_preview(item)
+
+        summary = (
+            f"Refresh complete: {len(refreshed)} refreshed, "
+            f"{skipped} skipped, {len(failures)} failed."
+        )
+        self.statusBar().showMessage(summary)
+        if failures:
+            show_warning_notification(summary + "\n" + "\n".join(failures))
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
