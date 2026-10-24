@@ -40,8 +40,12 @@ from sqlshell.table_list import DraggableTablesList
 from sqlshell.notification_manager import init_notification_manager, show_error_notification, show_warning_notification, show_info_notification, show_success_notification
 from sqlshell.christmas_theme import ChristmasThemeManager
 from sqlshell.project_manager import ProjectManager
+from sqlshell.refresh_dialog import RefreshDialog, is_file_source
 
-class SQLShell(QMainWindow):
+from sqlshell.folder_source_ui import FolderSourceWindowMixin, source_item_info, source_icon
+
+
+class SQLShell(FolderSourceWindowMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.db_manager = DatabaseManager()
@@ -204,13 +208,11 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(drag_drop_info)
         
         # Tables section
-        tables_header = QLabel("TABLES")
-        tables_header.setObjectName("header_label")
-        tables_header.setStyleSheet(get_tables_header_stylesheet())
-        left_layout.addWidget(tables_header)
+        left_layout.addWidget(self.create_tables_header())
         
         # Tables info label
-        tables_info = QLabel("Right-click on tables to profile columns, analyze structure, and discover distributions. Select multiple tables to analyze foreign key relationships.")
+        tables_info = QLabel("Ctrl/Shift-click to select tables. Right-click for refresh and analysis.")
+        tables_info.setToolTip("Select multiple tables to refresh, combine, or analyze relationships. Refresh All reloads file-based tables in every folder.")
         tables_info.setWordWrap(True)
         tables_info.setStyleSheet("color: #7FB3D5; font-size: 11px; margin-top: 2px; margin-bottom: 5px;")
         left_layout.addWidget(tables_info)
@@ -218,8 +220,9 @@ class SQLShell(QMainWindow):
         # Tables list with custom styling
         self.tables_list = DraggableTablesList(self)
         self.tables_list.itemClicked.connect(self.show_table_preview)
-        self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tables_list.customContextMenuRequested.connect(self.show_tables_context_menu)
+        for signal in (self.tables_list.model().rowsInserted, self.tables_list.model().rowsRemoved, self.tables_list.model().modelReset, self.tables_list.model().dataChanged):
+            signal.connect(self.update_refresh_controls)
+        self.update_refresh_controls()
         left_layout.addWidget(self.tables_list)
         
         # Browse button for quick file selection
@@ -248,6 +251,16 @@ class SQLShell(QMainWindow):
             }
         """)
         left_layout.addWidget(self.browse_button)
+
+        self.add_folder_source_button = QPushButton("Add Folder Source…")
+        self.add_folder_source_button.setIcon(source_icon())
+        self.add_folder_source_button.setToolTip(
+            "Discover supported files in a folder and its subfolders. Data loads when used."
+        )
+        self.add_folder_source_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_folder_source_button.setStyleSheet(self.browse_button.styleSheet())
+        self.add_folder_source_button.clicked.connect(self.browse_folder_source)
+        left_layout.addWidget(self.add_folder_source_button)
         
         # Add spacer at the bottom
         left_layout.addStretch()
@@ -318,6 +331,60 @@ class SQLShell(QMainWindow):
         # Status bar
         self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
         
+    def create_tables_header(self):
+        """Build compact commands for the entire sidebar table tree."""
+        header = QWidget()
+        layout = QVBoxLayout(header)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(4)
+        label = QLabel("TABLES")
+        label.setObjectName("header_label")
+        label.setStyleSheet(get_tables_header_stylesheet() + "margin-top: 0px;")
+        layout.addWidget(label)
+        # Keep the title above the commands: their combined text widths can
+        # exceed the 196px available at the sidebar's minimum width on Windows.
+        controls = QHBoxLayout()
+        controls.setSpacing(4)
+        layout.addLayout(controls)
+
+        self.refresh_all_button = QToolButton()
+        self.refresh_all_button.setText("Refresh All")
+        self.refresh_all_button.setEnabled(False)
+        self.refresh_all_button.setAccessibleName("Refresh All Tables")
+        self.refresh_all_button.setToolTip("Reload all file-based tables, including tables in folders")
+        self.refresh_all_button.clicked.connect(self.reload_all_tables)
+        controls.addWidget(self.refresh_all_button)
+        controls.addStretch()
+
+        self.tables_menu_button = QToolButton()
+        self.tables_menu_button.setText("⋯")
+        self.tables_menu_button.setAccessibleName("Table organization menu")
+        self.tables_menu_button.setToolTip("New Folder, Expand All, Collapse All")
+        self.tables_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.tables_menu_button)
+        menu.setStyleSheet(get_context_menu_stylesheet())
+        if hasattr(self, "browse_folder_source"):
+            menu.addAction("Add Folder Source…").triggered.connect(self.browse_folder_source)
+        menu.addAction("New Folder").triggered.connect(lambda: self.tables_list.create_new_folder())
+        menu.addAction("Expand All").triggered.connect(lambda: self.tables_list.expandAll())
+        menu.addAction("Collapse All").triggered.connect(lambda: self.tables_list.collapseAll())
+        self.tables_menu_button.setMenu(menu)
+        controls.addWidget(self.tables_menu_button)
+        for button in (self.refresh_all_button, self.tables_menu_button):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setMinimumHeight(30)
+            button.setStyleSheet("QToolButton { color: white; background: #3D5266; border: 1px solid #60788D; border-radius: 4px; font-size: 11px; padding: 3px; }"
+                                "QToolButton:hover { background: #4B657D; }"
+                                "QToolButton:focus { border: 2px solid #7FC8FF; }"
+                                "QToolButton:disabled { color: #9CAAB6; background: #34495E; border-color: #465B6D; }"
+                                "QToolButton::menu-indicator { image: none; width: 0px; }")
+            # Native tool-button size hints can exceed the narrow sidebar.
+            # Size these text-only controls using the styled font, with room
+            # for padding and the focus border, instead of the platform hint.
+            button.ensurePolished()
+            button.setFixedWidth(max(30, button.fontMetrics().horizontalAdvance(button.text()) + 16))
+        return header
+
     def create_tab_corner_widget(self):
         """Create a corner widget with a + button to add new tabs"""
         corner_widget = QWidget()
@@ -575,6 +642,7 @@ class SQLShell(QMainWindow):
             return
             
         if self.db_manager.remove_table(table_name):
+            self.tables_list.tables_needing_reload.discard(table_name)
             # Remove from tree widget
             parent = current_item.parent()
             if parent:
@@ -615,6 +683,7 @@ class SQLShell(QMainWindow):
         for item in table_items:
             table_name = self.tables_list.get_table_name_from_item(item)
             if table_name in successful_removals:
+                self.tables_list.tables_needing_reload.discard(table_name)
                 parent = item.parent()
                 if parent:
                     parent.removeChild(item)
@@ -695,6 +764,8 @@ class SQLShell(QMainWindow):
 
     def update_completer(self):
         """Update the completer with table and column names in a non-blocking way"""
+        if getattr(self, "_refresh_in_progress", False):
+            return
         try:
             # Check if any tabs exist
             if self.tab_widget.count() == 0:
@@ -1407,7 +1478,7 @@ LIMIT 10
             QMessageBox.information(
                 self,
                 "Table Created",
-                f"Query results have been saved as:\n\n"
+                f"Results have been saved as:\n\n"
                 f"File: {file_name}\n"
                 f"Table: {table_name}\n\n"
                 f"Rows: {len(df):,}\nColumns: {len(df.columns)}\n\n"
@@ -1640,6 +1711,9 @@ LIMIT 10
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        if getattr(self, "_refresh_in_progress", False):
+            event.ignore()
+            return
         """Ensure proper cleanup of database connections when closing the application"""
         try:
             # Check for unsaved changes
@@ -1678,7 +1752,7 @@ LIMIT 10
         """Check if there are unsaved changes in the project"""
         if not self.current_project_file:
             return (self.tab_widget.count() > 0 and any(self.tab_widget.widget(i).get_query_text().strip() 
-                                                        for i in range(self.tab_widget.count()))) or bool(self.db_manager.loaded_tables)
+                                                        for i in range(self.tab_widget.count()))) or bool(self.db_manager.loaded_tables) or bool(getattr(self.db_manager, "folder_sources", {}))
         
         try:
             # Load the last saved state
@@ -1708,6 +1782,9 @@ LIMIT 10
                 'connection_type': self.db_manager.connection_type
             }
             
+            if getattr(self.db_manager, 'folder_sources', {}) != saved_data.get('folder_sources', {}):
+                return True
+
             # Compare tables and connection type
             if (current_data['connection_type'] != saved_data.get('connection_type') or
                 len(current_data['tables']) != len(saved_data.get('tables', {}))):
@@ -1734,6 +1811,14 @@ LIMIT 10
         """Show context menu for tables list"""
         # Check if we have multiple selected items
         selected_items = self.tables_list.selectedItems()
+        if len(selected_items) > 1 and any(
+                self.tables_list.is_folder_item(selected) and source_item_info(selected)
+                for selected in selected_items):
+            menu = QMenu(self)
+            refresh = menu.addAction('Refresh Selected Tables')
+            if menu.exec(self.tables_list.viewport().mapToGlobal(position)) == refresh:
+                self.reload_selected_tables(selected_items)
+            return
         if len(selected_items) > 1:
             # Filter out any folder items from selection
             table_items = [item for item in selected_items if not self.tables_list.is_folder_item(item)]
@@ -1742,6 +1827,10 @@ LIMIT 10
                 # Create context menu for multiple table selection
                 context_menu = QMenu(self)
                 context_menu.setStyleSheet(get_context_menu_stylesheet())
+
+                refresh_action = context_menu.addAction("Refresh Selected Tables")
+                refresh_action.setIcon(QIcon.fromTheme("view-refresh"))
+                context_menu.addSeparator()
                 
                 # Add foreign key analysis option
                 analyze_fk_action = context_menu.addAction(f"Analyze Foreign Keys Between {len(table_items)} Tables")
@@ -1780,7 +1869,9 @@ LIMIT 10
                 # Show menu and get selected action
                 action = context_menu.exec(self.tables_list.mapToGlobal(position))
                 
-                if action == analyze_fk_action:
+                if action == refresh_action:
+                    self.reload_selected_tables(selected_items)
+                elif action == analyze_fk_action:
                     self.analyze_foreign_keys_between_tables(table_items)
                 elif action == union_all_action:
                     self.generate_set_operation_for_tables(table_items, 'UNION ALL')
@@ -1887,13 +1978,14 @@ LIMIT 10
         change_source_action = None
         if table_name in self.db_manager.loaded_tables:
             source_path = self.db_manager.loaded_tables[table_name]
-            if source_path not in ['database', 'query_result']:
+            if source_path not in ['database', 'query_result'] and not source_item_info(item):
                 change_source_action = context_menu.addAction("Change Table Source...")
                 change_source_action.setIcon(QIcon.fromTheme("document-open"))
         
         # Add move to folder submenu
         move_menu = context_menu.addMenu("Move to Folder")
         move_menu.setIcon(QIcon.fromTheme("folder"))
+        move_menu.setEnabled(not bool(source_item_info(item)))
         
         # Add "New Folder" option to move menu
         new_folder_action = move_menu.addAction("New Folder...")
@@ -1902,7 +1994,7 @@ LIMIT 10
         # Add folders to the move menu
         for i in range(self.tables_list.topLevelItemCount()):
             top_item = self.tables_list.topLevelItem(i)
-            if self.tables_list.is_folder_item(top_item):
+            if self.tables_list.is_folder_item(top_item) and not source_item_info(top_item):
                 folder_action = move_menu.addAction(top_item.text(0))
                 folder_action.setData(top_item)
         
@@ -2377,6 +2469,115 @@ LIMIT 10
         
         return False
 
+    def update_refresh_controls(self, *args):
+        if hasattr(self, "refresh_all_button"):
+            available = bool(getattr(self.db_manager, "folder_sources", {})) or any(is_file_source(source) for source in self.db_manager.loaded_tables.values())
+            self.refresh_all_button.setEnabled(available and not getattr(self, "_refresh_in_progress", False))
+            self.refresh_all_button.setToolTip("Reload all file-based tables, including tables in folders" if available else "No file-based tables to refresh")
+
+    def reload_all_tables(self):
+        """Refresh every table, regardless of selection or folder expansion."""
+        table_items = []
+        pending = [self.tables_list.invisibleRootItem()]
+        while pending:
+            parent = pending.pop()
+            for index in range(parent.childCount()):
+                item = parent.child(index)
+                if self.tables_list.is_folder_item(item):
+                    if source_item_info(item):
+                        table_items.append(item)
+                    else:
+                        pending.append(item)
+                else:
+                    table_items.append(item)
+        self.reload_selected_tables(table_items)
+
+    def reload_selected_tables(self, table_items=None):
+        """Refresh selected file-based tables, reporting batch results once."""
+        if table_items is None:
+            table_items = self.tables_list.selectedItems()
+        folders = list(dict.fromkeys(
+            source_item_info(item) for item in table_items
+            if self.tables_list.is_folder_item(item) and source_item_info(item)
+        ))
+        # Keep only the broadest selected subtree for each source.
+        folders = [(key, rel) for key, rel in folders if not any(
+            other_key == key and other_rel != rel and
+            (not other_rel or rel.startswith(other_rel + '/'))
+            for other_key, other_rel in folders)]
+        table_names = list(dict.fromkeys(
+            name for item in table_items
+            if not self.tables_list.is_folder_item(item)
+            for name in [self.tables_list.get_table_name_from_item(item)]
+            if name
+        ))
+        if getattr(self, "_refresh_in_progress", False):
+            return
+        if not table_names and not folders:
+            self.statusBar().showMessage("No tables to refresh.")
+            return
+
+        current_item = self.tables_list.currentItem()
+        current_name = (
+            self.tables_list.get_table_name_from_item(current_item)
+            if current_item and not self.tables_list.is_folder_item(current_item)
+            else None
+        )
+        refreshed = set()
+        eligible = [name for name in table_names
+                    if is_file_source(self.db_manager.loaded_tables.get(name))]
+        skipped = len(table_names) - len(eligible)
+        failures = []
+        self._refresh_in_progress = True
+        self.update_refresh_controls()
+        try:
+            if folders:
+                dialog = RefreshDialog(self.db_manager, eligible, self, folders=folders)
+                results = dialog.run_refresh()
+                self.sync_folder_source_tree(dialog.worker.added)
+                failures.extend(f'{path}: {message}' for path, message in dialog.worker.scan_errors)
+            else:
+                results = RefreshDialog(self.db_manager, eligible, self).run_refresh() if eligible else []
+        finally:
+            self._refresh_in_progress = False
+            self.update_refresh_controls()
+        for table_name, success, message in results:
+            if not success:
+                failures.append(f"{table_name}: {message}")
+                self.tables_list.mark_table_failed(table_name, message)
+                continue
+            try:
+                self._apply_column_renames_to_table(table_name)
+                self.tables_list.mark_table_reloaded(table_name)
+                refreshed.add(table_name)
+            except Exception as exc:
+                failures.append(f"{table_name}: {exc}")
+
+        if refreshed or folders:
+            self.update_completer()
+            if current_name in refreshed:
+                item = self.tables_list.find_table_item(current_name)
+                if item:
+                    self.show_table_preview(item)
+
+        summary = (
+            f"Refresh complete: {len(refreshed)} refreshed, "
+            f"{skipped} skipped, {len(failures)} failed."
+        )
+        self.statusBar().showMessage(summary)
+        if failures:
+            self.show_refresh_failures(summary, failures)
+
+    def show_refresh_failures(self, summary, failures):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Refresh results")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(summary)
+        dialog.setInformativeText("Some tables could not be refreshed. Open details for the full list.")
+        dialog.setDetailedText("\n".join(failures))
+        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dialog.exec()
+
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""
         try:
@@ -2411,6 +2612,7 @@ LIMIT 10
                 if table_item:
                     self.show_table_preview(table_item)
             else:
+                self.tables_list.mark_table_failed(table_name, message)
                 # Show error message
                 show_warning_notification(f"Reload Failed: {message}")
                 self.statusBar().showMessage(f'Failed to reload table: {message}')
@@ -4262,7 +4464,7 @@ LIMIT 10
                     
                     # Create and show the visualization
                     self.statusBar().showMessage(f'Generating entropy profile for "{table_name}"...')
-                    vis = visualize_profile(df)
+                    vis = visualize_profile(df, save_callback=self.save_results_as_table)
                     
                     # Store a reference to prevent garbage collection
                     self._entropy_window = vis
@@ -4455,7 +4657,7 @@ LIMIT 10
             
             # Create and show the visualization
             self.statusBar().showMessage(f'Generating entropy profile...')
-            vis = visualize_profile(df)
+            vis = visualize_profile(df, save_callback=self.save_results_as_table)
             
             # Store a reference to prevent garbage collection
             self._entropy_window = vis
