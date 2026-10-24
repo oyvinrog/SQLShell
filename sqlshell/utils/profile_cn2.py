@@ -738,11 +738,16 @@ class Rule:
                 col_vals = col_vals.astype('int64') / 1e9
 
             if cond.operator == '==':
-                mask &= (col_vals == cond.value).values
+                condition_mask = col_vals == cond.value
             elif cond.operator == '<=':
-                mask &= (col_vals <= cond.value).values
+                condition_mask = col_vals <= cond.value
             elif cond.operator == '>':
-                mask &= (col_vals > cond.value).values
+                condition_mask = col_vals > cond.value
+            else:
+                continue
+            # Extension dtypes may produce nullable booleans; missing values
+            # never satisfy a condition, and callers need a NumPy boolean mask.
+            mask &= condition_mask.to_numpy(dtype=bool, na_value=False)
             # Handle NaN values
             mask &= ~pd.Series(col_vals).isna().values
         return mask
@@ -906,8 +911,10 @@ class CN2Classifier:
         n_samples = len(X)
 
         for feat_idx, col in enumerate(X.columns):
-            col_data = X[col].values
+            col_data = X[col].to_numpy()
             dtype = X[col].dtype
+            if isinstance(dtype, pd.api.extensions.ExtensionDtype):
+                col_data = X[col].to_numpy(dtype=object, na_value=np.nan)
 
             # Check if datetime column (including timezone-aware datetime64)
             is_datetime = pd.api.types.is_datetime64_any_dtype(dtype)
@@ -923,7 +930,10 @@ class CN2Classifier:
                 col_data = col_data_series.astype('int64').values / 1e9  # Convert nanoseconds to seconds
                 dtype = col_data.dtype
 
-            is_numeric = np.issubdtype(dtype, np.number)
+            is_numeric = (
+                pd.api.types.is_numeric_dtype(dtype)
+                and not pd.api.types.is_bool_dtype(dtype)
+            )
 
             # Handle NaN mask
             nan_mask = pd.isna(col_data)

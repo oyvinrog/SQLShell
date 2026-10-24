@@ -190,6 +190,10 @@ def test_header_layout_and_organization_actions(window, qapp, monkeypatch):
     current = window.add('first', folder='Files')
     window.tables_list.setCurrentItem(current)
     header = window.create_tables_header()
+    # This standalone header does not inherit SQLShell's application stylesheet.
+    # Match its font family instead of using the offscreen platform's default
+    # (which can be a non-scalable bitmap font on Windows).
+    header.setStyleSheet("QWidget { font-family: 'Segoe UI', 'Arial', sans-serif; }")
     # Sidebar minimum width less its two 12px margins.
     header.setFixedWidth(196)
     header.show()

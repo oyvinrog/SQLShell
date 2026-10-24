@@ -378,6 +378,22 @@ class TestCN2ClassifierFit:
         cat_conditions = [c for c in all_conditions if c.operator == '==']
         assert len(cat_conditions) > 0
     
+    @pytest.mark.parametrize('dtype', ['object', 'string', 'string[pyarrow]', 'category'])
+    def test_fit_predict_string_dtypes_with_missing_values(self, dtype):
+        X = pd.DataFrame({
+            'color': pd.Series(['red'] * 10 + ['blue'] * 10 + [None], dtype=dtype)
+        })
+        y = np.array(['warm'] * 10 + ['cool'] * 10 + ['cool'])
+        clf = CN2Classifier(min_covered_examples=2).fit(X, y)
+
+        assert len(clf.rules_) > 0
+        np.testing.assert_array_equal(clf.predict(X), y)
+        for rule in clf.rules_:
+            mask = rule.covers_mask(X)
+            assert isinstance(mask, np.ndarray)
+            assert mask.dtype == bool
+            assert not mask[-1]
+
     def test_fit_returns_self(self, cn2_classifier, simple_classification_df):
         """Test that fit returns self for chaining."""
         X = simple_classification_df.drop(columns=['target'])
@@ -1308,7 +1324,8 @@ class TestDiscretizeNumericTargetFunction:
         df_disc, disc = discretize_numeric_target(numeric_df, 'income')
         
         assert disc._is_fitted == True
-        assert df_disc['income'].dtype == object  # Converted to categorical strings
+        assert all(isinstance(value, str) for value in df_disc['income'])
+        assert set(df_disc['income']).issubset(set(disc.bin_labels_))
         assert len(df_disc) == len(numeric_df)
     
     def test_with_method(self, numeric_df):
