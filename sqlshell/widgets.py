@@ -101,8 +101,16 @@ class CopyableTableWidget(QTableWidget):
         
         if has_selection:
             copy_selection_action = QAction("Copy Selection (Ctrl+C)", self)
-            copy_selection_action.triggered.connect(self.copy_selection_to_clipboard)
+            copy_selection_action.triggered.connect(
+                lambda checked=False: self.copy_selection_to_clipboard(include_headers=False)
+            )
             menu.addAction(copy_selection_action)
+
+            copy_selection_header_action = QAction("Copy Selection + Header", self)
+            copy_selection_header_action.triggered.connect(
+                lambda checked=False: self.copy_selection_to_clipboard(include_headers=True)
+            )
+            menu.addAction(copy_selection_header_action)
             
             menu.addSeparator()
         
@@ -349,8 +357,8 @@ class CopyableTableWidget(QTableWidget):
         item = self.item(row, col)
         return item.text() if item else ""
     
-    def copy_selection_to_clipboard(self):
-        """Copy selected cells to clipboard in tab-separated format"""
+    def copy_selection_to_clipboard(self, include_headers=False):
+        """Copy selected cells as tab-separated values, optionally with headers."""
         selection = self.selectionModel().selection()
         
         if not selection:
@@ -378,8 +386,8 @@ class CopyableTableWidget(QTableWidget):
         # Build the data to copy
         copied_data = []
         
-        # Add headers if copying from the first row or if entire columns are selected
-        if min_row == 0 or self.are_entire_columns_selected():
+        # Include headers only when explicitly requested.
+        if include_headers:
             header_row = []
             for col in range(min_col, max_col + 1):
                 header_item = self.horizontalHeaderItem(col)
@@ -460,4 +468,4 @@ class CopyableTableWidget(QTableWidget):
         for range_ in selection:
             if range_.top() == 0 and range_.bottom() == self.rowCount() - 1:
                 return True
-        return False 
+        return False
