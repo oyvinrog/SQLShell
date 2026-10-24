@@ -204,10 +204,7 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(drag_drop_info)
         
         # Tables section
-        tables_header = QLabel("TABLES")
-        tables_header.setObjectName("header_label")
-        tables_header.setStyleSheet(get_tables_header_stylesheet())
-        left_layout.addWidget(tables_header)
+        left_layout.addWidget(self.create_tables_header())
         
         # Tables info label
         tables_info = QLabel("Right-click on tables to profile columns, analyze structure, and discover distributions. Select multiple tables to analyze foreign key relationships.")
@@ -316,6 +313,43 @@ class SQLShell(QMainWindow):
         # Status bar
         self.statusBar().showMessage('Ready | Ctrl+Enter: Execute Query | Ctrl+K: Toggle Comment | Ctrl+T: New Tab')
         
+    def create_tables_header(self):
+        """Build compact commands for the entire sidebar table tree."""
+        header = QWidget()
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(4)
+        label = QLabel("TABLES")
+        label.setObjectName("header_label")
+        label.setStyleSheet(get_tables_header_stylesheet() + "margin-top: 0px;")
+        layout.addWidget(label)
+        layout.addStretch()
+
+        self.refresh_all_button = QToolButton()
+        self.refresh_all_button.setText("Refresh All")
+        self.refresh_all_button.setAccessibleName("Refresh All Tables")
+        self.refresh_all_button.setToolTip("Reload all file-based tables, including tables in folders")
+        self.refresh_all_button.clicked.connect(self.reload_all_tables)
+        layout.addWidget(self.refresh_all_button)
+
+        self.tables_menu_button = QToolButton()
+        self.tables_menu_button.setText("⋯")
+        self.tables_menu_button.setAccessibleName("Table organization menu")
+        self.tables_menu_button.setToolTip("New Folder, Expand All, Collapse All")
+        self.tables_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.tables_menu_button)
+        menu.setStyleSheet(get_context_menu_stylesheet())
+        menu.addAction("New Folder").triggered.connect(lambda: self.tables_list.create_new_folder())
+        menu.addAction("Expand All").triggered.connect(lambda: self.tables_list.expandAll())
+        menu.addAction("Collapse All").triggered.connect(lambda: self.tables_list.collapseAll())
+        self.tables_menu_button.setMenu(menu)
+        layout.addWidget(self.tables_menu_button)
+        for button in (self.refresh_all_button, self.tables_menu_button):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet("QToolButton { color: white; font-size: 11px; padding: 3px; }"
+                                "QToolButton::menu-indicator { image: none; width: 0px; }")
+        return header
+
     def create_tab_corner_widget(self):
         """Create a corner widget with a + button to add new tabs"""
         corner_widget = QWidget()
@@ -2380,6 +2414,20 @@ LIMIT 10
             print(f"Warning: Could not apply column renames to table '{table_name}': {e}")
         
         return False
+
+    def reload_all_tables(self):
+        """Refresh every table, regardless of selection or folder expansion."""
+        table_items = []
+        pending = [self.tables_list.invisibleRootItem()]
+        while pending:
+            parent = pending.pop()
+            for index in range(parent.childCount()):
+                item = parent.child(index)
+                if self.tables_list.is_folder_item(item):
+                    pending.append(item)
+                else:
+                    table_items.append(item)
+        self.reload_selected_tables(table_items)
 
     def reload_selected_tables(self, table_items=None):
         """Refresh selected file-based tables, reporting batch results once."""

@@ -15,6 +15,8 @@ pytestmark = pytest.mark.gui
 class RefreshWindow(QMainWindow):
     show_tables_context_menu = main.SQLShell.show_tables_context_menu
     reload_selected_tables = main.SQLShell.reload_selected_tables
+    reload_all_tables = main.SQLShell.reload_all_tables
+    create_tables_header = main.SQLShell.create_tables_header
 
     def __init__(self):
         super().__init__()
@@ -139,3 +141,68 @@ def test_mouse_multiselection_refresh(window, qapp, modifier):
     window.reload_selected_tables()
     assert window.db_manager.reload_table.call_count == 2
     assert set(c.args[0] for c in window.db_manager.reload_table.call_args_list) == {'first', 'second'}
+
+
+def test_refresh_all_includes_collapsed_nested_tables(window):
+    from PyQt6.QtWidgets import QTreeWidgetItem
+
+    first = window.add('first')
+    folder = window.tables_list.create_folder('Files')
+    nested = QTreeWidgetItem(folder)
+    nested.setText(0, 'Nested')
+    nested.setData(0, Qt.ItemDataRole.UserRole, 'folder')
+    second = window.add('second')
+    window.tables_list.takeTopLevelItem(window.tables_list.indexOfTopLevelItem(second))
+    nested.addChild(second)
+    window.add('db', 'database')
+    window.add('query', 'query_result')
+    window.tables_list.setCurrentItem(first)
+    folder.setExpanded(False)
+    nested.setExpanded(False)
+    selection = window.tables_list.selectedItems()
+    window.db_manager.reload_table.side_effect = [(False, 'missing source'), (True, 'ok')]
+    header = window.create_tables_header()
+    window.refresh_all_button.click()
+    assert window.db_manager.reload_table.call_args_list == [call('first'), call('second')]
+    assert window.tables_list.selectedItems() == selection
+    assert not folder.isExpanded() and not nested.isExpanded()
+    window.update_completer.assert_called_once_with()
+    window.show_table_preview.assert_not_called()
+    assert window.statusBar().currentMessage() == 'Refresh complete: 1 refreshed, 2 skipped, 1 failed.'
+    main.show_warning_notification.assert_called_once()
+    header.deleteLater()
+
+
+def test_refresh_all_empty(window):
+    window.reload_all_tables()
+    window.db_manager.reload_table.assert_not_called()
+    window.update_completer.assert_not_called()
+    main.show_warning_notification.assert_not_called()
+
+
+def test_header_layout_and_organization_actions(window, qapp, monkeypatch):
+    from PyQt6.QtWidgets import QInputDialog
+
+    folder = window.tables_list.create_folder('Files')
+    current = window.add('first', folder='Files')
+    window.tables_list.setCurrentItem(current)
+    header = window.create_tables_header()
+    # Sidebar minimum width less its two 12px margins.
+    header.setFixedWidth(196)
+    header.show()
+    qapp.processEvents()
+    assert header.minimumSizeHint().width() <= 196
+    for button in (window.refresh_all_button, window.tables_menu_button):
+        assert button.accessibleName() and button.toolTip()
+        assert header.rect().contains(button.geometry())
+    actions = {action.text(): action for action in window.tables_menu_button.menu().actions()}
+    actions['Collapse All'].trigger()
+    assert not folder.isExpanded()
+    actions['Expand All'].trigger()
+    assert folder.isExpanded()
+    monkeypatch.setattr(QInputDialog, 'getText', lambda *args: ('New root', True))
+    actions['New Folder'].trigger()
+    tree = window.tables_list
+    assert any(tree.topLevelItem(i).text(0) == 'New root' for i in range(tree.topLevelItemCount()))
+    header.close()
+    header.deleteLater()
