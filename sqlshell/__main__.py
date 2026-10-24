@@ -40,6 +40,7 @@ from sqlshell.table_list import DraggableTablesList
 from sqlshell.notification_manager import init_notification_manager, show_error_notification, show_warning_notification, show_info_notification, show_success_notification
 from sqlshell.christmas_theme import ChristmasThemeManager
 from sqlshell.project_manager import ProjectManager
+from sqlshell.refresh_dialog import RefreshDialog, is_file_source
 
 class SQLShell(QMainWindow):
     def __init__(self):
@@ -207,7 +208,8 @@ class SQLShell(QMainWindow):
         left_layout.addWidget(self.create_tables_header())
         
         # Tables info label
-        tables_info = QLabel("Right-click on tables to profile columns, analyze structure, and discover distributions. Select multiple tables to analyze foreign key relationships.")
+        tables_info = QLabel("Ctrl/Shift-click to select tables. Right-click for refresh and analysis.")
+        tables_info.setToolTip("Select multiple tables to refresh, combine, or analyze relationships. Refresh All reloads file-based tables in every folder.")
         tables_info.setWordWrap(True)
         tables_info.setStyleSheet("color: #7FB3D5; font-size: 11px; margin-top: 2px; margin-bottom: 5px;")
         left_layout.addWidget(tables_info)
@@ -215,6 +217,9 @@ class SQLShell(QMainWindow):
         # Tables list with custom styling
         self.tables_list = DraggableTablesList(self)
         self.tables_list.itemClicked.connect(self.show_table_preview)
+        for signal in (self.tables_list.model().rowsInserted, self.tables_list.model().rowsRemoved, self.tables_list.model().modelReset, self.tables_list.model().dataChanged):
+            signal.connect(self.update_refresh_controls)
+        self.update_refresh_controls()
         left_layout.addWidget(self.tables_list)
         
         # Browse button for quick file selection
@@ -327,6 +332,7 @@ class SQLShell(QMainWindow):
 
         self.refresh_all_button = QToolButton()
         self.refresh_all_button.setText("Refresh All")
+        self.refresh_all_button.setEnabled(False)
         self.refresh_all_button.setAccessibleName("Refresh All Tables")
         self.refresh_all_button.setToolTip("Reload all file-based tables, including tables in folders")
         self.refresh_all_button.clicked.connect(self.reload_all_tables)
@@ -346,7 +352,11 @@ class SQLShell(QMainWindow):
         layout.addWidget(self.tables_menu_button)
         for button in (self.refresh_all_button, self.tables_menu_button):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setStyleSheet("QToolButton { color: white; font-size: 11px; padding: 3px; }"
+            button.setMinimumHeight(30)
+            button.setStyleSheet("QToolButton { color: white; background: #3D5266; border: 1px solid #60788D; border-radius: 4px; font-size: 11px; padding: 3px; }"
+                                "QToolButton:hover { background: #4B657D; }"
+                                "QToolButton:focus { border: 2px solid #7FC8FF; }"
+                                "QToolButton:disabled { color: #9CAAB6; background: #34495E; border-color: #465B6D; }"
                                 "QToolButton::menu-indicator { image: none; width: 0px; }")
         return header
 
@@ -727,6 +737,8 @@ class SQLShell(QMainWindow):
 
     def update_completer(self):
         """Update the completer with table and column names in a non-blocking way"""
+        if getattr(self, "_refresh_in_progress", False):
+            return
         try:
             # Check if any tabs exist
             if self.tab_widget.count() == 0:
@@ -1672,6 +1684,9 @@ LIMIT 10
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        if getattr(self, "_refresh_in_progress", False):
+            event.ignore()
+            return
         """Ensure proper cleanup of database connections when closing the application"""
         try:
             # Check for unsaved changes
@@ -2415,6 +2430,12 @@ LIMIT 10
         
         return False
 
+    def update_refresh_controls(self, *args):
+        if hasattr(self, "refresh_all_button"):
+            available = any(is_file_source(source) for source in self.db_manager.loaded_tables.values())
+            self.refresh_all_button.setEnabled(available and not getattr(self, "_refresh_in_progress", False))
+            self.refresh_all_button.setToolTip("Reload all file-based tables, including tables in folders" if available else "No file-based tables to refresh")
+
     def reload_all_tables(self):
         """Refresh every table, regardless of selection or folder expansion."""
         table_items = []
@@ -2439,7 +2460,10 @@ LIMIT 10
             for name in [self.tables_list.get_table_name_from_item(item)]
             if name
         ))
+        if getattr(self, "_refresh_in_progress", False):
+            return
         if not table_names:
+            self.statusBar().showMessage("No tables to refresh.")
             return
 
         current_item = self.tables_list.currentItem()
@@ -2449,18 +2473,22 @@ LIMIT 10
             else None
         )
         refreshed = set()
-        skipped = 0
+        eligible = [name for name in table_names
+                    if is_file_source(self.db_manager.loaded_tables.get(name))]
+        skipped = len(table_names) - len(eligible)
         failures = []
-        for table_name in table_names:
-            if self.db_manager.loaded_tables.get(table_name) in ('database', 'query_result'):
-                skipped += 1
+        self._refresh_in_progress = True
+        self.update_refresh_controls()
+        try:
+            results = RefreshDialog(self.db_manager, eligible, self).run_refresh() if eligible else []
+        finally:
+            self._refresh_in_progress = False
+            self.update_refresh_controls()
+        for table_name, success, message in results:
+            if not success:
+                failures.append(f"{table_name}: {message}")
                 continue
-            self.statusBar().showMessage(f'Reloading table "{table_name}"...')
             try:
-                success, message = self.db_manager.reload_table(table_name)
-                if not success:
-                    failures.append(f"{table_name}: {message}")
-                    continue
                 self._apply_column_renames_to_table(table_name)
                 self.tables_list.mark_table_reloaded(table_name)
                 refreshed.add(table_name)
@@ -2480,7 +2508,17 @@ LIMIT 10
         )
         self.statusBar().showMessage(summary)
         if failures:
-            show_warning_notification(summary + "\n" + "\n".join(failures))
+            self.show_refresh_failures(summary, failures)
+
+    def show_refresh_failures(self, summary, failures):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Refresh results")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(summary)
+        dialog.setInformativeText("Some tables could not be refreshed. Open details for the full list.")
+        dialog.setDetailedText("\n".join(failures))
+        dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+        dialog.exec()
 
     def reload_selected_table(self, table_name=None):
         """Reload the data for a table from its source file"""

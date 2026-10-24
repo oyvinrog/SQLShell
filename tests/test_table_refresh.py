@@ -17,6 +17,7 @@ class RefreshWindow(QMainWindow):
     reload_selected_tables = main.SQLShell.reload_selected_tables
     reload_all_tables = main.SQLShell.reload_all_tables
     create_tables_header = main.SQLShell.create_tables_header
+    update_refresh_controls = main.SQLShell.update_refresh_controls
 
     def __init__(self):
         super().__init__()
@@ -28,6 +29,7 @@ class RefreshWindow(QMainWindow):
         self.show_table_preview = Mock()
         self.get_current_tab = Mock(return_value=object())
         self.reload_selected_table = Mock()
+        self.show_refresh_failures = Mock()
 
     def add(self, name, source='source.csv', folder=None):
         self.db_manager.loaded_tables[name] = source
@@ -78,8 +80,8 @@ def test_failure_continues_and_duplicates_are_ignored(window, failure):
     assert window.tables_list.tables_needing_reload == {'first'}
     window.update_completer.assert_called_once_with()
     window.show_table_preview.assert_not_called()
-    main.show_warning_notification.assert_called_once()
-    assert 'first:' in main.show_warning_notification.call_args.args[0]
+    window.show_refresh_failures.assert_called_once()
+    assert 'first:' in window.show_refresh_failures.call_args.args[1][0]
     assert window.statusBar().currentMessage() == 'Refresh complete: 1 refreshed, 0 skipped, 1 failed.'
 
 
@@ -162,6 +164,7 @@ def test_refresh_all_includes_collapsed_nested_tables(window):
     selection = window.tables_list.selectedItems()
     window.db_manager.reload_table.side_effect = [(False, 'missing source'), (True, 'ok')]
     header = window.create_tables_header()
+    window.update_refresh_controls()
     window.refresh_all_button.click()
     assert window.db_manager.reload_table.call_args_list == [call('first'), call('second')]
     assert window.tables_list.selectedItems() == selection
@@ -169,7 +172,7 @@ def test_refresh_all_includes_collapsed_nested_tables(window):
     window.update_completer.assert_called_once_with()
     window.show_table_preview.assert_not_called()
     assert window.statusBar().currentMessage() == 'Refresh complete: 1 refreshed, 2 skipped, 1 failed.'
-    main.show_warning_notification.assert_called_once()
+    window.show_refresh_failures.assert_called_once()
     header.deleteLater()
 
 
@@ -206,3 +209,83 @@ def test_header_layout_and_organization_actions(window, qapp, monkeypatch):
     assert any(tree.topLevelItem(i).text(0) == 'New root' for i in range(tree.topLevelItemCount()))
     header.close()
     header.deleteLater()
+
+
+def test_refresh_controls_follow_available_sources(window):
+    header = window.create_tables_header()
+    window.update_refresh_controls()
+    assert not window.refresh_all_button.isEnabled()
+    window.add('attached', 'database:external')
+    window.update_refresh_controls()
+    assert not window.refresh_all_button.isEnabled()
+    window.add('file')
+    window.update_refresh_controls()
+    assert window.refresh_all_button.isEnabled()
+    window._refresh_in_progress = True
+    window.update_refresh_controls()
+    assert not window.refresh_all_button.isEnabled()
+    window._refresh_in_progress = False
+    header.deleteLater()
+
+
+def test_worker_keeps_event_loop_responsive(window):
+    import threading
+    from PyQt6.QtCore import QTimer
+
+    window.add('file')
+    released = threading.Event()
+    worker_threads = []
+    ticks = []
+
+    def reload(name):
+        worker_threads.append(threading.get_ident())
+        assert released.wait(3), 'UI timer did not run during refresh'
+        return True, 'ok'
+
+    def tick():
+        ticks.append(window._refresh_in_progress)
+        released.set()
+
+    window.db_manager.reload_table.side_effect = reload
+    QTimer.singleShot(50, tick)
+    window.reload_all_tables()
+    assert ticks == [True]
+    assert worker_threads[0] != threading.get_ident()
+    window.show_refresh_failures.assert_not_called()
+
+
+def test_real_csv_refresh_in_worker(window, tmp_path):
+    import pandas as pd
+    from sqlshell.db.database_manager import DatabaseManager
+
+    manager = DatabaseManager()
+    window.db_manager = manager
+    source = tmp_path / 'data.csv'
+    source.write_text('value\n2\n3\n')
+    manager.register_dataframe(pd.DataFrame({'value': [1]}), 'data', str(source))
+    item = window.tables_list.add_table_item('data', str(source))
+    window.tables_list.setCurrentItem(item)
+    try:
+        window.reload_all_tables()
+        assert manager.get_full_table('data')['value'].tolist() == [2, 3]
+        window.show_table_preview.assert_called_once_with(item)
+        window.show_refresh_failures.assert_not_called()
+    finally:
+        manager.close_connection()
+
+
+def test_failure_dialog_exposes_all_details(window, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    failures = [f'table_{i}: missing source file' for i in range(30)]
+    inspected = []
+
+    def inspect(dialog):
+        assert dialog.detailedText().splitlines() == failures
+        assert dialog.text() == '30 failed'
+        inspected.append(True)
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, 'exec', inspect)
+    main.SQLShell.show_refresh_failures(window, '30 failed', failures)
+    assert inspected == [True]
