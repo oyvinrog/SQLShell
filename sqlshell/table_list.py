@@ -1,6 +1,7 @@
 import os
 import sys
 import pandas as pd
+from sqlshell.folder_source_ui import source_item_info
 from PyQt6.QtWidgets import (QApplication, QListWidget, QListWidgetItem, 
                             QMessageBox, QMainWindow, QVBoxLayout, QLabel, 
                             QWidget, QHBoxLayout, QFrame, QTreeWidget, QTreeWidgetItem,
@@ -371,6 +372,10 @@ class DraggableTablesList(QTreeWidget):
     
     def dropEvent(self, event):
         """Override drop event to handle dropping items into folders"""
+        target = self.itemAt(event.position().toPoint())
+        if source_item_info(target) or any(source_item_info(item) for item in self.selectedItems()):
+            event.ignore()
+            return
         if event.source() == self:  # Internal drop
             drop_pos = event.position().toPoint()
             target_item = self.itemAt(drop_pos)
@@ -624,18 +629,26 @@ class DraggableTablesList(QTreeWidget):
         """Show context menu for the tree widget"""
         item = self.itemAt(position)
         
+        if item and self.is_folder_item(item) and source_item_info(item):
+            self.parent.folder_source_context_menu(item, position)
+            return
         # Create the menu
         menu = QMenu(self)
         
         if not item:
             # Clicked on empty space - show menu for creating a folder
+            add_source = None
+            if hasattr(self.parent, 'browse_folder_source'):
+                add_source = menu.addAction('Add Folder Source…')
             new_folder_action = menu.addAction(QIcon.fromTheme("folder-new"), "New Folder")
             expand_all_action = menu.addAction(QIcon.fromTheme("view-fullscreen"), "Expand All")
             collapse_all_action = menu.addAction(QIcon.fromTheme("view-restore"), "Collapse All")
             
             action = menu.exec(QCursor.pos())
             
-            if action == new_folder_action:
+            if add_source is not None and action == add_source:
+                self.parent.browse_folder_source()
+            elif action == new_folder_action:
                 self.create_new_folder()
             elif action == expand_all_action:
                 self.expandAll()
@@ -755,7 +768,9 @@ class DraggableTablesList(QTreeWidget):
                     self.takeTopLevelItem(index)
     
     def move_item_to_folder(self, item, target_folder):
-        """Move an item to a different folder"""
+        """Move an item to a different organizational folder."""
+        if source_item_info(item) or source_item_info(target_folder):
+            return
         if not item or not target_folder:
             return
         
@@ -803,8 +818,19 @@ class DraggableTablesList(QTreeWidget):
         table_item = self.find_table_item(table_name)
         if table_item:
             table_item.setIcon(0, QIcon.fromTheme("x-office-spreadsheet"))
-            table_item.setToolTip(0, "")
+            info = source_item_info(table_item)
+            table_item.setToolTip(0, os.path.join(info[0], info[1]) if info else "")
                 
+    def mark_table_failed(self, table_name, message):
+        self.tables_needing_reload.add(table_name)
+        item = self.find_table_item(table_name)
+        if item:
+            from PyQt6.QtWidgets import QStyle
+            item.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning))
+            info = source_item_info(item)
+            path = os.path.join(info[0], info[1]) + '\n' if info else ''
+            item.setToolTip(0, path + message + '\nPrevious data, if available, is stale.')
+
     def mark_table_needs_reload(self, table_name):
         """Mark a table as needing reload by adding an icon"""
         self.tables_needing_reload.add(table_name)

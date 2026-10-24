@@ -8,6 +8,7 @@ Handles saving and loading SQLShell projects, including:
 - Database connection state
 """
 
+from sqlshell.folder_source_ui import SOURCE_ROLE, RELATIVE_ROLE, source_item_info
 import os
 import json
 from pathlib import Path
@@ -58,6 +59,7 @@ class ProjectManager:
             self.db_manager.close_connection()
         
         # Clear all database tracking
+        self.db_manager.folder_sources = {}
         self.db_manager.loaded_tables = {}
         self.db_manager.table_columns = {}
         
@@ -130,6 +132,7 @@ class ProjectManager:
             project_data = {
                 'tables': {},
                 'folders': {},
+                'folder_sources': getattr(self.db_manager, 'folder_sources', {}),
                 'tabs': tabs_data,
                 'connection_type': self.db_manager.connection_type,
                 'database_path': None,  # Initialize to None
@@ -153,7 +156,8 @@ class ProjectManager:
                             project_data['folders'][folder_id] = {
                                 'name': folder_name,
                                 'parent': None,
-                                'expanded': item.isExpanded()
+                                'expanded': item.isExpanded(),
+                                'source': source_item_info(item)
                             }
                             save_folder_structure(item, folder_id)
                         else:
@@ -170,7 +174,8 @@ class ProjectManager:
                             project_data['folders'][folder_id] = {
                                 'name': folder_name,
                                 'parent': parent_path,
-                                'expanded': child.isExpanded()
+                                'expanded': child.isExpanded(),
+                                'source': source_item_info(child)
                             }
                             save_folder_structure(child, folder_id)
                         else:
@@ -324,6 +329,8 @@ class ProjectManager:
                 progress.setValue(20)
                 QApplication.processEvents()
                 
+                self.db_manager.folder_sources = project_data.get('folder_sources', {})
+
                 # First, recreate the folder structure
                 folder_items = {}  # Store folder items by ID
                 
@@ -363,6 +370,12 @@ class ProjectManager:
                 QApplication.processEvents()
                 
                 # Calculate progress steps for loading tables
+                for folder_id, folder_item in folder_items.items():
+                    info = project_data['folders'][folder_id].get('source')
+                    if info and info[0] in self.db_manager.folder_sources:
+                        folder_item.setData(0, SOURCE_ROLE, info[0])
+                        folder_item.setData(0, RELATIVE_ROLE, info[1])
+
                 table_count = len(project_data.get('tables', {}))
                 table_progress_start = 30
                 table_progress_end = 70
@@ -488,6 +501,10 @@ class ProjectManager:
                     progress.close()
                     return
                 
+                if hasattr(self.window, 'sync_folder_source_tree'):
+                    self.window.sync_folder_source_tree()
+                    self.window.update_refresh_controls()
+
                 # Apply column renames if they exist in the project
                 progress.setValue(72)
                 progress.setLabelText("Applying column renames...")

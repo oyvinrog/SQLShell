@@ -30,6 +30,21 @@
 
 **SQLShell is a desktop SQL interface specifically designed for analyzing data files.** It's not a database client - instead, it lets you load CSV, Parquet, Excel, and other data files and query them with SQL using DuckDB's fast analytical engine.
 
+### Folder sources
+
+Choose **Add Folder Source…** from the View menu or the tables sidebar menu to
+make Excel, CSV, TXT, Parquet, and Delta sources available recursively. A linked
+folder icon identifies the source; subfolders preserve the directory hierarchy.
+Excel workbooks use their first worksheet. SQLite and DuckDB files remain separate
+connections.
+
+Adding a folder or reopening a saved project only registers its tables. Data loads
+when a table is queried or previewed, so unused files consume no table-data memory.
+**Refresh Folder** rescans and loads its tables, including newly added files;
+**Refresh All** includes every folder source. Ctrl/Shift-select tables to refresh
+only that selection. Removed tables stay excluded until restored through
+**Restore Excluded Files…**. Removing a source never deletes its files.
+
 ### 🔥 Key Features
 
 <table>

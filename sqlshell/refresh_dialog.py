@@ -1,4 +1,5 @@
 """Responsive, serialized batch refresh with GUI updates on the main thread."""
+from sqlshell.folder_sources import in_subtree
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QDialog, QLabel, QProgressBar, QVBoxLayout
 
@@ -10,13 +11,31 @@ def is_file_source(source):
 class RefreshWorker(QThread):
     progress = pyqtSignal(int, str)
 
-    def __init__(self, manager, names, parent=None):
+    def __init__(self, manager, names, parent=None, folders=None, discover_only=False):
         super().__init__(parent)
         self.manager = manager
         self.names = names
         self.results = []
+        self.folders = folders or []
+        self.discover_only = discover_only
+        self.added = []
+        self.scan_errors = []
 
     def run(self):
+        names = list(self.names)
+        for key, subtree in self.folders:
+            self.progress.emit(0, 'Scanning ' + key)
+            try:
+                added, errors = self.manager.discover_folder_source(key, subtree)
+                self.added.extend(added)
+                self.scan_errors.extend(errors)
+                if not self.discover_only:
+                    names.extend(name for relative, name in
+                                 self.manager.folder_sources[key]['members'].items()
+                                 if in_subtree(relative, subtree))
+            except Exception as exc:
+                self.scan_errors.append((key, str(exc)))
+        self.names = list(dict.fromkeys(names))
         for index, name in enumerate(self.names):
             self.progress.emit(index, name)
             try:
@@ -28,9 +47,9 @@ class RefreshWorker(QThread):
 
 
 class RefreshDialog(QDialog):
-    def __init__(self, manager, names, parent):
+    def __init__(self, manager, names, parent, folders=None, discover_only=False):
         super().__init__(parent)
-        self.setWindowTitle('Refreshing tables')
+        self.setWindowTitle('Discovering folder tables' if discover_only else 'Refreshing tables')
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
         self.label = QLabel('Preparing refresh…')
@@ -40,11 +59,16 @@ class RefreshDialog(QDialog):
         self.progress.setRange(0, len(names))
         layout.addWidget(self.progress)
         layout.addWidget(QLabel('Please wait before making other database changes.'))
-        self.worker = RefreshWorker(manager, names, self)
+        self.worker = RefreshWorker(manager, names, self, folders, discover_only)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished.connect(self.accept)
 
     def update_progress(self, completed, name):
+        if name.startswith('Scanning '):
+            self.progress.setRange(0, 0)
+            self.label.setText(name)
+            return
+        self.progress.setRange(0, max(1, len(self.worker.names)))
         self.progress.setValue(completed)
         if name:
             self.label.setText(f'Refreshing {completed + 1} of {self.progress.maximum()}: {name}')

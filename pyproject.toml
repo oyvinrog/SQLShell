@@ -61,6 +61,7 @@ packages = [
 sqlshell = [
     "*.db",
     "resources/*.png",
+    "resources/*.svg",
     "resources/*.gif",
     "data/*.py",
     "*.png",

@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import duckdb
 from pathlib import Path
+from sqlshell.folder_sources import FolderSourcesMixin
 
 try:
     from sqlshell.notification_manager import show_info_notification
@@ -17,7 +18,7 @@ def _safe_info_notification(message: str) -> None:
     except Exception:
         return None
 
-class DatabaseManager:
+class DatabaseManager(FolderSourcesMixin):
     """
     Manages database connections and operations for SQLShell.
     Uses an in-memory DuckDB as the primary connection and can attach external
@@ -29,6 +30,7 @@ class DatabaseManager:
         self.conn = None
         self.connection_type = 'duckdb'
         self.loaded_tables = {}  # Maps table_name to file_path or 'database:alias'/'query_result'
+        self.folder_sources = {}
         self.table_columns = {}  # Maps table_name to list of column names
         self.database_path = None  # Track the path to the primary attached database (for display)
         self.attached_databases = {}  # Maps alias to {'path': path, 'type': 'sqlite'/'duckdb', 'tables': []}
@@ -368,13 +370,15 @@ class DatabaseManager:
         
         return processed
     
-    def load_file(self, file_path, table_prefix=""):
+    def load_file(self, file_path, table_prefix="", *, target_name=None, notify=True):
         """
         Load data from a file into the database.
         
         Args:
             file_path: Path to the data file (Excel, CSV, TXT, Parquet, Delta)
             table_prefix: Optional prefix to prepend to the table name (e.g., "prod_")
+            target_name: Existing or reserved name to replace only after a successful read.
+            notify: Emit a GUI notification; disabled for background refresh workers.
             
         Returns:
             Tuple of (table_name, DataFrame) for the loaded data
@@ -386,7 +390,7 @@ class DatabaseManager:
             # Check if this is a Delta table (folder with _delta_log)
             delta_path = Path(file_path)
             is_delta_table = (delta_path.is_dir() and 
-                             (delta_path / '_delta_log').exists()) or file_path.endswith('.delta')
+                             (delta_path / '_delta_log').exists()) or str(file_path).lower().endswith('.delta')
             
             # Read the file into a DataFrame, using optimized loading strategies
             if is_delta_table:
@@ -420,7 +424,7 @@ class DatabaseManager:
                                 print(f"Warning: Could not convert column '{col}' to float64: {e}")
                 except Exception as e:
                     raise ValueError(f"Error loading Delta table: {str(e)}")
-            elif file_path.endswith(('.xlsx', '.xls')):
+            elif str(file_path).lower().endswith(('.xlsx', '.xls')):
                 # Try to use a streaming approach for Excel files
                 try:
                     # For Excel files, we first check if it's a large file
@@ -443,7 +447,7 @@ class DatabaseManager:
                 except Exception:
                     # Fallback to standard reading method
                     df = pd.read_excel(file_path)
-            elif file_path.endswith(('.csv', '.txt')):
+            elif str(file_path).lower().endswith(('.csv', '.txt')):
                 # For CSV and TXT files, detect separator and use chunking for large files
                 try:
                     # Check if it's a large file
@@ -639,7 +643,7 @@ class DatabaseManager:
                     print(f"Error loading CSV/TXT file: {str(e)}")
                     print(traceback.format_exc())
                     raise ValueError(f"Error loading CSV/TXT file: {str(e)}")
-            elif file_path.endswith('.parquet'):
+            elif str(file_path).lower().endswith('.parquet'):
                 # Use fastparquet engine (lighter than pyarrow - saves 147MB in builds)
                 df = pd.read_parquet(file_path, engine='fastparquet')
             else:
@@ -661,10 +665,13 @@ class DatabaseManager:
             # Ensure unique table name
             original_name = table_name
             counter = 1
-            while table_name in self.loaded_tables:
+            while target_name is None and table_name in self.loaded_tables:
                 table_name = f"{original_name}_{counter}"
                 counter += 1
             
+            if target_name is not None:
+                table_name = target_name
+
             # Ensure we have a connection (always in-memory DuckDB)
             if not self.is_connected():
                 self._init_connection()
@@ -676,7 +683,8 @@ class DatabaseManager:
             # Store information about the table
             self.loaded_tables[table_name] = file_path
             self.table_columns[table_name] = [str(col) for col in df.columns.tolist()]
-            _safe_info_notification(f"Loaded {len(df)} rows into table '{table_name}'.")
+            if notify:
+                _safe_info_notification(f"Loaded {len(df)} rows into table '{table_name}'.")
             
             return table_name, df
             
@@ -714,6 +722,7 @@ class DatabaseManager:
                     if table_name in tables:
                         tables.remove(table_name)
             
+            self.exclude_folder_member(table_name)
             # Remove from tracking
             del self.loaded_tables[table_name]
             if table_name in self.table_columns:
@@ -798,188 +807,18 @@ class DatabaseManager:
             raise Exception(f"Error getting table data: {str(e)}")
     
     def reload_table(self, table_name):
-        """
-        Reload a table's data from its source file.
-        
-        Args:
-            table_name: Name of the table to reload
-            
-        Returns:
-            Tuple of (bool, message) indicating success/failure and a message
-            
-        Raises:
-            ValueError: If the table cannot be reloaded
-        """
-        if not table_name in self.loaded_tables:
+        """Read before replacing a registration so failed refresh preserves old data."""
+        source = self.loaded_tables.get(table_name)
+        if not source:
             return False, f"Table '{table_name}' not found"
-        
-        file_path = self.loaded_tables[table_name]
-        
-        # Check if this is a file-based table
-        if file_path in ['database', 'query_result']:
+        if source in ('database', 'query_result') or source.startswith('database:'):
             return False, f"Cannot reload '{table_name}' because it's not a file-based table"
-        
         try:
-            # Check if the file still exists
-            if not os.path.exists(file_path):
-                return False, f"Source file '{file_path}' no longer exists"
-            
-            # Store the original table name
-            original_name = table_name
-            
-            # Remove the existing table
-            self.remove_table(table_name)
-            
-            # Check if this is a Delta table
-            delta_path = Path(file_path)
-            is_delta_table = (delta_path.is_dir() and 
-                             (delta_path / '_delta_log').exists()) or file_path.endswith('.delta')
-            
-            # Load the file with the original table name
-            df = None
-            if is_delta_table:
-                # Read as Delta table
-                import deltalake
-                delta_table = deltalake.DeltaTable(file_path)
-                df = delta_table.to_pandas()
-            elif file_path.endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(file_path)
-            elif file_path.endswith(('.csv', '.txt')):
-                # Try multiple encodings for CSV/TXT files
-                encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'ISO-8859-1']
-                
-                # Detect the separator automatically
-                def detect_separator(sample_data):
-                    # Common separators to check
-                    separators = [',', ';', '\t']
-                    separator_scores = {}
-
-                    # Split into lines and analyze
-                    lines = [line.strip() for line in sample_data.split('\n') if line.strip()]
-                    if not lines:
-                        return ','  # Default if no content
-
-                    # Check for quoted content with separators
-                    has_quotes = '"' in sample_data or "'" in sample_data
-                    
-                    # If we have quoted content, use a different approach
-                    if has_quotes:
-                        for sep in separators:
-                            # Look for patterns like "value";
-                            pattern_count = 0
-                            for line in lines:
-                                # Count occurrences of quote + separator
-                                double_quote_pattern = f'"{sep}'
-                                single_quote_pattern = f"'{sep}"
-                                pattern_count += line.count(double_quote_pattern) + line.count(single_quote_pattern)
-                            
-                            # If we found clear quote+separator patterns, this is likely our separator
-                            if pattern_count > 0:
-                                separator_scores[sep] = pattern_count
-                    
-                    # Standard approach based on consistent column counts
-                    if not separator_scores:
-                        for sep in separators:
-                            # Count consistent occurrences across lines
-                            counts = [line.count(sep) for line in lines]
-                            if counts and all(c > 0 for c in counts):
-                                # Calculate consistency score: higher if all counts are the same
-                                consistency = 1.0 if all(c == counts[0] for c in counts) else 0.5
-                                # Score is average count * consistency
-                                separator_scores[sep] = sum(counts) / len(counts) * consistency
-                    
-                    # Choose the separator with the highest score
-                    if separator_scores:
-                        return max(separator_scores.items(), key=lambda x: x[1])[0]
-                    
-                    # Default to comma if we couldn't determine
-                    return ','
-                
-                # First, sample the file to detect separator and encoding
-                with open(file_path, 'rb') as f:
-                    # Read first few KB to detect encoding and separator
-                    raw_sample = f.read(4096)
-                
-                # Try to decode with various encodings
-                sample_text = None
-                detected_encoding = None
-                
-                for encoding in encodings_to_try:
-                    try:
-                        sample_text = raw_sample.decode(encoding)
-                        detected_encoding = encoding
-                        break
-                    except UnicodeDecodeError:
-                        # If this encoding fails, try the next one
-                        continue
-                
-                if not sample_text:
-                    raise ValueError("Could not decode file with any of the attempted encodings")
-                
-                # Detect separator from the sample
-                separator = detect_separator(sample_text)
-                
-                # Determine quote character (default to double quote)
-                quotechar = '"'
-                if sample_text.count("'") > sample_text.count('"'):
-                    quotechar = "'"
-                
-                # Read with detected parameters
-                try:
-                    df = pd.read_csv(
-                        file_path, 
-                        sep=separator,
-                        encoding=detected_encoding,
-                        engine='python' if separator != ',' else 'c',
-                        quotechar=quotechar,
-                        doublequote=True
-                    )
-                except pd.errors.ParserError as e:
-                    # If parsing fails, try again with error recovery options
-                    print(f"Initial parsing failed on reload: {str(e)}. Trying with error recovery options...")
-                    
-                    # Try with Python engine which is more flexible
-                    try:
-                        # First try with pandas >= 1.3 parameters
-                        df = pd.read_csv(
-                            file_path,
-                            sep=separator,
-                            encoding=detected_encoding,
-                            engine='python',  # Always use python engine for error recovery
-                            quotechar=quotechar,
-                            doublequote=True,
-                            on_bad_lines='warn',  # New parameter in pandas >= 1.3
-                            na_values=[''],
-                            keep_default_na=True
-                        )
-                    except TypeError:
-                        # Fall back to pandas < 1.3 parameters
-                        df = pd.read_csv(
-                            file_path,
-                            sep=separator,
-                            encoding=detected_encoding,
-                            engine='python',
-                            quotechar=quotechar,
-                            doublequote=True,
-                            error_bad_lines=False,  # Old parameter
-                            warn_bad_lines=True,    # Old parameter
-                            na_values=[''],
-                            keep_default_na=True
-                        )
-            elif file_path.endswith('.parquet'):
-                # Use fastparquet engine (lighter than pyarrow - saves 147MB in builds)
-                df = pd.read_parquet(file_path, engine='fastparquet')
-            else:
-                return False, "Unsupported file format"
-            
-            # Register the dataframe with the original name
-            self.register_dataframe(df, original_name, file_path)
-            
+            self.load_file(source, target_name=table_name, notify=False)
             return True, f"Table '{table_name}' reloaded successfully"
-            
-        except Exception as e:
-            return False, f"Error reloading table: {str(e)}"
-    
+        except Exception as exc:
+            return False, f"Error reloading table: {exc}"
+
     def rename_table(self, old_name, new_name):
         """
         Rename a table in the database.
@@ -1020,6 +859,10 @@ class DatabaseManager:
             # Update tracking
             self.loaded_tables[new_name] = self.loaded_tables.pop(old_name)
             self.table_columns[new_name] = self.table_columns.pop(old_name)
+            member = self.folder_member(old_name)
+            if member:
+                key, relative = member
+                self.folder_sources[key]['members'][relative] = new_name
             
             return True
             
