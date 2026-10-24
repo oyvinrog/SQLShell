@@ -358,6 +358,11 @@ class SQLShell(QMainWindow):
                                 "QToolButton:focus { border: 2px solid #7FC8FF; }"
                                 "QToolButton:disabled { color: #9CAAB6; background: #34495E; border-color: #465B6D; }"
                                 "QToolButton::menu-indicator { image: none; width: 0px; }")
+            # Native tool-button size hints can exceed the narrow sidebar.
+            # Size these text-only controls using the styled font, with room
+            # for padding and the focus border, instead of the platform hint.
+            button.ensurePolished()
+            button.setFixedWidth(max(30, button.fontMetrics().horizontalAdvance(button.text()) + 16))
         return header
 
     def create_tab_corner_widget(self):

@@ -183,16 +183,27 @@ def test_refresh_all_empty(window):
     main.show_warning_notification.assert_not_called()
 
 
-def test_header_layout_and_organization_actions(window, qapp, monkeypatch):
-    from PyQt6.QtWidgets import QInputDialog
+@pytest.mark.parametrize('oversized_button_hints', [False, True])
+def test_header_layout_and_organization_actions(window, qapp, monkeypatch, oversized_button_hints):
+    from PyQt6.QtWidgets import QInputDialog, QToolButton
+
+    if oversized_button_hints:
+        class WideToolButton(QToolButton):
+            def sizeHint(self):
+                size = super().sizeHint()
+                size.setWidth(max(120, size.width()))
+                return size
+
+            def minimumSizeHint(self):
+                return self.sizeHint()
+
+        monkeypatch.setattr(main, 'QToolButton', WideToolButton)
 
     folder = window.tables_list.create_folder('Files')
     current = window.add('first', folder='Files')
     window.tables_list.setCurrentItem(current)
     header = window.create_tables_header()
-    # This standalone header does not inherit SQLShell's application stylesheet.
-    # Match its font family instead of using the offscreen platform's default
-    # (which can be a non-scalable bitmap font on Windows).
+    # Match the font family inherited from the application in normal use.
     header.setStyleSheet("QWidget { font-family: 'Segoe UI', 'Arial', sans-serif; }")
     # Sidebar minimum width less its two 12px margins.
     header.setFixedWidth(196)
@@ -202,6 +213,8 @@ def test_header_layout_and_organization_actions(window, qapp, monkeypatch):
     for button in (window.refresh_all_button, window.tables_menu_button):
         assert button.accessibleName() and button.toolTip()
         assert header.rect().contains(button.geometry())
+        assert button.width() >= button.fontMetrics().horizontalAdvance(button.text()) + 8
+    assert not window.refresh_all_button.geometry().intersects(window.tables_menu_button.geometry())
     actions = {action.text(): action for action in window.tables_menu_button.menu().actions()}
     actions['Collapse All'].trigger()
     assert not folder.isExpanded()
