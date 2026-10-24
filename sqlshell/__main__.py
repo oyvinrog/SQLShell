@@ -1407,7 +1407,7 @@ LIMIT 10
             QMessageBox.information(
                 self,
                 "Table Created",
-                f"Query results have been saved as:\n\n"
+                f"Results have been saved as:\n\n"
                 f"File: {file_name}\n"
                 f"Table: {table_name}\n\n"
                 f"Rows: {len(df):,}\nColumns: {len(df.columns)}\n\n"
@@ -4262,7 +4262,7 @@ LIMIT 10
                     
                     # Create and show the visualization
                     self.statusBar().showMessage(f'Generating entropy profile for "{table_name}"...')
-                    vis = visualize_profile(df)
+                    vis = visualize_profile(df, save_callback=self.save_results_as_table)
                     
                     # Store a reference to prevent garbage collection
                     self._entropy_window = vis
@@ -4455,7 +4455,7 @@ LIMIT 10
             
             # Create and show the visualization
             self.statusBar().showMessage(f'Generating entropy profile...')
-            vis = visualize_profile(df)
+            vis = visualize_profile(df, save_callback=self.save_results_as_table)
             
             # Store a reference to prevent garbage collection
             self._entropy_window = vis

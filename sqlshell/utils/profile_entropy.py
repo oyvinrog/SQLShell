@@ -3,7 +3,7 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-    QTableView, QHeaderView, QLabel, QFrame, QScrollArea
+    QTableView, QHeaderView, QLabel, QFrame, QScrollArea, QPushButton
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QColor, QPalette, QBrush
 
@@ -111,8 +111,9 @@ class EntropyProfiler(QObject):
 class EntropyVisualization(QMainWindow):
     """Window to visualize entropy results"""
     
-    def __init__(self, results_df, parent=None):
+    def __init__(self, results_df, parent=None, save_callback=None):
         super().__init__(parent)
+        self.results_df = results_df.copy()
         self.setWindowTitle("Column Entropy Profile")
         self.resize(800, 600)
         
@@ -140,6 +141,14 @@ class EntropyVisualization(QMainWindow):
         
         # Create table view
         self.create_table_view(layout, results_df)
+
+        if save_callback is not None:
+            self.save_button = QPushButton("Save as Table…")
+            self.save_button.setEnabled(not self.results_df.empty)
+            self.save_button.clicked.connect(
+                lambda: save_callback(self.results_df.copy())
+            )
+            layout.addWidget(self.save_button)
     
     def create_visual_bars(self, layout, df):
         """Create horizontal bars representing entropy values"""
@@ -271,19 +280,20 @@ def profile(df):
     return profiler.profile(df)
 
 
-def visualize_profile(df):
+def visualize_profile(df, save_callback=None):
     """
     Create a visual representation of the entropy profile for a dataframe.
     
     Args:
         df: pandas DataFrame to analyze
+        save_callback: Optional callable receiving the analysis DataFrame to save
         
     Returns:
         A PyQt6 window showing the visualization
     """
     profiler = EntropyProfiler()
     results = profiler.profile(df)
-    vis = EntropyVisualization(results)
+    vis = EntropyVisualization(results, save_callback=save_callback)
     vis.show()
     return vis
 
